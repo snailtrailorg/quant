@@ -13,7 +13,7 @@
 4. **语义三处（本批最易踩错，设计 §4.3）**：
    - 日界＝`bar=1Dutc`（**UTC 锚定**；OKX 裸 `1D` 是 UTC+8，与币安裸混＝静默错位）；
    - `volume=volCcy`（币量）、`amount=volQuote`——**不是 `vol`**（那是张数，各标的 ctVal 不同）；
-   - 符号＝`<instId>.OKX`，**不跨所归一**（`BTC-USDT-SWAP.OKX` 与 `BTCUSDT.BINANCE` 永不互认）；
+   - 符号＝`<instId>.XOKX`，**不跨所归一**（`BTC-USDT-SWAP.XOKX` 与 `BTCUSDT.XBIN` 永不互认）；
 5. **失败必须可见**：`code != '0'` 响亮抛（**不返回空帧**）；空帧会被上游当「该窗口无数据」
    记 success，把故障埋掉；符号枚举空 → handler 响亮 raise（不推游标）；
 6. **重试面三条路**：网络异常 / HTTP 429·5xx（优先 `Retry-After`）/ 业务限频 `code=50011`；
@@ -350,10 +350,10 @@ class TestPullDaily:
         assert OA._BAR == "1Dutc"
 
     def test_instid_suffix_stripped_for_request(self):
-        """调用方可给带/不带 `.OKX` 的符号——源侧请求必须用裸 instId。"""
+        """调用方可给带/不带 `.XOKX` 的符号——源侧请求必须用裸 instId。"""
         ad = OA.OkxAdapter()
         with self._pages([{"code": "0", "data": [_candle(_ms(2024, 1, 2))]}]) as m:
-            ad.pull_daily("BTC-USDT-SWAP.OKX", "20240101", "20240105")
+            ad.pull_daily("BTC-USDT-SWAP.XOKX", "20240101", "20240105")
         assert m.call_args.args[1]["instId"] == "BTC-USDT-SWAP"
 
     def test_paginates_via_after_and_trims_window(self):
@@ -414,7 +414,7 @@ class TestToBarRows:
         rows = ad.to_bar_rows(_df([_candle(_ms(2024, 1, 2), vol=7.0, vol_ccy=100.0,
                                           vol_quote=150.0)]), "1D")
         sym, freq, ts, o, h, lo, c, vol, amt, adj, src = rows[0]
-        assert sym == "BTC-USDT-SWAP.OKX"
+        assert sym == "BTC-USDT-SWAP.XOKX"
         assert freq == "1D"
         assert (o, h, lo, c) == (1.0, 2.0, 0.5, 1.5)
         assert (vol, amt) == (100.0, 150.0), "volume 必须是 volCcy（币量），不是 vol（张数）"
@@ -439,14 +439,14 @@ class TestToBarRows:
         assert len(ad.to_bar_rows(df, "1D")) == 1
 
     def test_no_cross_exchange_normalization(self):
-        """🔴 语义③：`.OKX` 后缀**不与 `.BINANCE` 互认**——两个不同标的，永不归一。"""
+        """🔴 语义③：`.XOKX` 后缀**不与 `.XBIN` 互认**——两个不同标的，永不归一。"""
         ad = OA.OkxAdapter()
         rows = ad.to_bar_rows(_df([_candle(_ms(2024, 1, 2))], inst="BTC-USDT-SWAP"), "1D")
-        assert rows[0][0] == "BTC-USDT-SWAP.OKX"
+        assert rows[0][0] == "BTC-USDT-SWAP.XOKX"
         assert "BINANCE" not in rows[0][0]
         # 已带后缀不重复加
-        rows2 = ad.to_bar_rows(_df([_candle(_ms(2024, 1, 2))], inst="BTC-USDT-SWAP.OKX"), "1D")
-        assert rows2[0][0] == "BTC-USDT-SWAP.OKX"
+        rows2 = ad.to_bar_rows(_df([_candle(_ms(2024, 1, 2))], inst="BTC-USDT-SWAP.XOKX"), "1D")
+        assert rows2[0][0] == "BTC-USDT-SWAP.XOKX"
 
     def test_rows_survive_write_gate(self):
         from src.data_platform.db import validate_bars
@@ -454,11 +454,11 @@ class TestToBarRows:
         assert len(validate_bars(list(rows))) == len(rows)
 
     def test_symbol_convention_agrees_with_markets_layer(self):
-        """`.OKX` → crypto（markets 与 security_master 双单源一致），且与 `.BINANCE` 同市场。"""
+        """`.XOKX` → crypto（markets 与 security_master 双单源一致），且与 `.XBIN` 同市场。"""
         from src.data_platform.security_master import SMClient
         from src.quant_common.markets import market_of_symbol
-        assert market_of_symbol("BTC-USDT-SWAP.OKX") == "crypto"
-        assert market_of_symbol("BTCUSDT.BINANCE") == "crypto"
+        assert market_of_symbol("BTC-USDT-SWAP.XOKX") == "crypto"
+        assert market_of_symbol("BTCUSDT.XBIN") == "crypto"
         assert SMClient._market_of_suffix("OKX") == "crypto"
 
     def test_empty_df(self):
@@ -533,7 +533,7 @@ class _FakeAdapter:
         return pd.DataFrame([{"okx_symbol": params["symbol"], "ts": _ms(2024, 1, 2)}])
 
     def to_bar_rows(self, df, freq, adj_map=None):
-        return [(f"{df['okx_symbol'].iloc[0]}.OKX", freq,
+        return [(f"{df['okx_symbol'].iloc[0]}.XOKX", freq,
                  datetime(2024, 1, 2, tzinfo=timezone.utc),
                  1.0, 2.0, 0.5, 1.5, 100.0, 150.0, None, "okx")]
 
@@ -715,7 +715,7 @@ class TestRealDb:
             f"okx 能力矩阵漏声明：{sorted(own - set(OA.OkxAdapter.capabilities))}")
 
     def test_two_crypto_sources_coexist_in_one_table(self):
-        """多加密市场共存的结构前提：`.OKX` 与 `.BINANCE` 同表同 freq（`bar_1d`）。"""
+        """多加密市场共存的结构前提：`.XOKX` 与 `.XBIN` 同表同 freq（`bar_1d`）。"""
         rows = self._q("SELECT sync_id, pg_table FROM sync_kind_config "
                        "WHERE sync_id IN ('okx_perp_daily','binance_perp_daily')")
         assert dict(rows) == {"okx_perp_daily": "bar_1d", "binance_perp_daily": "bar_1d"}
@@ -756,8 +756,8 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        # 0182（批 175d：position_snapshot 禁 .SSE 的 contract CHECK）
-        assert heads == {"0182"}, f"head 不是唯一 0182：{sorted(heads)}"   # 批 175d：0182 新链头——链头钉随批交棒
+        # 0184（批 176：screen_factor_cache.vt_symbol + reconcile_issue 裸码归一）
+        assert heads == {"0184"}, f"head 不是唯一 0184：{sorted(heads)}"   # 批 176：0184 新链头——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

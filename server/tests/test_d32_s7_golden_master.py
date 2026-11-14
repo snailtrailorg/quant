@@ -97,9 +97,9 @@ def test_send_order_request_equivalent_to_legacy():
     old = adapters.XTPAdapter(gateway=g_old, event_engine=ee, order_prefix="t1:e1000:")
     new = _port(_EE(), g_new)
 
-    cid_old = old.send_order(adapters.Order(symbol="600000.SHSE", action="BUY", volume=100,
+    cid_old = old.send_order(adapters.Order(symbol="600000.XSHG", action="BUY", volume=100,
                                             price=10.0, order_type="limit", client_id="t1:e1000:c1"))
-    r_new = new.send(DomOrder("600000.SHSE", Action.BUY, 100, 10.0, OrderType.LIMIT, "t1:e1000:c1"))
+    r_new = new.send(DomOrder("600000.XSHG", Action.BUY, 100, 10.0, OrderType.LIMIT, "t1:e1000:c1"))
 
     assert cid_old == "t1:e1000:c1" == r_new.client_id and r_new.accepted is True
     a, b = g_old.sent[0], g_new.sent[0]
@@ -116,10 +116,10 @@ def test_send_empty_orderid_rejected_equivalent():
             return "XTP.0"
 
     old = adapters.XTPAdapter(gateway=_Reject(), event_engine=_EE(), order_prefix="p:")
-    assert old.send_order(adapters.Order("600000.SHSE", "SELL", 100, 10.0)) is None
+    assert old.send_order(adapters.Order("600000.XSHG", "SELL", 100, 10.0)) is None
 
     port = TD.XtpExecutionPort(_EE(), _Reject(), _Api(), _slot(), lambda n: (lambda f: f))
-    r = port.send(DomOrder("600000.SHSE", Action.SELL, 100, 10.0))
+    r = port.send(DomOrder("600000.XSHG", Action.SELL, 100, 10.0))
     assert r.accepted is False and r.reason
 
 
@@ -165,7 +165,7 @@ def test_subscribe_pushes_domain_and_recovers_client_id():
     from src.providers.xtp import _transport
     handler = ee.handlers[_transport.events()["order"]][-1]
     handler(SimpleNamespace(data=order_data()))
-    assert got and got[0].client_id == "CID.1" and got[0].symbol == "600000.SHSE"
+    assert got and got[0].client_id == "CID.1" and got[0].symbol == "600000.XSHG"
 
 def test_md_port_delegates_to_gateway(monkeypatch):
     """MD 端口必须把 in_session/trading_day 原样下传（连接窗语义不丢）。"""
@@ -222,9 +222,9 @@ def test_md_port_delegates_to_gateway(monkeypatch):
     monkeypatch.setattr(G, "XtpMdGateway", FakeGw)
     port = get("trading_account", "xtp").build({}, "md", _slot())
     port.poll_supervise(True, False)
-    port.subscribe(["600000.SHSE"])
+    port.subscribe(["600000.XSHG"])
     assert seen["gw"].calls[0] == (True, False)
-    assert seen["gw"].calls[1] == ("sub", "600000.SHSE")   # 端口收 list，底层网关收单标的
+    assert seen["gw"].calls[1] == ("sub", "600000.XSHG")   # 端口收 list，底层网关收单标的
     assert port.connected is True
 
 # ── B 路线：端口兼容面（worker 现行形状，传输在插件内）────────────
@@ -237,7 +237,7 @@ def test_compat_send_and_cancel_shape():
     compat = _LegacyCompat(port, account_id=1)
 
     from src.strategy_framework.adapters import Order as LegacyOrder
-    cid = compat.send_order(LegacyOrder("600000.SHSE", "BUY", 100, 10.0, "limit", "t1:e1000:c9"))
+    cid = compat.send_order(LegacyOrder("600000.XSHG", "BUY", 100, 10.0, "limit", "t1:e1000:c9"))
     assert cid == "t1:e1000:c9" and gw.sent[0].reference == cid
 
     vt = compat.get_vt_orderid(cid)
@@ -295,5 +295,5 @@ def test_td_registry_plugin_impl_builds_port(monkeypatch):
     rt = R.build_td_runtime("xtp", _EE(), 1, 1, 1)
     assert "exec_port" in rt and rt["adapter"] is not None
     r = rt["adapter"].send_order(__import__("src.strategy_framework.adapters", fromlist=["Order"]).Order(
-        "600000.SHSE", "BUY", 100, 10.0, "limit", "t1:e1:c1"))
+        "600000.XSHG", "BUY", 100, 10.0, "limit", "t1:e1:c1"))
     assert r == "t1:e1:c1"

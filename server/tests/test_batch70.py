@@ -48,15 +48,15 @@ class TestPubLatestTick:
         import json as _json
         r = MagicMock()
         r.get.return_value = _json.dumps({"_ts_epoch": 200.0, "last": 10.0})
-        _pub_write(r, "X.SHSE", _json.dumps({"last": 9.9}), 100.0, 1)   # 旧 ts
+        _pub_write(r, "X.XSHG", _json.dumps({"last": 9.9}), 100.0, 1)   # 旧 ts
         r.set.assert_not_called()
-        _pub_write(r, "X.SHSE", _json.dumps({"last": 10.1}), 300.0, 2)  # 新 ts
+        _pub_write(r, "X.XSHG", _json.dumps({"last": 10.1}), 300.0, 2)  # 新 ts
         r.set.assert_called_once()
         args = r.set.call_args
-        assert "hub:latest_tick:pub:X.SHSE" == args.args[0]
+        assert "hub:latest_tick:pub:X.XSHG" == args.args[0]
         payload = _json.loads(args.args[1])
         assert payload["_ts_epoch"] == 300.0 and payload["account_id"] == 2
-        _pub_write(r, "X.SHSE", "{}", None, 1)   # ts None 跳过
+        _pub_write(r, "X.XSHG", "{}", None, 1)   # ts None 跳过
         assert r.set.call_count == 1
 
     def test_reader_single_get_pub(self):
@@ -67,6 +67,6 @@ class TestPubLatestTick:
         r.get.return_value = _json.dumps({"last": 10.5, "_ts_epoch": 1.0, "account_id": 3, "ts": "2026-09-28T10:00:00+08:00"})
         with patch.object(sd, "_r", return_value=r), \
              patch("src.data_platform.market_snapshot.get_quote", return_value=None):
-            q = sd._quote_block("600000.SH", "600000.SHSE")
+            q = sd._quote_block("600000.SH", "600000.XSHG")
         assert q["source"] == "hub" and q["last"] == 10.5 and "_ts_epoch" not in q
-        r.get.assert_called_once_with("hub:latest_tick:pub:600000.SHSE")
+        r.get.assert_called_once_with("hub:latest_tick:pub:600000.XSHG")

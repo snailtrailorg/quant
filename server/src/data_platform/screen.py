@@ -165,7 +165,7 @@ def run_query(category: str, fields: list, where: str, params: list, limit: int,
 
 
 # 缓存 join：按 category+factor 各取自己的 max(trade_date)（全局 max 会串品类/因子——评审 P1）
-_CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.ts_code = {ts_col} "
+_CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.vt_symbol = {cache_col} "
                "AND {alias}.category = '{category}' AND {alias}.factor = '{factor}' "
                "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache "
                "WHERE category = '{category}' AND factor = '{factor}')")
@@ -194,6 +194,7 @@ _BASE = {
     "stock": {
         "from": "FROM daily_basic d LEFT JOIN asset_static_info a ON a.ts_code = d.ts_code",
         "ts_col": "d.ts_code", "latest": "d.trade_date = (SELECT max(trade_date) FROM daily_basic)",
+        "cache_col": "d.vt_symbol",   # 批176：daily_basic 已有 vt_symbol（全非空），缓存 join 不再转后缀
         "order": "d.total_mv DESC NULLS LAST",
     },
     "convertible": {
@@ -202,7 +203,7 @@ _BASE = {
                  "LEFT JOIN (SELECT symbol, close, ts FROM bar_1d WHERE freq='1D' "
                  "AND ts >= (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') "
                  "AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day') cd "
-                 "ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE'), '.BJ', '.BSE') "
+                 "ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.XSHE'), '.SH', '.XSHG'), '.BJ', '.BJSE') "
                  "LEFT JOIN (SELECT ts_code, close FROM daily_basic "
                  "WHERE trade_date = (SELECT max(trade_date) FROM daily_basic)) sd ON b.stk_code = sd.ts_code"),
         "ts_col": "b.ts_code", "latest": None, "order": "double_low NULLS LAST",
@@ -234,7 +235,8 @@ def build_base_from(category: str, fields: list[str] | None = None) -> str:
             factor = spec["factor"]
             if factor not in cache_joined:
                 alias = f"f_{factor}"
-                joins += _CACHE_JOIN.format(alias=alias, ts_col=base["ts_col"],
+                joins += _CACHE_JOIN.format(alias=alias,
+                                            cache_col=base.get("cache_col") or base["ts_col"],
                                             factor=factor, category=category)
                 cache_joined.add(factor)
             out[f] = f"f_{spec['factor']}.value"

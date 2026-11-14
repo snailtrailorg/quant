@@ -101,7 +101,7 @@ def _get_kline_adapter(cfg: dict):
     **仅日线数据面同步**（sync_id 以 _daily 结尾）走 resolve(supply) 选源；分钟/基准/复权
     因子路径保持原 cfg（kind 波及面+归一面混搭两因——A P1 b/c）。试点回退=键置 off；
     resolve 全程 try 包裹（表缺/DB 抖动回退 cfg provider——回退语义自洽）。
-    已知占位：symbols=("600000.SHSE",) 单标的近似（exchanges 限定行不可判——正式化取真实标的集）。
+    已知占位：symbols=("600000.XSHG",) 单标的近似（exchanges 限定行不可判——正式化取真实标的集）。
     """
     from src.data_platform.adapters.base import get_adapter
     provider = cfg.get("provider") or "tushare"
@@ -110,7 +110,7 @@ def _get_kline_adapter(cfg: dict):
             from src.data_platform import routing
             from src.quant_common.contract import DataRequest
             chain = routing.resolve(DataRequest(
-                kind="bar_daily", symbols=("600000.SHSE",), temporality="historical",
+                kind="bar_daily", symbols=("600000.XSHG",), temporality="historical",
                 consumer_tag="sync", mode="supply"))
             for c in chain.candidates:             # supply 链无 local_pg（28 §7.1）——首选外部源
                 if not c.is_local:
@@ -1167,8 +1167,8 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     with get_conn() as conn:
         sql = ("SELECT DISTINCT (ts AT TIME ZONE 'Asia/Shanghai')::date FROM bar_1d WHERE adj_factor IS NULL "
                # 只扫股票行：asset_static_info 是 A 股静态表（场内基金/转债不在其中）
-               "AND symbol IN (SELECT DISTINCT REPLACE(REPLACE(REPLACE(ts_code,'.SH','.SHSE'),"
-               "'.SZ','.SZSE'),'.BJ','.BSE') FROM asset_static_info)")
+               "AND symbol IN (SELECT DISTINCT REPLACE(REPLACE(REPLACE(ts_code,'.SH','.XSHG'),"
+               "'.SZ','.XSHE'),'.BJ','.BJSE') FROM asset_static_info)")
         params: list = []
         if start_date:
             sql += " AND (ts AT TIME ZONE 'Asia/Shanghai')::date >= %s"

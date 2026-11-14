@@ -29,7 +29,7 @@ from src.data_sync import engine
 
 NS = "__t110s"
 SID = NS + "_binance_perp_daily"
-S1, S2, S3 = f"{NS}_BTC.BINANCE", f"{NS}_ETH.BINANCE", f"{NS}_SOL.BINANCE"
+S1, S2, S3 = f"{NS}_BTC.XBIN", f"{NS}_ETH.XBIN", f"{NS}_SOL.XBIN"
 SYMS = [S1, S2, S3]
 SPEC = ("bar_daily", "perp", "1D", "bar_1d", "UTC", "perp")
 _UNSET = object()
@@ -212,7 +212,7 @@ class TestRoundTripBound:
             calls.append(1)
             return real(*a, **k)
 
-        uni = [(f"{NS}_S{i}.BINANCE", _now(), "2026-10-01") for i in range(n_sym)]
+        uni = [(f"{NS}_S{i}.XBIN", _now(), "2026-10-01") for i in range(n_sym)]
         with patch.object(engine, "get_conn", side_effect=counting):
             _run_scale(uni)
         return len(calls)

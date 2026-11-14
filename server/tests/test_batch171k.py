@@ -31,7 +31,7 @@ class TestDailyDedup:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         conn.__exit__.return_value = False
-        conn.execute.return_value.fetchall.return_value = [("600000.SHSE", None, 0)]
+        conn.execute.return_value.fetchall.return_value = [("600000.XSHG", None, 0)]
         redis_mock = MagicMock()
         redis_mock.exists.return_value = dedup_store is not None
         redis_mock.get.return_value = None
@@ -45,11 +45,11 @@ class TestDailyDedup:
 
     def test_first_day_notifies(self):
         out, notifies = self._run_scan(dedup_store=None)
-        assert any("600000.SHSE" in (n[3] or "") for n in notifies), "首日真断连照报"
+        assert any("600000.XSHG" in (n[3] or "") for n in notifies), "首日真断连照报"
 
     def test_same_day_swallowed(self):
         out, notifies = self._run_scan(dedup_store="1")   # 键存在=当日已发
-        assert not any("600000.SHSE" in (n[3] or "") for n in notifies), "同日缺量被吞"
+        assert not any("600000.XSHG" in (n[3] or "") for n in notifies), "同日缺量被吞"
 
 
 def _lock(acquired):

@@ -51,13 +51,13 @@ class TestQueryPosition:
 
         def _push_two():
             a._positions["600000.SSE"] = _row("600000.SSE")
-            a._positions["000001.SZSE"] = _row("000001.SZSE")
+            a._positions["000001.XSHE"] = _row("000001.XSHE")
 
         a._gateway.query_position.side_effect = _push_two
         with caplog.at_level("WARNING"):
             rows = a.query_position()
         assert len(rows) == 2
-        assert {r.symbol for r in rows} == {"600000.SSE", "000001.SZSE"}
+        assert {r.symbol for r in rows} == {"600000.SSE", "000001.XSHE"}
         assert "部分快照" not in caplog.text
 
     def test_partial_snapshot_warns(self, caplog):

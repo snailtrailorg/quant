@@ -94,7 +94,7 @@
           </div>
         </el-form-item>
         <el-form-item :label="t('factors.pvParams')">
-          <el-input v-model="preview.symbol" style="width: 150px" placeholder="600000.SHSE" />
+          <el-input v-model="preview.symbol" style="width: 150px" placeholder="600000.XSHG" />
           <el-select v-model="preview.freq" style="width: 80px; margin-left: var(--sp-15)">
             <el-option v-for="f in ['1D','1min','5min']" :key="f" :value="f" :label="f" />
           </el-select>
@@ -246,7 +246,7 @@ const strategies = ref([])
 const loadStrategies = async () => { try { strategies.value = (await api.get('/strategy')) || [] } catch {} }
 onMounted(loadStrategies)
 // P2-7（05 §5.5 要点 1）：试算三参数放开——不同标的/频率的行为差异正是研究内容
-const preview = ref({ symbol: '600000.SHSE', freq: '1D', bars: 60 })
+const preview = ref({ symbol: '600000.XSHG', freq: '1D', bars: 60 })
 const previewError = ref('')
 const previewChart = ref(null)
 const previewFactor = async () => {

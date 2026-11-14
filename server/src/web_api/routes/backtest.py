@@ -76,14 +76,14 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
         for sym in symbols:
             raw = (sym or "").strip()
             if "." not in raw:
-                raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
+                raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.XSHG）: {raw}")
             vt = to_vt_symbol(raw)
             ts = vt_to_ts(vt)
             # 批 131（审员 P0-1）：**vt_to_ts 是恒等函数**（未知后缀原样返回）——不能当校验器；
             # 显式校验 ts 后缀，否则 600000.FOO 会静默入库（与本 bug 同类：注释假装有约束）。
             if ts.rsplit(".", 1)[-1] not in ("SH", "SZ", "BJ"):
                 raise ApiError(400, "SYMBOL_INVALID",
-                               f"symbol 交易所后缀非法（仅 SHSE/SZSE/BSE）: {raw}")
+                               f"symbol 交易所后缀非法（仅 XSHG/XSHE/BJSE，兼容旧 SHSE/SZSE/BSE）: {raw}")
             _norm.append((vt, ts))
         for vt, _ts in _norm:
             conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, vt))
@@ -105,12 +105,12 @@ def add_pool_symbol_api(pid: str, body: dict = Body(...),
     if not raw:
         raise ApiError(400, "MISSING_FIELDS", "symbol 必填")
     if "." not in raw:
-        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
+        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.XSHG）: {raw}")
     vt = to_vt_symbol(raw)
     ts = vt_to_ts(vt)   # 校验可转换（防垃圾格式入池后同步空转——S-F1）
     # 批 131（审员 P0-1）：vt_to_ts 对未知后缀恒等返回 ⇒ 显式校验（同 create_pool）
     if ts.rsplit(".", 1)[-1] not in ("SH", "SZ", "BJ"):
-        raise ApiError(400, "SYMBOL_INVALID", f"symbol 交易所后缀非法（仅 SHSE/SZSE/BSE）: {raw}")
+        raise ApiError(400, "SYMBOL_INVALID", f"symbol 交易所后缀非法（仅 XSHG/XSHE/BJSE）: {raw}")
     with get_conn() as conn:
         cur = conn.execute("SELECT id, category FROM pools WHERE id=%s", (pid,))
         row = cur.fetchone()

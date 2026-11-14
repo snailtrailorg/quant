@@ -51,7 +51,7 @@ class TestIntervalMapping:
         """源 interval 名 / 日粒度 / 未映射 → 响亮拒绝（不是空帧）。"""
         a = BA.BinanceAdapter()
         with pytest.raises(UnsupportedFeature):
-            a.pull_minute("BTCUSDT.BINANCE", freq, "20261004", "20261004")
+            a.pull_minute("BTCUSDT.XBIN", freq, "20261004", "20261004")
 
     def test_pull_minute_uses_mapped_interval(self):
         """`pull_minute('15min')` 必须去打 `15m` 目录（而不是 15min/1m）。"""
@@ -63,7 +63,7 @@ class TestIntervalMapping:
 
         a = BA.BinanceAdapter()
         with patch.object(BA, "_get", _fake_get):
-            out = a.pull_minute("BTCUSDT.BINANCE", "15min", "20261003", "20261004")
+            out = a.pull_minute("BTCUSDT.XBIN", "15min", "20261003", "20261004")
         assert out.empty
         assert len(seen) == 2, seen
         assert all("/klines/BTCUSDT/15m/" in u for u in seen), seen
@@ -78,7 +78,7 @@ class TestIntervalMapping:
 
         a = BA.BinanceAdapter()
         with patch.object(BA, "_get", _fake_get):
-            a.pull_minute("BTCUSDT.BINANCE", "1min", "20261004 09:00:00", "20261004 15:00:00")
+            a.pull_minute("BTCUSDT.XBIN", "1min", "20261004 09:00:00", "20261004 15:00:00")
         assert all("-2026-10-04.zip" in u for u in seen), seen
 
     def test_fetch_supply_dispatches_minute(self):
@@ -226,7 +226,7 @@ class _FakeBinance:
             return []
         sym = str(df["binance_symbol"].iloc[0])
         ts = datetime(self._day.year, self._day.month, self._day.day, tzinfo=timezone.utc)
-        return [(f"{sym}.BINANCE", freq, ts, 1.0, 2.0, 0.5, 1.5, 10.0, 20.0, None, "binance")]
+        return [(f"{sym}.XBIN", freq, ts, 1.0, 2.0, 0.5, 1.5, 10.0, 20.0, None, "binance")]
 
 
 def _run(sync_id, adapter, cfg=None, end_date="20260131", backfill=None):
@@ -279,7 +279,7 @@ class TestHandlerFactory:
             def to_bar_rows(self, df, freq, adj_map=None):
                 sym = str(df["binance_symbol"].iloc[0])
                 d = {"A": 27, "B": 29, "C": 28}[sym]
-                return [(f"{sym}.BINANCE", freq,
+                return [(f"{sym}.XBIN", freq,
                          datetime(2026, 1, d, tzinfo=timezone.utc),
                          1.0, 2.0, 0.5, 1.5, 1.0, 1.0, None, "binance")]
 

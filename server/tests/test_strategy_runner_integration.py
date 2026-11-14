@@ -106,16 +106,16 @@ def test_warmup_history():
     now = datetime.now()
     # 11 字段序（对齐 db.get_bars——批 59 DataBus 经 to_contract 校验）
     rows = [
-        {"symbol": "600000.SHSE", "freq": "1min", "ts": as_utc(now - timedelta(hours=1)),
+        {"symbol": "600000.XSHG", "freq": "1min", "ts": as_utc(now - timedelta(hours=1)),
          "open": 3.0, "high": 3.1, "low": 2.9, "close": 3.05, "volume": 10000,
          "amount": 30000.0, "adj_factor": None, "source": "tushare"},
-        {"symbol": "600000.SHSE", "freq": "1min", "ts": as_utc(now - timedelta(minutes=30)),
+        {"symbol": "600000.XSHG", "freq": "1min", "ts": as_utc(now - timedelta(minutes=30)),
          "open": 3.05, "high": 3.15, "low": 3.0, "close": 3.1, "volume": 15000,
          "amount": 45000.0, "adj_factor": None, "source": "tushare"},
     ]
     df = _make_bars_df(rows)
     with patch("src.data_platform.db.get_bars", return_value=df):
-        history = _warmup_history("600000.SHSE")
+        history = _warmup_history("600000.XSHG")
     assert len(history) == 2
     assert history[0]["close"] == 3.05
     assert history[0]["volume"] == 10000.0
@@ -127,7 +127,7 @@ def test_warmup_history_empty():
     from src.strategy_runner.main import _warmup_history
     df = _make_bars_df([])
     with patch("src.data_platform.db.get_bars", return_value=df):
-        history = _warmup_history("600000.SHSE")
+        history = _warmup_history("600000.XSHG")
     assert history == []
 
 
@@ -135,7 +135,7 @@ def test_warmup_history_db_error():
     """get_bars 抛异常，不抛（走 logger.warning）。"""
     from src.strategy_runner.main import _warmup_history
     with patch("src.data_platform.db.get_bars", side_effect=Exception("PG down")):
-        history = _warmup_history("600000.SHSE")
+        history = _warmup_history("600000.XSHG")
     assert history == []
 
 
@@ -156,7 +156,7 @@ def test_tick_to_bar_to_strategy():
     # 1. 建策略实例（mock adapter）
     mock_adapter = MagicMock(spec=XTPAdapter)
     cfg = StrategyConfig(
-        id="test", name="测试策略", type="astock_analysis", symbol="600000.SHSE",
+        id="test", name="测试策略", type="astock_analysis", symbol="600000.XSHG",
         adapter="xtp", enabled=True, factors=[], aggregator={}, params={},
     )
     strategy = Strategy.from_config(cfg, mock_adapter)
@@ -220,7 +220,7 @@ def test_tick_to_bar_with_history():
 
     mock_adapter = MagicMock(spec=XTPAdapter)
     cfg = StrategyConfig(
-        id="test2", name="历史暖机策略", type="astock_analysis", symbol="600000.SHSE",
+        id="test2", name="历史暖机策略", type="astock_analysis", symbol="600000.XSHG",
         adapter="xtp", enabled=True, factors=[], aggregator={}, params={},
     )
     strategy = Strategy.from_config(cfg, mock_adapter)

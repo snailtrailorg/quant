@@ -240,6 +240,37 @@ def drift_check():
     return {"status": "ok", "running_strategies": len(running), "drift_issues": issues}
 
 
+# 批176：持仓账实分离比对（比对键=裸码兼容 trade_log 历史；落库键=sym_vt canonical）
+_POSITION_DIFF_SQL = """
+    SELECT COALESCE(CASE WHEN d.sym_vt LIKE '%.%' THEN d.sym_vt END,
+                    sm.vt_symbol, d.sym_vt) AS sym,
+           d.vid, d.snap_vol, d.derived_vol
+    FROM (
+        SELECT COALESCE(s.sym, t.sym) AS sym,
+               COALESCE(s.sym_vt, t.sym_vt) AS sym_vt,
+               COALESCE(s.vid, t.vid) AS vid,
+               COALESCE(s.snap_vol, 0) AS snap_vol,
+               COALESCE(t.derived_vol, 0) AS derived_vol
+        FROM (SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
+                     min(symbol) AS sym_vt, SUM(volume) AS snap_vol
+              FROM position_snapshot WHERE direction != 'direction_short'
+              GROUP BY 1, 2) s
+        FULL OUTER JOIN (
+            SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
+                   min(symbol) AS sym_vt,
+                   SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
+            FROM trade_log GROUP BY 1, 2) t
+          ON s.sym = t.sym AND s.vid IS NOT DISTINCT FROM t.vid
+        WHERE COALESCE(s.snap_vol, 0) != COALESCE(t.derived_vol, 0)
+    ) d
+    LEFT JOIN LATERAL (
+        SELECT m.vt_symbol FROM security_master m
+        WHERE split_part(m.vt_symbol, '.', 1) = d.sym AND m.category = 'stock'
+        ORDER BY m.vt_symbol LIMIT 1
+    ) sm ON true
+"""
+
+
 @app.task(name="src.scheduler.tasks.reconcile_three_books")
 def reconcile_three_books():
     """S-ACC-003 信号-委托-成交三账对账。
@@ -258,19 +289,16 @@ def reconcile_three_books():
                 # ——join 前必须归一，否则永不命中→每小时误报
                 cur = conn.execute("SELECT id, name FROM trading_account")
                 account_names = {r[0]: r[1] for r in cur.fetchall()}
-                cur = conn.execute("""
-                    SELECT COALESCE(s.sym, t.sym) AS sym,
-                           COALESCE(s.vid, t.vid) AS vid,
-                           COALESCE(s.snap_vol, 0) AS snap_vol,
-                           COALESCE(t.derived_vol, 0) AS derived_vol
-                    FROM (SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
-                          FROM position_snapshot WHERE direction != 'direction_short' GROUP BY 1, 2) s
-                    FULL OUTER JOIN (
-                        SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
-                               SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
-                        FROM trade_log GROUP BY 1, 2) t ON s.sym = t.sym AND s.vid IS NOT DISTINCT FROM t.vid
-                    WHERE COALESCE(s.snap_vol, 0) != COALESCE(t.derived_vol, 0)""")
+                # 批176：比对键仍用裸码（trade_log 历史行可能不带后缀），但**落库键**取 canonical：
+                # position 侧快照已 vt（min(symbol)）；trade_log-only 行用 LATERAL 查主档补 vt
+                # （只对差异行 lookup——不在全表 join，避免逐行扫 security_master）。
+                cur = conn.execute(_POSITION_DIFF_SQL)
                 for sym, vid, sv, dv in cur.fetchall():
+                    # trade_log-only 且主档查不到（已退市/非股票）→ 保原始裸码，日志留痕
+                    if not sym or "." not in sym:
+                        logging.getLogger("scheduler").warning(
+                            "对账差异单 symbol 无法归一（主档无行）: %r account=%s", sym, vid)
+                        sym = sym or f"account#{vid}"
                     # O-S2：trade_log 全历史推导（含上线前底仓/场外单）天然有持续差异——
                     # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率。
                     # D2：per-account 分组对账（trade_log 历史 account_id=NULL 用 IS NOT DISTINCT FROM 保留）
@@ -685,7 +713,8 @@ def data_continuity_check(self):
                 for symbol, _zero, _exp_sym in _gaps:
                     bar_gap_lines.append(f"{symbol}: 整周零根(预期~{_exp_sym})")
                     try:
-                        ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
+                        ts_code = (symbol.replace(".XSHG", ".SH").replace(".XSHE", ".SZ").replace(".BJSE", ".BJ")
+                                   .replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ"))
                         from src.data_platform.adapters.base import TushareAdapter
                         from src.data_platform.adapters.tushare_adapter import pull_daily
                         from src.data_platform.db import save_bars
@@ -1560,7 +1589,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     benchmark_bars = []
     try:
         from src.data_platform.db import get_index_bars
-        bench_df = get_index_bars("000300.SHSE", start, end)
+        bench_df = get_index_bars("000300.XSHG", start, end)
         benchmark_bars = bench_df.to_dict("records") if not bench_df.empty else []
     except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
@@ -2429,6 +2458,16 @@ def backup_db(self):
             "kept": KEEP_COUNT, "removed": removed}
 
 
+def _cache_rows(factor: str, trade_date, pairs) -> list[tuple]:
+    """批176：因子缓存行（category, ts_code, vt_symbol, factor, trade_date, value）。
+
+    `pairs` = [(vt_symbol, value)]，来自 bar_1d（已是 vt）。ts_code 为过渡期双写（旧读者 + 旧主键
+    仍引用），contract 批删列后只剩 vt。纯函数便于单测（不碰 DB）。
+    """
+    from ..data_platform.schema import to_ts_code
+    return [("stock", to_ts_code(sym), sym, factor, trade_date, val) for sym, val in pairs]
+
+
 @app.task(name="src.scheduler.tasks.screen_factor_compute",
           soft_time_limit=1800, time_limit=2100)
 def screen_factor_compute():
@@ -2480,20 +2519,17 @@ def screen_factor_compute():
                             ) t) AS ma
                     FROM last_day ld
                 )
-                SELECT CASE split_part(symbol, '.', 2)
-                         WHEN 'SHSE' THEN split_part(symbol, '.', 1) || '.SH'
-                         WHEN 'SSE'  THEN split_part(symbol, '.', 1) || '.SH'
-                         WHEN 'SZSE' THEN split_part(symbol, '.', 1) || '.SZ'
-                         WHEN 'BSE'  THEN split_part(symbol, '.', 1) || '.BJ'
-                         ELSE symbol END,
+                SELECT symbol,
                        """ + dev_expr + """
                 FROM win WHERE ma IS NOT NULL AND last_close > 0
             """, (t1,))
-            rows = [("stock", r[0], factor, t1, r[1]) for r in cur.fetchall()]
+            # 批176：缓存键落 vt（bar_1d.symbol 即 vt）；ts_code 双写供过渡期旧读者（contract 后删）
+            rows = _cache_rows(factor, t1, cur.fetchall())
             if rows:
                 cur.executemany(
-                    "INSERT INTO screen_factor_cache (category, ts_code, factor, trade_date, value) "
-                    "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows)
+                    "INSERT INTO screen_factor_cache "
+                    "(category, ts_code, vt_symbol, factor, trade_date, value) "
+                    "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows)
             results[factor] = len(rows)
         conn.commit()
         cur = conn.execute("DELETE FROM screen_factor_cache WHERE trade_date < CURRENT_DATE - 90")

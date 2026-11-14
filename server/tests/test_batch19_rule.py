@@ -17,8 +17,8 @@ def _rc():
     return c
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "u1"}
-SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "u1"}
+BUY = {"symbol": "600000.XSHG", "action": "BUY", "volume": 100, "price": 10.0, "operator": "u1"}
+SELL = {"symbol": "600000.XSHG", "action": "SELL", "volume": 100, "price": 10.0, "operator": "u1"}
 
 
 class TestRuleCodes:
@@ -91,7 +91,7 @@ class TestActionClassification:
         # price=600 × volume=1 → 600 超限 500 → new_vol=int(500/600)=0 → 拒单
         with patch("src.data_platform.perms.market_op_allowed", return_value=True), \
              patch("src.risk_control.risk.get_conn", return_value=ins):
-            d = c.check_order({"symbol": "600000.SHSE", "action": "BUY", "volume": 1,
+            d = c.check_order({"symbol": "600000.XSHG", "action": "BUY", "volume": 1,
                                "price": 600.0, "operator": "u1"})
         assert not d.approved and d.rule == "MAX_SINGLE_AMOUNT"
         sql_params = ins.execute.call_args[0][1]
@@ -108,7 +108,7 @@ class TestActionClassification:
         #  故改用能产出整手的合法参数，断言语义仍是「approved+adjusted=adjust」。）
         with patch("src.data_platform.perms.market_op_allowed", return_value=True), \
              patch("src.risk_control.risk.get_conn", return_value=ins):
-            d = c.check_order({"symbol": "600000.SHSE", "action": "BUY", "volume": 1000,
+            d = c.check_order({"symbol": "600000.XSHG", "action": "BUY", "volume": 1000,
                                "price": 1.0, "operator": "u1"})
         assert d.approved and d.adjusted is not None and d.rule == "MAX_SINGLE_AMOUNT"
         assert d.adjusted["volume"] == 500      # 批174：按 100 取整

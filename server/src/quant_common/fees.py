@@ -30,7 +30,8 @@ def symbol_market(symbol: str) -> str | None:
         return "convertible"
     if code.startswith(("50", "51", "56", "58")) or code.startswith(("15", "16", "18")):
         return "listed_fund"   # 场内基金全体（ETF/LOF/封基/REITs）
-    if any(symbol.endswith(s) for s in (".SHSE", ".SZSE", ".SSE")) or (len(code) == 6 and code.isdigit()):
+    if any(symbol.endswith(s) for s in (".XSHG", ".XSHE", ".BJSE", ".SHSE", ".SZSE", ".SSE", ".BSE")) \
+            or (len(code) == 6 and code.isdigit()):
         return "astock"
     return None
 

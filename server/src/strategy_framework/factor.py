@@ -947,7 +947,7 @@ def _factor_class_of(vt_symbol: str) -> str:
         return "convertible"
     if code.startswith(("15", "16", "51", "52")):
         return "etf"
-    if any(x in sym for x in (".SHSE", ".SZSE", ".BSE")):
+    if any(x in sym for x in (".XSHG", ".XSHE", ".BJSE", ".SHSE", ".SZSE", ".BSE")):
         return "astock"
     return "unknown"
 

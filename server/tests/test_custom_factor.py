@@ -80,7 +80,7 @@ class TestPythonModeGetFactor:
     return ctx.hold()
 '''
         cfg = StrategyConfig(
-            id='test', name='test', type='python', symbol='600000.SHSE',
+            id='test', name='test', type='python', symbol='600000.XSHG',
             adapter='xtp', params={'mode': 'python', 'python_code': code}
         )
         strat = Strategy.from_config(cfg, None)
@@ -97,7 +97,7 @@ class TestPythonModeGetFactor:
     return ctx.hold()
 '''
         cfg = StrategyConfig(
-            id='test2', name='test2', type='python', symbol='600000.SHSE',
+            id='test2', name='test2', type='python', symbol='600000.XSHG',
             adapter='xtp', params={'mode': 'python', 'python_code': code}
         )
         strat = Strategy.from_config(cfg, None)
@@ -179,7 +179,7 @@ class TestDslPreview:
         base = datetime(2026, 8, 1)
         # 11 字段序（对齐 db.get_bars 的 BAR_TABLE_SELECT——批 59 DataBus 经 to_contract 校验）
         return pd.DataFrame([{
-            "symbol": "600000.SHSE", "freq": "1D", "ts": as_utc(base + timedelta(days=i)),
+            "symbol": "600000.XSHG", "freq": "1D", "ts": as_utc(base + timedelta(days=i)),
             "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.0 + i * 0.01,
             "volume": 1000, "amount": 10000.0, "adj_factor": 1.0, "source": "tushare",
         } for i in range(n)])
@@ -190,7 +190,7 @@ class TestDslPreview:
         from src.web_api.routes.strategy import preview_factor_api
         with patch("src.data_platform.db.get_bars", return_value=self._bars_df(150)):
             out = preview_factor_api({"type": "dsl", "code": "mean(close,120) / close - 1",
-                                      "symbol": "600000.SHSE", "freq": "1D"}, {})
+                                      "symbol": "600000.XSHG", "freq": "1D"}, {})
         assert len(out["values"]) == 120
         assert out["stats"]["errors"] == 0 and out["stats"]["last"] is not None
         assert out["stats"]["last"] < 0   # 递增序列:均值<当前 → 偏离度为负(数值正确性)

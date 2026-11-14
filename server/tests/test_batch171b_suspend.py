@@ -36,22 +36,22 @@ needs_db = pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev �
 class TestPurgePorts:
 
     def test_vt_to_ts_normalization(self):
-        assert _vt_to_ts("000016.SHSE") == "000016.SH"
-        assert _vt_to_ts("127045.SZSE") == "127045.SZ"
-        assert _vt_to_ts("430047.BSE") == "430047.BJ"
-        assert _vt_to_ts("BTCUSDT.BINANCE") == "BTCUSDT.BINANCE"   # 加密原样
+        assert _vt_to_ts("000016.XSHG") == "000016.SH"
+        assert _vt_to_ts("127045.XSHE") == "127045.SZ"
+        assert _vt_to_ts("430047.BJSE") == "430047.BJ"
+        assert _vt_to_ts("BTCUSDT.XBIN") == "BTCUSDT.XBIN"   # 加密原样
 
     @needs_db
     def test_suspended_on_s_only_and_vt_keys(self):
         """验收 3：2026-10-14——S 行净化、R 行（002860/002813 当日实有 bar）永不净化、vt 键形态。
 
-        000016=平安银行（**深市** .SZSE/.SZ——勿写沪市后缀）；002860/002813=深市 R 行。
+        000016=平安银行（**深市** .XSHE/.SZ——勿写沪市后缀）；002860/002813=深市 R 行。
         """
-        if not suspend_days_bulk(date(2026, 10, 13), date(2026, 10, 15), {"000016.SZSE"}):
+        if not suspend_days_bulk(date(2026, 10, 13), date(2026, 10, 15), {"000016.XSHE"}):
             pytest.skip("dev 无 10-14 停牌数据（先跑验收 8 回补）")
         got = suspended_on(date(2026, 10, 14),
-                           {"000016.SZSE", "002860.SZSE", "002813.SZSE", "600000.SHSE"})
-        assert got == {"000016.SZSE"}, "仅 S 行（000016）；R 行与未停牌标的不进"
+                           {"000016.XSHE", "002860.XSHE", "002813.XSHE", "600000.XSHG"})
+        assert got == {"000016.XSHE"}, "仅 S 行（000016）；R 行与未停牌标的不进"
         # 非停牌日空集：000016 连停 10-08~10-22（dev 实证）——须选**库内该标的无行**的
         # 日期（10-23 复牌后首个交易日窗内；拍脑选日=把「任选一日非停牌」写成「任一日
         # 都非停牌」——步4 盲审 A-P0-1 教训）
@@ -64,16 +64,16 @@ class TestPurgePorts:
                       if d not in have]
         assert candidates, "库内 10-23 后应有非停牌日（000016 复牌）"
         for d in candidates:
-            assert suspended_on(d, {"000016.SZSE"}) == set(), f"{d} 非该标的停牌日应空集"
+            assert suspended_on(d, {"000016.XSHE"}) == set(), f"{d} 非该标的停牌日应空集"
 
     @needs_db
     def test_bulk_keys_are_vt(self):
         """验收 3 补：bulk 返回键 vt 形态——与 risk.py 循环变量直接 get（防 ts/vt 错位静默失效）。"""
-        m = suspend_days_bulk(date(2026, 10, 13), date(2026, 10, 15), {"000016.SZSE"})
+        m = suspend_days_bulk(date(2026, 10, 13), date(2026, 10, 15), {"000016.XSHE"})
         if not m:
             pytest.skip("dev 无 10-14 停牌数据")
-        assert "000016.SZSE" in m and all(k.endswith((".SHSE", ".SZSE", ".BSE")) for k in m)
-        assert date(2026, 10, 14) in m["000016.SZSE"]
+        assert "000016.XSHE" in m and all(k.endswith((".XSHG", ".XSHE", ".BJSE")) for k in m)
+        assert date(2026, 10, 14) in m["000016.XSHE"]
 
 
 # ---------------------------------------------------------------------------
@@ -88,33 +88,33 @@ class TestExpectedBarsSuspend:
 
     def test_daily_minus_suspend_days(self):
         opens = [date(2026, 10, d) for d in (12, 13, 14, 15, 16)]
-        base = expected_bars("1D", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 16), opens)
-        cut = expected_bars("1D", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 16), opens,
+        base = expected_bars("1D", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 16), opens)
+        cut = expected_bars("1D", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 16), opens,
                             suspend_days=[date(2026, 10, 14)])
         assert base == 5 and cut == 4, "1D 减 len(窗内停牌日)"
 
     def test_minute_minus_times_bpd(self):
         opens = [date(2026, 10, d) for d in (12, 13, 14, 15, 16)]
-        base = expected_bars("1min", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 16), opens)
-        cut = expected_bars("1min", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 16), opens,
+        base = expected_bars("1min", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 16), opens)
+        cut = expected_bars("1min", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 16), opens,
                             suspend_days=[date(2026, 10, 14), date(2026, 10, 15)])
         assert base == 5 * 240 and cut == 3 * 240, "1min 减 n×240"
 
     def test_crypto_ignores_suspend(self):
         opens = [date(2026, 10, d) for d in (12, 13, 14, 15, 16)]
-        n = expected_bars("1D", "BTCUSDT.BINANCE", date(2026, 10, 12), date(2026, 10, 16), opens,
+        n = expected_bars("1D", "BTCUSDT.XBIN", date(2026, 10, 12), date(2026, 10, 16), opens,
                           suspend_days=[date(2026, 10, 14)])
         assert n == 5, "加密显式跳过（无停牌概念）"
 
     def test_none_no_drift(self):
         opens = [date(2026, 10, d) for d in (12, 13, 14)]
-        assert (expected_bars("1D", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 14), opens)
-                == expected_bars("1D", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 14),
+        assert (expected_bars("1D", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 14), opens)
+                == expected_bars("1D", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 14),
                                  opens, suspend_days=None))
 
     def test_out_of_window_suspend_ignored(self):
         opens = [date(2026, 10, d) for d in (12, 13, 14)]
-        n = expected_bars("1D", "000016.SHSE", date(2026, 10, 12), date(2026, 10, 14), opens,
+        n = expected_bars("1D", "000016.XSHG", date(2026, 10, 12), date(2026, 10, 14), opens,
                           suspend_days=[date(2026, 10, 1)])   # 窗外停牌日
         assert n == 3
 
@@ -134,7 +134,7 @@ class TestExpectedBarsSuspend:
         cap = _Cap()
         logger.addHandler(cap)
         try:
-            got = suspend_days_bulk(1, date(2026, 11, 6), {"000016.SZSE"})   # int＝错误接线形态
+            got = suspend_days_bulk(1, date(2026, 11, 6), {"000016.XSHE"})   # int＝错误接线形态
         finally:
             logger.removeHandler(cap)
         assert got == {}, "fail-open 宁多报"
@@ -149,8 +149,8 @@ class TestExpectedBarsSuspend:
             vals = {r[0] for r in c.execute("SELECT DISTINCT full_day FROM suspend_calendar")}
         assert vals <= {"True", "False"}, f"值域漂移: {vals}"
         # 半日行（False）不参与净化——真数据里找一条验证
-        m = suspend_days_bulk(date(2026, 10, 1), date(2026, 11, 5), {"301569.SZSE"})
-        days_301569 = m.get("301569.SZSE") or []
+        m = suspend_days_bulk(date(2026, 10, 1), date(2026, 11, 5), {"301569.XSHE"})
+        days_301569 = m.get("301569.XSHE") or []
         assert all(isinstance(d, date) for d in days_301569)
 
 
@@ -164,8 +164,8 @@ class TestDelistTruncate:
     def test_expected_bars_short_window_after_cut(self):
         """合成夹具：delist 早于窗末 ⇒ 消费方截 last 后窗口变短（expected 随窗收窄）。"""
         opens = [date(2026, 10, d) for d in range(10, 20)]
-        full = expected_bars("1D", "110076.SHSE", date(2026, 10, 10), date(2026, 10, 19), opens)
-        cut = expected_bars("1D", "110076.SHSE", date(2026, 10, 10), date(2026, 10, 14), opens)
+        full = expected_bars("1D", "110076.XSHG", date(2026, 10, 10), date(2026, 10, 19), opens)
+        cut = expected_bars("1D", "110076.XSHG", date(2026, 10, 10), date(2026, 10, 14), opens)
         assert full == 10 and cut == 5
 
     def test_reconcile_window_cut_via_delist(self):

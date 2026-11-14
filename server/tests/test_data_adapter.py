@@ -33,8 +33,8 @@ def test_to_bar_rows_daily_batch_snapshot():
     adapter = TushareAdapter()
     df = _daily_df()
     rows = adapter.to_bar_rows(df, "1D", adj_map={})
-    assert rows[0] == ("600000.SHSE", "1D", as_shanghai(datetime(2026, 1, 5)), 10.0, 10.5, 9.8, 10.2, 100000.0, 10200000.0, None, "tushare")
-    assert rows[1] == ("000001.SZSE", "1D", as_shanghai(datetime(2026, 1, 5)), 12.0, 12.3, 11.9, 12.1, 200000.0, 24200000.0, None, "tushare")
+    assert rows[0] == ("600000.XSHG", "1D", as_shanghai(datetime(2026, 1, 5)), 10.0, 10.5, 9.8, 10.2, 100000.0, 10200000.0, None, "tushare")
+    assert rows[1] == ("000001.XSHE", "1D", as_shanghai(datetime(2026, 1, 5)), 12.0, 12.3, 11.9, 12.1, 200000.0, 24200000.0, None, "tushare")
 
 
 def test_to_bar_rows_daily_matches_to_save_rows():
@@ -95,7 +95,7 @@ def test_joinquant_real_impl_honesty():
     # 日线：缺凭证必须**响亮**抛 ProviderConfigError（静默回落 tushare＝串源）；
     # 若抛 NotImplementedError 则说明真接被撤回——那时的能力声明必须同步撤回。
     try:
-        jq.pull_daily("000001.SZSE", "20260601", "20260602")
+        jq.pull_daily("000001.XSHE", "20260601", "20260602")
         raise AssertionError("缺凭证时 pull_daily 未响亮失败")
     except ProviderConfigError:
         pass
@@ -103,7 +103,7 @@ def test_joinquant_real_impl_honesty():
         raise AssertionError("真接被撤回（stub 语义回归）——能力声明必须同步撤回") from e
     # 分钟线：批 103c 未实现 ⇒ 显式不支持
     with pytest.raises(UnsupportedFeature):
-        jq.pull_minute("000001.SZSE", "1m", "20260601", "20260602")
+        jq.pull_minute("000001.XSHE", "1m", "20260601", "20260602")
     # DB 可无行（走 .env 兜底），但 _REGISTRY 必须注册（否则 get_data_source 抛错＝串源立法）
     assert get_data_source("joinquant") is None or \
         get_data_source("joinquant").provider == "joinquant"

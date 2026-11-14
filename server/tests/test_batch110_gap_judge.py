@@ -162,29 +162,29 @@ LOCAL_MISS_02 = {"20261001", "20261003", "20261004"}            # 缺 10-02
 class TestRoundStreak:
     @needs_db
     def test_first_open_sets_hit_round_1(self):
-        out, _a = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        out, _a = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                        local=LOCAL_MISS_02, round_id=11)
         assert out[SID]["new_open"] == 1
-        assert _hit(SID) == [("BTC.BINANCE", "2026-10-02", 1, 11)]
+        assert _hit(SID) == [("BTC.XBIN", "2026-10-02", 1, 11)]
 
     @needs_db
     def test_aligned_round_increments_hit(self):
         ad = _FakeCrypto()
         for rd in (11, 12):
-            _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
                  local=LOCAL_MISS_02, round_id=rd)
-        assert _hit(SID) == [("BTC.BINANCE", "2026-10-02", 2, 12)], "同一缺口续存 ⇒ 累加"
+        assert _hit(SID) == [("BTC.XBIN", "2026-10-02", 2, 12)], "同一缺口续存 ⇒ 累加"
 
     @needs_db
     def test_closed_row_keeps_history(self):
         """`closed` 保留 `hit_rounds/last_hit_round`（判据**读史**；不得清零）。"""
         ad = _FakeCrypto()
-        _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
              local=LOCAL_MISS_02, round_id=11)
-        _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
              local=LOCAL_FULL, round_id=12)            # 补齐 ⇒ closed
         assert _states(SID)[0][1] == "closed"
-        assert _hit(SID) == [("BTC.BINANCE", "2026-10-02", 1, 11)], "closed 后保留史"
+        assert _hit(SID) == [("BTC.XBIN", "2026-10-02", 1, 11)], "closed 后保留史"
 
     @needs_db
     def test_skipped_round_then_hit_resets_to_1(self):
@@ -194,16 +194,16 @@ class TestRoundStreak:
         """
         ad = _FakeCrypto()
         for rd in (11, 12, 13, 14):
-            _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
                  local=LOCAL_MISS_02, round_id=rd)
         assert _hit(SID)[0][2] == 4
         # 轮 15：该 scope 整轮未跑（scope 表为空）——「中断」而非「连续」
         _run(ad, universe=[], local=set(), round_id=15, scope={})
         assert _hit(SID)[0][2] == 4, "跳过轮不动行（计数既不增也不归零）"
         # 轮 16：命中，但上一命中是 14 ≠ 15 ⇒ 复位为 1
-        _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
              local=LOCAL_MISS_02, round_id=16)
-        assert _hit(SID) == [("BTC.BINANCE", "2026-10-02", 1, 16)]
+        assert _hit(SID) == [("BTC.XBIN", "2026-10-02", 1, 16)]
 
     @needs_db
     def test_hit_ge_n_at_threshold(self):
@@ -211,7 +211,7 @@ class TestRoundStreak:
         ad = _FakeCrypto()
         out = None
         for rd in range(11, 11 + engine._GAP_JUDGE_ROUNDS):
-            out, _a = _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            out, _a = _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
                            local=LOCAL_MISS_02, round_id=rd)
         assert _hit(SID)[0][2] == engine._GAP_JUDGE_ROUNDS
         assert out[SID]["hit_ge_n"] == 1
@@ -220,10 +220,10 @@ class TestRoundStreak:
     @needs_db
     def test_no_round_id_means_not_judged(self):
         """Valkey 不可用（`round_id=None`）⇒ **只观测不判定**：不维护命中列、`hit_ge_n=0`。"""
-        out, _a = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        out, _a = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                        local=LOCAL_MISS_02, round_id=None)
         assert out[SID]["judged"] is False and out[SID]["hit_ge_n"] == 0
-        assert _hit(SID) == [("BTC.BINANCE", "2026-10-02", 0, 0)], "不判定 ⇒ 不维护命中列"
+        assert _hit(SID) == [("BTC.XBIN", "2026-10-02", 0, 0)], "不判定 ⇒ 不维护命中列"
 
 
 # ---------------------------------------------------------------------------
@@ -280,14 +280,14 @@ class TestInceptionInclusion:
     @needs_db
     def test_sm_list_date_enables_claims(self):
         """SM **有** `list_date` ⇒ 期望集自它起算、正常主张缺口（不再恒 `uncertain`）。"""
-        out, _a = _run(_FakeCrypto(), universe=[("BTC-USDT-SWAP.OKX", _now(), "2026-10-01")],
+        out, _a = _run(_FakeCrypto(), universe=[("BTC-USDT-SWAP.XOKX", _now(), "2026-10-01")],
                        local=LOCAL_MISS_02, round_id=11)
         assert out[SID]["new_open"] == 1 and out[SID]["unknown_inception"] == 0
 
     @needs_db
     def test_null_list_date_is_structural_unknown(self):
         """「SM **有** symbol 但 `list_date` 空」＝ **结构性未知** ⇒ `uncertain(inception_unknown)`。"""
-        out, _a = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), None)],
+        out, _a = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), None)],
                        local=LOCAL_MISS_02, round_id=11)
         assert out[SID]["unknown_inception"] == 1 and out[SID]["new_open"] == 0
         assert _states(SID)[0][2] == "inception_unknown"
@@ -298,7 +298,7 @@ class TestInceptionInclusion:
         """读口是 **SM**，不是 adapter 活体：adapter 报值而 SM 空 ⇒ 仍 `uncertain`。"""
         ad = _FakeCrypto()
         ad.symbol_inception = lambda s: "2026-10-01"      # 活体有值——但**不该被读**
-        out, _a = _run(ad, universe=[("BTC.BINANCE", _now(), None)],
+        out, _a = _run(ad, universe=[("BTC.XBIN", _now(), None)],
                        local=LOCAL_MISS_02, round_id=11)
         assert out[SID]["unknown_inception"] == 1, "活体值不得冒充 SM（单一真源）"
 
@@ -326,14 +326,14 @@ class TestCrossCheckGate:
     @needs_db
     def test_consistent_no_alert(self):
         """SID 不在声明集 ＋ list_date 全非空 ⇒ 一致 ⇒ 不告警。"""
-        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                           local=LOCAL_FULL, round_id=11)
         assert not [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
 
     @needs_db
     def test_measured_empty_but_not_declared_alerts(self):
         """实测「有 symbol 且 `list_date` 空」而**未声明** ⇒ 漂移 ⇒ 告警。"""
-        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), None)],
+        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), None)],
                           local=LOCAL_FULL, round_id=11)
         assert [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
 
@@ -341,7 +341,7 @@ class TestCrossCheckGate:
     def test_declared_but_measured_has_dates_alerts(self):
         """**反向**：声明「结构性不可得」但实测有值 ⇒ 声明过时 ⇒ 告警（双向互证）。"""
         with patch.object(engine, "_RECONCILE_UNKNOWN_INCEPTION", frozenset({SID})):
-            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                               local=LOCAL_FULL, round_id=11)
         assert [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
 
@@ -349,7 +349,7 @@ class TestCrossCheckGate:
     def test_stale_snapshot_skips_gate(self):
         """**stale ⇒ `unverified`，不判**——防把「瞬时探不到」误判为**结构性未知**（V5）。"""
         old = _now() - timedelta(days=engine._SNAPSHOT_STALE_DAYS + 1)
-        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", old, None)],
+        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", old, None)],
                           local=LOCAL_FULL, round_id=11)
         assert not [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
 
@@ -368,7 +368,7 @@ class TestCoverLowAlert:
         同一 code 报警，用例就测不到 V7（两者**共用** `sync.inception_cover_low`）。
         """
         with patch.object(engine, "_RECONCILE_UNKNOWN_INCEPTION", frozenset({SID})):
-            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), None)],
+            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), None)],
                               local=LOCAL_FULL, round_id=11,
                               cover_streak=engine._SM_COVER_STALE_ROUNDS)
         assert [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
@@ -376,14 +376,14 @@ class TestCoverLowAlert:
     @needs_db
     def test_below_threshold_no_alert(self):
         with patch.object(engine, "_RECONCILE_UNKNOWN_INCEPTION", frozenset({SID})):
-            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), None)],
+            _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), None)],
                               local=LOCAL_FULL, round_id=11,
                               cover_streak=engine._SM_COVER_STALE_ROUNDS - 1)
         assert not [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
 
     @needs_db
     def test_full_cover_no_alert(self):
-        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+        _o, alerts = _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                           local=LOCAL_FULL, round_id=11,
                           cover_streak=engine._SM_COVER_STALE_ROUNDS + 5)
         assert not [c for c, _t, _b in alerts if c == "sync.inception_cover_low"]
@@ -398,7 +398,7 @@ class TestSummary:
     @needs_db
     def test_scope_and_round_summary_logged(self, caplog):
         with caplog.at_level(logging.INFO, logger="data_sync"):
-            _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), "2026-10-01")],
                  local=LOCAL_MISS_02, round_id=11)
         txt = caplog.text
         assert f"gap_reconcile sync_id={SID}" in txt, txt
@@ -410,7 +410,7 @@ class TestSummary:
     @needs_db
     def test_summary_marks_coverage_gap(self, caplog):
         with caplog.at_level(logging.INFO, logger="data_sync"):
-            _run(_FakeCrypto(), universe=[("BTC.BINANCE", _now(), None)], local=LOCAL_FULL,
+            _run(_FakeCrypto(), universe=[("BTC.XBIN", _now(), None)], local=LOCAL_FULL,
                  round_id=11)
         assert "sm_covered=0/1" in caplog.text
         assert "unknown_inception=1" in caplog.text
@@ -444,11 +444,11 @@ class TestGateConjunction:
         ad = _FakeCrypto()
         out = None
         for rd in range(11, 11 + engine._GAP_JUDGE_ROUNDS):
-            out, _a = _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01")],
+            out, _a = _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01")],
                            local=LOCAL_MISS_02, round_id=rd)
         assert out[SID]["hit_ge_n"] == 1, "前置：已达阈值"
-        out2, _a = _run(ad, universe=[("BTC.BINANCE", _now(), "2026-10-01"),
-                                      ("ETH.BINANCE", _now(), None)],
+        out2, _a = _run(ad, universe=[("BTC.XBIN", _now(), "2026-10-01"),
+                                      ("ETH.XBIN", _now(), None)],
                         local=LOCAL_MISS_02, round_id=11 + engine._GAP_JUDGE_ROUNDS)
         assert out2[SID]["sm_covered"] == 1 and out2[SID]["sm_total"] == 2
         assert out2[SID]["hit_ge_n"] == 0, "抑制轮拿旧 hit_rounds 过门 ＝ 假过门"

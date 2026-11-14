@@ -105,7 +105,7 @@ class _FakeOkx:
             return []
         sym = str(df["okx_symbol"].iloc[0])
         ts = datetime(self._day.year, self._day.month, self._day.day, tzinfo=timezone.utc)
-        return [(sym + ".OKX", freq, ts, 1.0, 2.0, 0.5, 1.5, 10.0, 20.0, None, "okx")]
+        return [(sym + ".XOKX", freq, ts, 1.0, 2.0, 0.5, 1.5, 10.0, 20.0, None, "okx")]
 
 
 def _run(sync_id, adapter, cfg=None, end_date="20260131"):

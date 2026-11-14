@@ -132,8 +132,8 @@ class TestPanelPurifyColumns:
 
     def test_purified_symbol_columns(self, monkeypatch):
         """净化标的：suspended_days=len(_susp) 且 raw_expected>expected（扣停牌可见）。"""
-        rows = [("600000.SHSE", 200, date(2026, 1, 1), date(2026, 12, 31))]
-        susp = {"600000.SHSE": [date(2026, 2, 2), date(2026, 2, 3), date(2026, 2, 4)]}
+        rows = [("600000.XSHG", 200, date(2026, 1, 1), date(2026, 12, 31))]
+        susp = {"600000.XSHG": [date(2026, 2, 2), date(2026, 2, 3), date(2026, 2, 4)]}
         out = self._api(monkeypatch, rows, susp)
         item = out["items"][0]
         assert item["suspended_days"] == 3
@@ -143,12 +143,12 @@ class TestPanelPurifyColumns:
     def test_crypto_and_missing_zero(self, monkeypatch):
         """三态契约：crypto（is_crypto 跳停牌）与 missing 行两列=0。"""
         rows = [
-            ("BTCUSDT.BINANCE", 300, date(2026, 1, 1), date(2026, 12, 31)),  # crypto
-            ("999999.SHSE", 0, None, None),                                    # missing
+            ("BTCUSDT.XBIN", 300, date(2026, 1, 1), date(2026, 12, 31)),  # crypto
+            ("999999.XSHG", 0, None, None),                                    # missing
         ]
         out = self._api(monkeypatch, rows, {})
-        btc = next(i for i in out["items"] if i["symbol"] == "BTCUSDT.BINANCE")
-        miss = next(i for i in out["items"] if i["symbol"] == "999999.SHSE")
+        btc = next(i for i in out["items"] if i["symbol"] == "BTCUSDT.XBIN")
+        miss = next(i for i in out["items"] if i["symbol"] == "999999.XSHG")
         assert btc["suspended_days"] == 0 and btc["raw_expected"] == btc["expected"]
         assert miss["suspended_days"] == 0 and miss["raw_expected"] == 0
 

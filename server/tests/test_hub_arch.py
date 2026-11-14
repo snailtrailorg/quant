@@ -30,8 +30,8 @@ class TestMinuteAggregator:
     def test_minute_end_labeling(self):
         """R-BR9：桶 [10:00,10:01) → ts=10:01:00（Tushare 分钟末口径，评审 F2）。"""
         agg = MinuteAggregator()
-        assert agg.on_tick("600000.SHSE", _tick(0, 5, 10.0, 100)) is None
-        bar = agg.on_tick("600000.SHSE", _tick(1, 2, 10.2, 300))  # 跨分钟 → finalize 上一桶
+        assert agg.on_tick("600000.XSHG", _tick(0, 5, 10.0, 100)) is None
+        bar = agg.on_tick("600000.XSHG", _tick(1, 2, 10.2, 300))  # 跨分钟 → finalize 上一桶
         assert bar is not None
         # 批 56b：流协议 UTC 表示（原 +08:00）——时刻等价（10:01 上海 = 02:01 UTC）
         assert bar["ts"].hour == 2 and bar["ts"].minute == 1 and bar["ts"].second == 0
@@ -40,63 +40,63 @@ class TestMinuteAggregator:
     def test_volume_cumulative_diff(self):
         """S3：XTP qty 当日累计 → 桶 volume=桶末累计−上桶末累计。"""
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(0, 5, 10.0, 1000))
-        agg.on_tick("X.SHSE", _tick(0, 30, 10.1, 1500))
-        bar1 = agg.on_tick("X.SHSE", _tick(1, 2, 10.2, 2000))
+        agg.on_tick("X.XSHG", _tick(0, 5, 10.0, 1000))
+        agg.on_tick("X.XSHG", _tick(0, 30, 10.1, 1500))
+        bar1 = agg.on_tick("X.XSHG", _tick(1, 2, 10.2, 2000))
         assert bar1["volume"] == 500   # minute-0 桶末累计 1500 − 首tick基线 1000（冷启动基线语义）
-        bar2 = agg.on_tick("X.SHSE", _tick(2, 2, 10.3, 3500))
+        bar2 = agg.on_tick("X.XSHG", _tick(2, 2, 10.3, 3500))
         assert bar2["volume"] == 500   # minute-1 桶末累计 2000 − 上桶末 1500（3500 属 minute-2 桶）
 
     def test_cold_start_mid_day_cumulative(self):
         """冷启动缺陷回归（2026-08-17 晚实测）：日内中途起算，首桶 volume 绝不吃当日累计全量。"""
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(0, 5, 10.0, 23_900_000))    # 首见 tick=全天累计 2390万
-        agg.on_tick("X.SHSE", _tick(0, 40, 10.1, 23_900_500))   # 桶内仅 +500
-        bar = agg.on_tick("X.SHSE", _tick(1, 2, 10.2, 23_901_000))
+        agg.on_tick("X.XSHG", _tick(0, 5, 10.0, 23_900_000))    # 首见 tick=全天累计 2390万
+        agg.on_tick("X.XSHG", _tick(0, 40, 10.1, 23_900_500))   # 桶内仅 +500
+        bar = agg.on_tick("X.XSHG", _tick(1, 2, 10.2, 23_901_000))
         assert bar["volume"] == 500  # 只计首 tick 之后的增量，不是 2390 万
 
     def test_ohlc(self):
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(0, 5, 10.0, 100))
-        agg.on_tick("X.SHSE", _tick(0, 20, 10.5, 200))
-        agg.on_tick("X.SHSE", _tick(0, 40, 9.8, 300))
-        agg.on_tick("X.SHSE", _tick(0, 55, 10.2, 400))
-        bar = agg.on_tick("X.SHSE", _tick(1, 2, 10.1, 500))
+        agg.on_tick("X.XSHG", _tick(0, 5, 10.0, 100))
+        agg.on_tick("X.XSHG", _tick(0, 20, 10.5, 200))
+        agg.on_tick("X.XSHG", _tick(0, 40, 9.8, 300))
+        agg.on_tick("X.XSHG", _tick(0, 55, 10.2, 400))
+        bar = agg.on_tick("X.XSHG", _tick(1, 2, 10.1, 500))
         assert (bar["open"], bar["high"], bar["low"], bar["close"]) == (10.0, 10.5, 9.8, 10.2)
 
     def test_untrusted_sparse_bucket(self):
         """R-BR4 双门限：跨度<30s 且 tick<3 → untrusted；低频但跨度大不误报。"""
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(0, 10, 10.0, 100))
-        agg.on_tick("X.SHSE", _tick(0, 12, 10.0, 200))   # 跨度 2s，count=2
-        bar = agg.on_tick("X.SHSE", _tick(1, 2, 10.0, 300))
+        agg.on_tick("X.XSHG", _tick(0, 10, 10.0, 100))
+        agg.on_tick("X.XSHG", _tick(0, 12, 10.0, 200))   # 跨度 2s，count=2
+        bar = agg.on_tick("X.XSHG", _tick(1, 2, 10.0, 300))
         assert bar["untrusted"] is True
 
         agg2 = MinuteAggregator()
-        agg2.on_tick("Y.SHSE", _tick(0, 5, 10.0, 100))
-        agg2.on_tick("Y.SHSE", _tick(0, 45, 10.0, 200))  # 跨度 40s
-        bar2 = agg2.on_tick("Y.SHSE", _tick(1, 2, 10.0, 300))
+        agg2.on_tick("Y.XSHG", _tick(0, 5, 10.0, 100))
+        agg2.on_tick("Y.XSHG", _tick(0, 45, 10.0, 200))  # 跨度 40s
+        bar2 = agg2.on_tick("Y.XSHG", _tick(1, 2, 10.0, 300))
         assert bar2["untrusted"] is False
 
     def test_flush_minute_selective_and_idempotent(self):
         """P2 修复批(08-28):分窗 finalize 替代 flush_all——11:30 窗只收 11:29 桶,
         15:01 窗只收 15:00 桶(收盘竞价聚齐后);pop 语义幂等(盲审 B-P1-1 宽窗重跑无重复)。"""
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(29, 30, 10.0, 100, hour=11))   # [11:29] 桶在桶
-        agg.on_tick("Y.SHSE", _tick(0, 10, 9.07, 1_000, hour=15))  # [15:00] 桶在桶
+        agg.on_tick("X.XSHG", _tick(29, 30, 10.0, 100, hour=11))   # [11:29] 桶在桶
+        agg.on_tick("Y.XSHG", _tick(0, 10, 9.07, 1_000, hour=15))  # [15:00] 桶在桶
         bars = agg.flush_minute(11 * 60 + 29)
-        assert [b["symbol"] for b in bars] == ["X.SHSE"]
+        assert [b["symbol"] for b in bars] == ["X.XSHG"]
         assert agg.flush_minute(11 * 60 + 29) == []   # pop 幂等
         assert agg.flush_minute(10 * 60 + 29) == []   # 其他 slot 不误收
         bars2 = agg.flush_minute(15 * 60)
-        assert [b["symbol"] for b in bars2] == ["Y.SHSE"]
+        assert [b["symbol"] for b in bars2] == ["Y.XSHG"]
 
     def test_flush_minute_closing_volume_and_untrusted_exempt(self):
         """15:00 桶:竞价快照累计差=收盘量(四分类③修复语义);单笔稀疏不误报
         untrusted(盲审 A-P1-1:closing 豁免集含 900,防消费方滤丢收盘竞价根)。"""
         agg = MinuteAggregator()
-        agg.on_tick("Y.SHSE", _tick(0, 5, 9.07, 10_000, hour=15))            # 首笔建基线
-        agg.on_tick("Y.SHSE", _tick(0, 8, 9.07, 10_000 + 862_300, hour=15))  # 竞价量跳变
+        agg.on_tick("Y.XSHG", _tick(0, 5, 9.07, 10_000, hour=15))            # 首笔建基线
+        agg.on_tick("Y.XSHG", _tick(0, 8, 9.07, 10_000 + 862_300, hour=15))  # 竞价量跳变
         [bar] = agg.flush_minute(15 * 60)
         assert bar["volume"] == 862_300
         assert bar["untrusted"] is False
@@ -105,9 +105,9 @@ class TestMinuteAggregator:
         """15:01 窗日终兜底(代码盲审 A-P2-b):盘中断流滞留桶([10:25] 后无 tick)
         当日收口防次日丢根。"""
         agg = MinuteAggregator()
-        agg.on_tick("Z.SHSE", _tick(25, 30, 10.0, 100))
+        agg.on_tick("Z.XSHG", _tick(25, 30, 10.0, 100))
         [bar] = agg.flush_rest()
-        assert bar["symbol"] == "Z.SHSE"
+        assert bar["symbol"] == "Z.XSHG"
         assert bar["ts"].hour == 2 and bar["ts"].minute == 26   # 批 56b UTC 表示（10:26 上海）
 
 

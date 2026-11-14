@@ -25,7 +25,7 @@ class _Adapter:
 
 def _strategy():
     cfg = StrategyConfig(id="s-wire", name="w", type="astock_analysis",
-                         symbol="600000.SHSE", adapter="xtp")
+                         symbol="600000.XSHG", adapter="xtp")
     st = Strategy(cfg, _Adapter())
     st.account_id = None
     st.operator = "tester"
@@ -33,14 +33,14 @@ def _strategy():
 
 
 def _sig():
-    return Signal(action=Action.BUY, symbol="600000.SHSE", volume=100, price=10.0, reason="t")
+    return Signal(action=Action.BUY, symbol="600000.XSHG", volume=100, price=10.0, reason="t")
 
 
 def _rules(state="fresh"):
     from src.data_platform.rules import RuleSet, _DummyAcc
     ins = SimpleNamespace(tick_size=0.01, price_band=None, lot_size=100, order_types=[],
                           sellable_rule="volume_minus_frozen", venue_flags={},
-                          position_side="long_only", t_plus=1, order_range=None, symbol="600000.SHSE")
+                          position_side="long_only", t_plus=1, order_range=None, symbol="600000.XSHG")
     return RuleSet(ms=None, ins=ins, acc=_DummyAcc({"opponent_depth": 1, "aggression": 0.1,
                                                     "max_order_qty": 100000}), state=state)
 

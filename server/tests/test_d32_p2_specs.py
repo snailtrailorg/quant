@@ -27,7 +27,7 @@ def test_market_spec_astock():
 
 
 def test_stock_instrument_spec():
-    ins = InstrumentSpec.of("600000.SHSE")
+    ins = InstrumentSpec.of("600000.XSHG")
     assert ins.category == "stock" and float(ins.tick_size) == 0.01
     assert ins.lot_size == 100 and ins.t_plus == 1
     assert ins.price_band and ins.price_band["normal_pct"] == 10.0
@@ -35,7 +35,7 @@ def test_stock_instrument_spec():
 
 
 def test_convertible_has_no_band_row():
-    ins = InstrumentSpec.of("110000.SHSE")
+    ins = InstrumentSpec.of("110000.XSHG")
     assert ins.category == "convertible" and float(ins.tick_size) == 0.001
     assert ins.t_plus == 0
     # 转债无 band_rules 行：price_band=None（由 tick.lower_limit 兜底，不能当 0）
@@ -43,7 +43,7 @@ def test_convertible_has_no_band_row():
 
 
 def test_perp_defaults_and_unverified_flag():
-    ins = InstrumentSpec.of("BTCUSDT.BINANCE")
+    ins = InstrumentSpec.of("BTCUSDT.XBIN")
     assert ins.category == "perp" and ins.position_side == "both"
     assert ins.t_plus == 0 and ins.lot_size == 1
     assert ins.price_band is None

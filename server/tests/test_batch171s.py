@@ -143,10 +143,10 @@ class TestS1SameSourceQuote:
         tick = {"last": 12.3, "pre_close": 12.0, "upper_limit": 13.2,
                 "lower_limit": 10.8, "bid": [12.29], "ask": [12.31], "ts": "123"}
         r = business_redis(decode_responses=True, socket_timeout=2)
-        key = f"hub:latest_tick:{ACC_A}:600000.SHSE"
+        key = f"hub:latest_tick:{ACC_A}:600000.XSHG"
         try:
             r.set(key, json.dumps(tick), ex=30)
-            # 输入 .SSE → 必须按 .SHSE 归一后读到（键逐字符对齐 hub 写入侧）
+            # 输入 .SSE → 必须按 .XSHG 归一后读到（键逐字符对齐 hub 写入侧）
             assert get_hub_tick(ACC_A, "600000.SSE") == tick
         finally:
             r.delete(key)
@@ -157,7 +157,7 @@ class TestS1SameSourceQuote:
         from src.strategy_runner import trading as T
         from src.quant_common.redis_client import business_redis
         r = business_redis(decode_responses=True, socket_timeout=2)
-        key = f"hub:latest_tick:{ACC_A}:600000.SHSE"
+        key = f"hub:latest_tick:{ACC_A}:600000.XSHG"
         tick = {"last": 12.3, "bid": [12.2], "ask": [12.4]}
         try:
             r.set(key, json.dumps(tick), ex=30)
@@ -177,7 +177,7 @@ class TestS1SameSourceQuote:
         from src.data_platform.hub_quote import get_hub_tick
         from src.quant_common.redis_client import business_redis
         r = business_redis(decode_responses=True, socket_timeout=2)
-        bad_key = f"hub:latest_tick:{ACC_B}:600003.SHSE"
+        bad_key = f"hub:latest_tick:{ACC_B}:600003.XSHG"
         try:
             r.delete(bad_key)
             with caplog.at_level(logging.WARNING, logger="src.data_platform.hub_quote"):
@@ -201,8 +201,8 @@ class TestS2DirectionAndPricing:
 
     def test_adapter_price_rules_matrix(self):
         a = _Adapter([])
-        lng = _pos("600000.SHSE")
-        sht = _pos("BTCUSDT.BINANCE", direction="direction_short")
+        lng = _pos("600000.XSHG")
+        sht = _pos("BTCUSDT.XBIN", direction="direction_short")
         with _patch_rules():
             assert a.close_action(lng) == "SELL"
             assert a.close_action(sht) == "BUY", "direction_short 必须派生 BUY（买回平空）"
@@ -223,7 +223,7 @@ class TestS2DirectionAndPricing:
         """构造 direction_short 持仓驱动**整链**：Order.action/order_log.action 均 BUY。"""
         from src.data_platform.db import get_conn
         from src.strategy_runner import trading as T
-        pos = _pos("BTCUSDT.BINANCE", volume=1, direction="direction_short")
+        pos = _pos("BTCUSDT.XBIN", volume=1, direction="direction_short")
         adapter = _Adapter(position_seq=[[pos], []])
         rc = _real_rc(halted=True)
         req = "s2" + uuid.uuid4().hex[:8]
@@ -260,11 +260,11 @@ class TestS2DirectionAndPricing:
         """真 check_order：halted 下急停 BUY 平空放行、普通 BUY 开仓仍拒（不放松风控）。"""
         rc = _real_rc(halted=True)
         d_flat = rc.check_order(
-            {"symbol": "BTCUSDT.BINANCE", "action": "BUY", "volume": 1,
+            {"symbol": "BTCUSDT.XBIN", "action": "BUY", "volume": 1,
              "price": 50000, "reason": "emergency_close_all"}, account_id=None)
         assert d_flat.approved is True and d_flat.rule != "HALTED"
         d_open = rc.check_order(
-            {"symbol": "BTCUSDT.BINANCE", "action": "BUY", "volume": 1,
+            {"symbol": "BTCUSDT.XBIN", "action": "BUY", "volume": 1,
              "price": 50000, "operator": "u"}, account_id=None)
         assert d_open.approved is False and d_open.rule == "HALTED"
 
@@ -276,7 +276,7 @@ class TestS3ReQuoteEveryRound:
 
     def test_two_retry_rounds_use_different_prices(self):
         from src.strategy_runner import trading as T
-        pos = _pos("600000.SHSE", volume=100)
+        pos = _pos("600000.XSHG", volume=100)
         # 四拍：第1轮初始/复查、第2轮初始/复查（复查空=终局）
         adapter = _Adapter(position_seq=[[pos], [pos], [pos], []])
         adapter.close_reference_price = lambda tick, p, action: float(tick["px"])
@@ -368,7 +368,7 @@ def wired_worker():
     strategy = _StubStrategy()
     adapter = MagicMock()
     ctx = {
-        "tid": 41002, "sid": "smoke", "symbol": "X.SHSE", "strategy": strategy,
+        "tid": 41002, "sid": "smoke", "symbol": "X.XSHG", "strategy": strategy,
         "adapter": adapter, "event_engine": MagicMock(),
         "td_api": SimpleNamespace(connect_status=True), "history": [],
         "frozen": {"now": False, "sticky": False, "sticky_cause": None},
@@ -490,7 +490,7 @@ class TestS5TerminationAndVisibility:
 
     def test_valkey_down_escalates_alert_and_does_not_spin(self):
         from src.strategy_runner import trading as T
-        pos = _pos("600000.SHSE")
+        pos = _pos("600000.XSHG")
         adapter = _Adapter(position_seq=[[pos], []])
         rc = MagicMock()
         rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
@@ -543,9 +543,9 @@ class TestS6AuditClaimChain:
         req = "s6" + uuid.uuid4().hex[:8]
         oid1 = oid2 = None
         try:
-            oid1, cid1 = T._close_order_open("600000.SHSE", 100, 10.0, None, "t",
+            oid1, cid1 = T._close_order_open("600000.XSHG", 100, 10.0, None, "t",
                                              req, 1, "SELL")
-            oid2, cid2 = T._close_order_open("600000.SHSE", 200, 10.0, None, "t",
+            oid2, cid2 = T._close_order_open("600000.XSHG", 200, 10.0, None, "t",
                                              req, 2, "SELL")
             assert oid1 and oid2 and cid1 != cid2, "两笔拆单=两行、client_order_id 各异"
             with get_conn() as c:
@@ -568,15 +568,15 @@ class TestS6AuditClaimChain:
 
             # 路①：vt_orderid 命中
             T.write_order_status(
-                OrderState(orderid="", vt_orderid="XTP.9001", symbol="600000.SHSE",
+                OrderState(orderid="", vt_orderid="XTP.9001", symbol="600000.XSHG",
                            direction=Direction.LONG, status=OrderStatus.ALL_TRADED,
-                           volume=100, traded=100, price=10.0), adapter, "s6", "600000.SHSE")
+                           volume=100, traded=100, price=10.0), adapter, "s6", "600000.XSHG")
             # 路②：vt 行不存在 → _vt2cid → client_order_id 认领（真库 `<> ALL` 执行）
             adapter._vt2cid["CLAIM.2"] = cid2
             T.write_order_status(
-                OrderState(orderid="", vt_orderid="CLAIM.2", symbol="600000.SHSE",
+                OrderState(orderid="", vt_orderid="CLAIM.2", symbol="600000.XSHG",
                            direction=Direction.LONG, status=OrderStatus.ALL_TRADED,
-                           volume=200, traded=200, price=10.0), adapter, "s6", "600000.SHSE")
+                           volume=200, traded=200, price=10.0), adapter, "s6", "600000.XSHG")
             with get_conn() as c:
                 got = dict(c.execute(
                     "SELECT client_order_id, status FROM order_log "
@@ -594,7 +594,7 @@ class TestS6AuditClaimChain:
 # ─────────────────────── S7 持仓标的进订阅真相源 ───────────────────────
 
 class TestS7SubscriptionSource:
-    """持仓源不按 account 过滤 / 不做 .SSE→.SHSE 归一 → 本类红。"""
+    """持仓源不按 account 过滤 / 不做 .SSE→.XSHG 归一 → 本类红。"""
 
     @pytest.mark.skipif(not _db_up(), reason="真库不可用")
     def test_desired_symbols_includes_positions_normalized_and_account_filtered(self):
@@ -637,10 +637,10 @@ class TestS7SubscriptionSource:
                         "VALUES (%s,%s,'xtp','astock','{}')", (aid, f"s7-{aid}"))
                 c.execute(
                     "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
-                    "VALUES (%s,'689997.SHSE','direction_net',100,0)", (acc_a,))
+                    "VALUES (%s,'689997.XSHG','direction_net',100,0)", (acc_a,))
                 c.execute(
                     "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
-                    "VALUES (%s,'689996.SHSE','direction_net',100,0)", (acc_b,))
+                    "VALUES (%s,'689996.XSHG','direction_net',100,0)", (acc_b,))
                 c.commit()
             old = os.environ.get("ACCOUNT_ID")
             os.environ["ACCOUNT_ID"] = str(acc_a)
@@ -670,8 +670,8 @@ class TestS7SubscriptionSource:
             sm = {h.name: h for h in captured["loop"]._hooks}["subs-poll"].fn.__self__
             assert isinstance(sm, SubscriptionManager)
             want = sm._desired()
-            assert "689997.SHSE" in want, "持仓 .SSE 必须归一 .SHSE 进订阅集"
-            assert "689996.SHSE" not in want and "689996.SHSE" not in want, \
+            assert "689997.XSHG" in want, "持仓 .SSE 必须归一 .XSHG 进订阅集"
+            assert "689996.XSHG" not in want and "689996.XSHG" not in want, \
                 "他账号持仓标的不得到本 hub 订阅（account_id 过滤失效=红）"
         finally:
             with get_conn() as c:
@@ -755,7 +755,7 @@ class TestS8AccountClosePolicy:
             a = _Adapter([])
             a.account_id = acc_id
             assert a.close_policy()["aggression"] == 0.25
-            assert a.max_close_order_qty("600000.SHSE") == 500
+            assert a.max_close_order_qty("600000.XSHG") == 500
         finally:
             with get_conn() as c:
                 c.execute("UPDATE trading_account SET params=%s::jsonb WHERE id=%s",

@@ -24,8 +24,8 @@ def _state(**kw):
     return RiskState(halted=False, total_drawdown=0.0, daily_loss=0.0, available=True, **kw)
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "tester"}
-SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
+BUY = {"symbol": "600000.XSHG", "action": "BUY", "volume": 100, "price": 10.0, "operator": "tester"}
+SELL = {"symbol": "600000.XSHG", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
 
 
 class TestAccountAllowsCheckOrder:

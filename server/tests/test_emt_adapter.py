@@ -164,7 +164,7 @@ def test_send_order_market_type_and_market_swap(fake_binding):
     """市价钉 BEST5_OR_CANCEL；market 后缀→EMT 枚举对调映射（SHSE→SH_A=2）。"""
     a = _bare_adapter()
     a._api.InsertOrder.return_value = 9001
-    cid = a.send_order(Order(symbol="600000.SHSE", action="BUY", volume=100,
+    cid = a.send_order(Order(symbol="600000.XSHG", action="BUY", volume=100,
                              price=0.0, order_type="market"))
     assert cid == "t7:e1:c1"
     req = a._api.InsertOrder.call_args.args[0]
@@ -176,14 +176,14 @@ def test_send_order_market_type_and_market_swap(fake_binding):
 def test_send_order_fail_returns_none(fake_binding):
     a = _bare_adapter()
     a._api.InsertOrder.return_value = 0
-    assert a.send_order(Order(symbol="600000.SHSE", action="BUY", volume=1, price=1.0)) is None
+    assert a.send_order(Order(symbol="600000.XSHG", action="BUY", volume=1, price=1.0)) is None
 
 
 def test_send_order_session_dead_fail_fast(fake_binding):
     a = _bare_adapter()
     a._session_id = 0
     with pytest.raises(RuntimeError, match="session"):
-        a.send_order(Order(symbol="600000.SHSE", action="BUY", volume=1, price=1.0))
+        a.send_order(Order(symbol="600000.XSHG", action="BUY", volume=1, price=1.0))
 
 
 # --- 分帧聚合 ---
@@ -193,7 +193,7 @@ def test_query_position_frames_and_mapping(fake_binding):
 
     class _Pos:
         ticker = "510300"
-        market = 1          # SZ_A → .SZSE
+        market = 1          # SZ_A → .XSHE
         total_qty = 1000
         sellable_qty = 400  # T+1：frozen=600
         avg_price = 3.5
@@ -208,7 +208,7 @@ def test_query_position_frames_and_mapping(fake_binding):
     out = a.query_position()
     assert len(out) == 2
     p = out[0]
-    assert p.symbol == "510300.SZSE" and p.volume == 1000 and p.frozen == 600
+    assert p.symbol == "510300.XSHE" and p.volume == 1000 and p.frozen == 600
     assert p.yd_volume == 1000 and p.avg_price == 3.5
 
 

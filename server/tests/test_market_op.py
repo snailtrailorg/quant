@@ -80,8 +80,8 @@ def _rc():
     return c
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "u1"}
-SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "u1"}
+BUY = {"symbol": "600000.XSHG", "action": "BUY", "volume": 100, "price": 10.0, "operator": "u1"}
+SELL = {"symbol": "600000.XSHG", "action": "SELL", "volume": 100, "price": 10.0, "operator": "u1"}
 
 
 class TestCheckOrderMarketOp:
@@ -163,7 +163,7 @@ class TestOperatorInjection:
         from src.strategy_framework.strategy import Strategy, StrategyConfig, Signal, Action
 
         cfg = StrategyConfig(id="t15", name="t", type="astock_analysis",
-                             symbol="600000.SHSE", adapter="xtp")
+                             symbol="600000.XSHG", adapter="xtp")
         s = Strategy(cfg, None)
         s.operator = "bernard"
 
@@ -179,7 +179,7 @@ class TestOperatorInjection:
                 return RiskDecision(approved=False, reason="拒（仅捕获 order）")
 
         with patch("src.risk_control.risk.RiskControl.get", return_value=FakeRC()):
-            s.place_order(Signal(action=Action.BUY, score=0.5, symbol="600000.SHSE",
+            s.place_order(Signal(action=Action.BUY, score=0.5, symbol="600000.XSHG",
                                  volume=100, price=10.0, reason="t"))
         assert captured.get("operator") == "bernard"
 
@@ -188,7 +188,7 @@ class TestOperatorInjection:
         from src.strategy_framework.strategy import Strategy, StrategyConfig, Signal, Action
 
         cfg = StrategyConfig(id="t15b", name="t", type="astock_analysis",
-                             symbol="600000.SHSE", adapter="xtp")
+                             symbol="600000.XSHG", adapter="xtp")
         s = Strategy(cfg, None)   # 不设 operator → ""
 
         captured = {}
@@ -202,7 +202,7 @@ class TestOperatorInjection:
                 from src.risk_control.risk import RiskDecision
                 return RiskDecision(approved=False, reason="拒（仅捕获 order）")
 
-        sig = Signal(action=Action.BUY, score=0.5, symbol="600000.SHSE",
+        sig = Signal(action=Action.BUY, score=0.5, symbol="600000.XSHG",
                      volume=100, price=10.0, reason="t")
         sig.operator = "attacker"   # 恶意自报
         with patch("src.risk_control.risk.RiskControl.get", return_value=FakeRC()):

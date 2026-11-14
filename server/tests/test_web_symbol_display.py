@@ -1,4 +1,4 @@
-"""批175f 守门：前端**展示**标的必须带交易所后缀（`600000.SHSE`）。
+"""批175f 守门：前端**展示**标的必须带交易所后缀（`600000.XSHG`）。
 
 背景：批175（标的主标识归一）把入站/落库/读侧都归一到 vt，但漏了"显示层"——
 `Trading.vue`/`Dashboard.vue` 用 `(row.symbol||'').split('.')[0]` 把后缀剥掉，
@@ -6,7 +6,7 @@
 
 不覆盖（非展示，允许）：
 - 选股页 `_key = (s) => (s||'').split('.')[0]`：行匹配键，不上屏；
-- `.SZ/.SH → .SZSE/.SHSE` 的**入参**转换（LiveTask/PaperTrade 的 `EX` 表）。
+- `.SZ/.SH → .XSHE/.XSHG` 的**入参**转换（LiveTask/PaperTrade 的 `EX` 表）。
 """
 from pathlib import Path
 
@@ -61,7 +61,7 @@ def test_screen_rows_expose_vt_symbol():
          patch.object(SC, "build_base_from", return_value="SELECT 1 AS ts_code"):
         out = SC.run_query("stock", [], "", [], 10, [])
     syms = [r["vt_symbol"] for r in out["rows"]]
-    assert syms == ["601939.SHSE", "920085.BSE"]
+    assert syms == ["601939.XSHG", "920085.BJSE"]
     assert out["rows"][0]["ts_code"] == "601939.SH"      # 源口径保留（join 用）
 
 
@@ -82,7 +82,7 @@ def test_screen_astock_api_exposes_vt_symbol():
     row = ("601939.SH", "建设银行", 12.1, 9.3, 8.9, 0.86, 1.3, 3.1e8, 1.1e8, 4.8, 2.0, None, None)
     with patch.object(R, "get_conn", return_value=_fake_conn([row])):
         out = R.screen_astock_api(payload={})
-    assert out[0]["vt_symbol"] == "601939.SHSE" and out[0]["ts_code"] == "601939.SH"
+    assert out[0]["vt_symbol"] == "601939.XSHG" and out[0]["ts_code"] == "601939.SH"
 
 
 def test_screen_cb_api_exposes_vt_symbol():
@@ -92,8 +92,8 @@ def test_screen_cb_api_exposes_vt_symbol():
            123.4, 12.1, 130.0, 5.0)
     with patch.object(R, "get_conn", return_value=_fake_conn([row])):
         out = R.screen_cb_api(payload={})
-    assert out[0]["vt_symbol"] == "113056.SHSE"
-    assert out[0]["stk_vt_symbol"] == "601963.SHSE"
+    assert out[0]["vt_symbol"] == "113056.XSHG"
+    assert out[0]["stk_vt_symbol"] == "601963.XSHG"
 
 
 def test_screen_etf_api_exposes_vt_symbol():
@@ -102,4 +102,4 @@ def test_screen_etf_api_exposes_vt_symbol():
     row = ("158907.SZ", "国泰鑫汇", "国泰基金", "股票型", None, 12.0, 0.5, 1.0)
     with patch.object(R, "get_conn", return_value=_fake_conn([row])):
         out = R.screen_etf_api(payload={})
-    assert out[0]["vt_symbol"] == "158907.SZSE"
+    assert out[0]["vt_symbol"] == "158907.XSHE"

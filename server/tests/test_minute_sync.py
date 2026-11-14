@@ -45,7 +45,7 @@ def test_to_save_rows_min():
     rows = to_save_rows_min(_fake_minute_df(), "1min")
     assert len(rows) == 1
     row = rows[0]
-    assert row[0] == "600000.SHSE"   # vt_symbol
+    assert row[0] == "600000.XSHG"   # vt_symbol
     assert row[1] == "1min"          # freq
     assert row[3] == 10.0            # open
     assert row[6] == 10.1            # close

@@ -16,14 +16,14 @@ TRADER = {"sub": "2", "username": "trader", "role": "trader", "db_role": "trader
 VIEWER = {"sub": "3", "username": "viewer", "role": "viewer", "db_role": "viewer"}
 
 
-def _conn(row=("running", "600000.SHSE")):
+def _conn(row=("running", "600000.XSHG")):
     conn = MagicMock()
     conn.__enter__.return_value = conn
     conn.execute.return_value = MagicMock(fetchone=MagicMock(return_value=row))
     return conn
 
 
-def _conn_for_task_mode(mode="live", row=("running", "600000.SHSE")):
+def _conn_for_task_mode(mode="live", row=("running", "600000.XSHG")):
     """批 86-B：`assert_task_perm` 会**额外查一次** `live_task.mode`（在 auth 模块里
     import `get_conn`，与 trading 模块的补丁**不是同一个符号**）。
 
@@ -75,7 +75,7 @@ class TestUnfreezeWebEndpoint:
                    return_value={"operator": "admin"}) as req, \
              patch("src.web_api.routes.trading.audit_log") as au:
             out = _call_endpoint("trading", "unfreeze_live_task", 5, body=None, payload=ADMIN)
-        assert out["ok"] and out["channel"] == "manual_web" and out["symbol"] == "600000.SHSE"
+        assert out["ok"] and out["channel"] == "manual_web" and out["symbol"] == "600000.XSHG"
         assert req.call_args.kwargs["channel"] == "manual_web"
         assert req.call_args.args[0] == 5
         assert au.call_args.args[1] == "unfreeze_live_task"
@@ -137,7 +137,7 @@ class TestUnfreezeWebEndpoint:
     def test_preview_endpoint_peek_only(self):
         """预览端点只读不消费（页面刷新多次不应把 token 吃掉）。"""
         with patch("src.data_platform.freeze_event.peek_confirm_token",
-                   return_value={"tid": 5, "symbol": "600000.SHSE", "freeze_type": "ts_gap",
+                   return_value={"tid": 5, "symbol": "600000.XSHG", "freeze_type": "ts_gap",
                                  "operator": "william", "created_at": 1}) as peek:
             out = _call_endpoint("trading", "get_unfreeze_request", token="tok", payload=ADMIN)
         assert out["tid"] == 5 and out["freeze_type"] == "ts_gap"
@@ -199,7 +199,7 @@ class TestImTaskUnfreezeTool:
                    return_value="TOKEN123") as mk, \
              patch("src.data_platform.freeze_event.list_events", return_value=[]), \
              patch("src.data_platform.db.get_conn",
-                   return_value=MagicMock(**{"__enter__.return_value.execute.return_value.fetchone.return_value": ("600000.SHSE",)})), \
+                   return_value=MagicMock(**{"__enter__.return_value.execute.return_value.fetchone.return_value": ("600000.XSHG",)})), \
              patch("src.data_platform.audit.audit_log"), \
              patch("src.data_platform.freeze_event.request_unfreeze") as req:
             from src.im_bot.feishu_client import execute_confirmed_tool

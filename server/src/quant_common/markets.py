@@ -38,8 +38,9 @@ def market_of_symbol(symbol: str) -> str:
     return EXCHANGES.get(suffix, {}).get("market", "astock")
 
 EXCHANGES: dict[str, dict] = {
-    "SHSE": {"market": "astock"}, "SZSE": {"market": "astock"}, "BSE": {"market": "astock"},
-    "BINANCE": {"market": "crypto"}, "OKX": {"market": "crypto"},
+    # 批177：键 = 内部 canonical venue 码（ISO MIC；crypto 自定义）
+    "XSHG": {"market": "astock"}, "XSHE": {"market": "astock"}, "BJSE": {"market": "astock"},
+    "XBIN": {"market": "crypto"}, "XOKX": {"market": "crypto"},
 }
 
 # 批 127 Step3（contract）：正名完成——单键 listed_fund（etf 键 0153 已清，

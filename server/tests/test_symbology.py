@@ -11,28 +11,28 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.mark.parametrize("inp,out", [
-    ("600036.SHSE", "600036.SHSE"), ("600036.SSE", "600036.SHSE"),
-    ("600036.XSHG", "600036.SHSE"), ("600036.SH", "600036.SHSE"),
-    ("000001.SZSE", "000001.SZSE"), ("000001.XSHE", "000001.SZSE"), ("000001.SZ", "000001.SZSE"),
-    ("830799.BSE", "830799.BSE"), ("830799.BJSE", "830799.BSE"), ("830799.BJ", "830799.BSE"),
-    ("BTCUSDT.BINANCE", "BTCUSDT.BINANCE"), ("BTCUSDT.OKX", "BTCUSDT.OKX"),
-    ("600036.shse", "600036.SHSE"),
+    ("600036.XSHG", "600036.XSHG"), ("600036.SSE", "600036.XSHG"),
+    ("600036.XSHG", "600036.XSHG"), ("600036.SH", "600036.XSHG"),
+    ("000001.XSHE", "000001.XSHE"), ("000001.XSHE", "000001.XSHE"), ("000001.SZ", "000001.XSHE"),
+    ("830799.BJSE", "830799.BJSE"), ("830799.BJSE", "830799.BJSE"), ("830799.BJ", "830799.BJSE"),
+    ("BTCUSDT.XBIN", "BTCUSDT.XBIN"), ("BTCUSDT.XOKX", "BTCUSDT.XOKX"),
+    ("600036.shse", "600036.XSHG"),
 ])
 def test_canonical(inp, out):
     assert S.canonical(inp) == out
     assert S.canonical(S.canonical(inp)) == out          # 幂等
 
 
-@pytest.mark.parametrize("bad", ["600036", "600036.", ".SHSE", "", "600036.UNKNOWN"])
+@pytest.mark.parametrize("bad", ["600036", "600036.", ".XSHG", "", "600036.UNKNOWN"])
 def test_canonical_rejects(bad):
     with pytest.raises(ValueError):
         S.canonical(bad)
 
 
 @pytest.mark.parametrize("inp,mic", [
-    ("600036.SHSE", "XSHG"), ("000001.SZSE", "XSHE"), ("830799.BSE", "BJSE"),
+    ("600036.XSHG", "XSHG"), ("000001.XSHE", "XSHE"), ("830799.BJSE", "BJSE"),
     ("600036.SSE", "XSHG"),
-    ("BTCUSDT.BINANCE", None), ("BTCUSDT.OKX", None), ("600036", None), ("x.UNKNOWN", None),
+    ("BTCUSDT.XBIN", None), ("BTCUSDT.XOKX", None), ("600036", None), ("x.UNKNOWN", None),
 ])
 def test_to_mic(inp, mic):
     assert S.to_mic(inp) == mic
@@ -53,14 +53,14 @@ def test_vt_suffix_rejects(bad):
         S.vt_suffix(bad)
 
 
-@pytest.mark.parametrize("inp", ["600036.SHSE", "600036.SSE", "600036.SH", "600036.XSHG"])
+@pytest.mark.parametrize("inp", ["600036.XSHG", "600036.SSE", "600036.SH", "600036.XSHG"])
 def test_aliases_bidirectional_shanghai(inp):
-    assert S.aliases(inp) == {"600036.SHSE", "600036.SSE"}
+    assert S.aliases(inp) == {"600036.XSHG", "600036.SSE"}
 
 
 def test_aliases_shenzhen_and_crypto_single():
-    assert S.aliases("000001.SZSE") == {"000001.SZSE"}
-    assert S.aliases("BTCUSDT.BINANCE") == {"BTCUSDT.BINANCE"}
+    assert S.aliases("000001.XSHE") == {"000001.XSHE"}
+    assert S.aliases("BTCUSDT.XBIN") == {"BTCUSDT.XBIN"}
 
 
 def test_mic_tables_consistent():

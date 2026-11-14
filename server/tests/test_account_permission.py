@@ -54,7 +54,7 @@ def _call(attr, perm=None, st=None, _st_in_list=False):
     conn.__enter__.return_value = conn
     with patch("src.data_platform.security_master.SMClient", return_value=sm), \
          patch("src.data_platform.db.get_conn", return_value=conn):
-        return account_allows(1, "600000.SHSE")
+        return account_allows(1, "600000.XSHG")
 
 
 class TestAccountAllows:
@@ -139,8 +139,8 @@ class TestAccountPermissionSeed:
                 "ORDER BY id LIMIT 1").fetchone()
         if vid is None:
             pytest.skip("无 xtp 交易 account")
-        assert account_allows(vid[0], "600000.SHSE") is True
-        assert account_allows(999999, "600000.SHSE") is False   # 不存在 account fail-closed
+        assert account_allows(vid[0], "600000.XSHG") is True
+        assert account_allows(999999, "600000.XSHG") is False   # 不存在 account fail-closed
 
 
 class TestAccountPermissionEndpoint:

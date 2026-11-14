@@ -67,7 +67,7 @@ def test_aggregate_success_no_flag():
     ts_lo = datetime(2026, 9, 28, 7, 0, tzinfo=timezone.utc)
     ts_hi = datetime(2026, 9, 30, 7, 0, tzinfo=timezone.utc)
     heavy = MagicMock()
-    heavy.execute.return_value = _cursor(rows=[("600000.SHSE", 3, ts_lo, ts_hi)])
+    heavy.execute.return_value = _cursor(rows=[("600000.XSHG", 3, ts_lo, ts_hi)])
 
     p1, p2, p3 = _patches(_sym_conn(rows), heavy)
     with p1, p2, p3:

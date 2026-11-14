@@ -19,7 +19,7 @@ from src.quant_common.contract import (
 from src.data_platform.tz import as_utc
 
 
-def _row(sym="600000.SHSE", ts=None):
+def _row(sym="600000.XSHG", ts=None):
     ts = ts or as_utc(datetime(2026, 9, 21, 9, 31))
     return (sym, "1D", ts, 1.0, 1.0, 1.0, 1.0, 100, 100000.0, 1.0, "tushare")
 
@@ -31,7 +31,7 @@ class TestToContract:
         assert len(f.rows) == 1 and f.fetched_at.tzinfo == timezone.utc
 
     def test_naive_ts_rejected(self):
-        r = ("600000.SHSE", "1D", datetime(2026, 9, 21, 9, 31), 1, 1, 1, 1, 100, 100000, 1, "t")
+        r = ("600000.XSHG", "1D", datetime(2026, 9, 21, 9, 31), 1, 1, 1, 1, 100, 100000, 1, "t")
         with pytest.raises(ContractError):
             to_contract([r], source="t", kind="bar_daily", freq="1D")
 
@@ -47,7 +47,7 @@ class TestToContract:
 class TestFetchDispatch:
     """fetch (kind,sub_kind) 分派——mock pull（不真拉网络）；sync_id 不进签名（用户裁定）。"""
 
-    def _req(self, kind, sub=None, symbols=("600000.SHSE",), start="20260901", end="20260921",
+    def _req(self, kind, sub=None, symbols=("600000.XSHG",), start="20260901", end="20260921",
              freq="1D", mode="consume"):
         return DataRequest(
             kind=kind, symbols=symbols, temporality="historical", sub_kind=sub, freq=freq,
@@ -199,7 +199,7 @@ class TestQualityHook:
     """批 72 双盲 P2-3：fetch 内质量挂钩钉（fail-soft 吞 MagicMock 的掩盖面对治——
     真 df 行为级断言挂钩真被调+label 词表+空 df 闸）。"""
 
-    def _req(self, kind, sub=None, symbols=("600000.SHSE",), freq="1D", mode="consume"):
+    def _req(self, kind, sub=None, symbols=("600000.XSHG",), freq="1D", mode="consume"):
         return DataRequest(
             kind=kind, symbols=symbols, temporality="historical", sub_kind=sub, freq=freq,
             range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)), mode=mode)

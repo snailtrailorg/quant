@@ -242,7 +242,7 @@ def _vnpy_exchange(ex: str):
     """
     from vnpy.trader.constant import Exchange
     from src.quant_common.symbology import vt_suffix
-    mapping = {"SHSE": Exchange.SSE, "SZSE": Exchange.SZSE, "BSE": Exchange.BSE}
+    mapping = {"XSHG": Exchange.SSE, "XSHE": Exchange.SZSE, "BJSE": Exchange.BSE}
     try:
         return mapping.get(vt_suffix(ex), Exchange.SSE)
     except ValueError:      # 未知 → 保持历史缺省（原 mapping.get 缺省即 Exchange.SSE）
@@ -507,7 +507,7 @@ def _load_emt_binding():
     return importlib.import_module("emt_trader_api")
 
 
-_EX_TO_EMT_MARKET = {"SHSE": "SH_A", "SZSE": "SZ_A", "BSE": "BJ_A"}
+_EX_TO_EMT_MARKET = {"XSHG": "SH_A", "XSHE": "SZ_A", "BJSE": "BJ_A"}
 
 
 class EmtAdapter(ExecutionAdapter):
@@ -756,10 +756,10 @@ class EmtAdapter(ExecutionAdapter):
     def _ex_suffix(market) -> str:
         """交易 market 枚举（1=SZ/2=SH 对调）→ vt 后缀。.value 兼容 pybind11/纯 Python 枚举。"""
         mod = _load_emt_binding()
-        inv = {mod.EMT_MARKET_TYPE.SH_A.value: ".SHSE", mod.EMT_MARKET_TYPE.SZ_A.value: ".SZSE",
-               mod.EMT_MARKET_TYPE.BJ_A.value: ".BSE"}
+        inv = {mod.EMT_MARKET_TYPE.SH_A.value: ".XSHG", mod.EMT_MARKET_TYPE.SZ_A.value: ".XSHE",
+               mod.EMT_MARKET_TYPE.BJ_A.value: ".BJSE"}
         mv = market.value if hasattr(market, "value") else (market or 0)
-        return inv.get(int(mv), ".SHSE")
+        return inv.get(int(mv), ".XSHG")
 
     def _on_order_raw(self, o, err, session) -> None:
         od = self._to_order_data(self._snapshot(o))

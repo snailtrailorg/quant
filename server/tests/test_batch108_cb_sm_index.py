@@ -68,14 +68,14 @@ class TestCbSmIndexMapping:
     def test_list_date_and_delist_date_take_r13_r14(self, monkeypatch):
         cap = _run_cb(monkeypatch)
         rows = {r[0]: r for r in cap["rows"]}
-        assert set(rows) == {"110102.SHSE", "113710.SHSE"}, rows
+        assert set(rows) == {"110102.XSHG", "113710.XSHG"}, rows
 
-        r = rows["110102.SHSE"]
+        r = rows["110102.XSHG"]
         assert r[10] == "20260805", f"list_date 应为 r[13]；得到 {r[10]!r}（rate_clause?）"
         assert r[11] == "20320804", f"delist_date 应为 r[14]；得到 {r[11]!r}"
         assert r[12] == engine_session(), "session_id 必须仍为 astock_main"
 
-        r2 = rows["113710.SHSE"]
+        r2 = rows["113710.XSHG"]
         assert r2[10] == "20260923" and r2[11] == "20310922"
 
     def test_not_listed_equals_delisted(self, monkeypatch):
@@ -93,8 +93,8 @@ class TestCbSmIndexMapping:
         """
         cap = _run_cb(monkeypatch)
         state = {s[0]: s for s in cap["state"]}
-        assert state["113710.SHSE"][1] == "2026-09-23", \
-            f"回落未取 list_date：{state['113710.SHSE'][1]!r}"
+        assert state["113710.XSHG"][1] == "2026-09-23", \
+            f"回落未取 list_date：{state['113710.XSHG'][1]!r}"
 
 
 def engine_session():

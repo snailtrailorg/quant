@@ -37,13 +37,13 @@ def _mock_rows():
 def test_kline_records_conversion():
     with patch.object(db, "ensure_table"), patch.object(db, "get_conn") as g:
         cur = _mock_conn(g, _mock_rows())
-        out = db.get_kline_records("600000.SHSE", "1D", None, None)
+        out = db.get_kline_records("600000.XSHG", "1D", None, None)
         # SQL 守门（代码盲审 A/B 同判）：列序与 r[0..5] 位置索引硬耦合，断言全文防误删/调换。
         # bar_1D 保持 freq 原样（PG 标识符折叠命中 bar_1d，与 get_bars/BAR_TABLE_SELECT 同待遇）
         sql, params = cur.execute.call_args[0]
         assert sql == ("SELECT ts, open, high, low, close, volume FROM bar_1D "
                        "WHERE symbol=%s AND ts >= %s AND ts <= %s ORDER BY ts ASC")
-        assert params == ("600000.SHSE", None, None)
+        assert params == ("600000.XSHG", None, None)
     assert out[0] == {"ts": "2026-09-05", "open": 10.5, "high": 11.0,
                       "low": 10.2, "close": 10.8, "volume": 1234567.0}
     assert out[1]["open"] is None    # Decimal('NaN') → None（非法 JSON 防御）
@@ -55,7 +55,7 @@ def test_kline_records_conversion():
 def test_kline_records_empty():
     with patch.object(db, "ensure_table"), patch.object(db, "get_conn") as g:
         _mock_conn(g, [])
-        assert db.get_kline_records("600000.SHSE", "1D", None, None) == []
+        assert db.get_kline_records("600000.XSHG", "1D", None, None) == []
 
 
 def test_kline_records_freq_guard():

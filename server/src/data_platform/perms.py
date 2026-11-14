@@ -131,9 +131,9 @@ def account_allows(account_id: int, symbol: str) -> bool:
         if board not in (boards or []):
             return False
         # board↔exchange 一致性（矛盾数据 fail-closed）
-        if (board == "star" and attr.exchange != "SHSE") or \
-           (board == "chinext" and attr.exchange != "SZSE") or \
-           (board == "bse" and attr.exchange != "BSE"):
+        if (board == "star" and attr.exchange != "XSHG") or \
+           (board == "chinext" and attr.exchange != "XSHE") or \
+           (board == "bse" and attr.exchange != "BJSE"):
             return False
         # 3. ST 子布尔（仅 board=main）。批 117 起真源=st_list 官方名单快照：
         #    ⚠ 语义（prod 2026-10-10 首部署实证修正）：stock_st 是 **ST-only 单态名单**

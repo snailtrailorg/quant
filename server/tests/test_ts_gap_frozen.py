@@ -54,8 +54,8 @@ class TestCryptoSessionGate:
 
     def test_market_of_symbol(self):
         from src.quant_common.markets import market_of_symbol
-        assert market_of_symbol("BTCUSDT.BINANCE") == "crypto"
-        assert market_of_symbol("600000.SHSE") == "astock"
+        assert market_of_symbol("BTCUSDT.XBIN") == "crypto"
+        assert market_of_symbol("600000.XSHG") == "astock"
         assert market_of_symbol("UNKNOWN.XXX") == "astock"   # 缺省
 
 

@@ -46,7 +46,7 @@ class TestFourSourceMax:
             def available_range(self, kind):
                 return ("2010-01-01", None)
 
-        floor, _ = eng._window_floors(_A(), "bar_daily", cfg, sym="X.SHSE",
+        floor, _ = eng._window_floors(_A(), "bar_daily", cfg, sym="X.XSHG",
                                       inception="2030-01-01")
         assert floor == date(2030, 1, 1)
 

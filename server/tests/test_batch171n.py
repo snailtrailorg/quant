@@ -37,7 +37,7 @@ class TestHaltedSellPass:
     def test_halted_sell_passes_gate1(self):
         rc = _rc(halted=True)
         d = rc._check_order_inner.__wrapped__(rc, {
-            "symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0,
+            "symbol": "600000.XSHG", "action": "SELL", "volume": 100, "price": 10.0,
         }) if hasattr(rc._check_order_inner, "__wrapped__") else None
         # 直测分支语义（全链测试见④）： halted+SELL 不得在第一步被 HALTED 拒
         with patch.object(rc, "_check_order_inner", side_effect=lambda *a, **k: _inner_probe(a[0] if a else {})):
@@ -50,7 +50,7 @@ class TestHaltedSellPass:
         # 真实直调： halted+SELL ⇒ 非 HALTED 拒（可能因 LIVE_SWITCH_OFF 拒=通过第 1 步）
         with patch.object(rc, "is_halted", return_value=True), \
              patch.object(rc, "halt_reason", return_value="test"):
-            d = rc._check_order_inner({"symbol": "600000.SHSE", "action": "SELL",
+            d = rc._check_order_inner({"symbol": "600000.XSHG", "action": "SELL",
                                        "volume": 100, "price": 10.0})
         assert d.rule != "HALTED", f"平仓方向被熔断拒: {d.rule} {d.reason}"
         assert d.rule == "LIVE_SWITCH_OFF", "过了第 1 步撞实盘开关（未开）=预期路径"
@@ -59,13 +59,13 @@ class TestHaltedSellPass:
         rc = _rc(halted=True)
         with patch.object(rc, "is_halted", return_value=True), \
              patch.object(rc, "halt_reason", return_value="test"):
-            d = rc._check_order_inner({"symbol": "600000.SHSE", "action": "BUY",
+            d = rc._check_order_inner({"symbol": "600000.XSHG", "action": "BUY",
                                        "volume": 100, "price": 10.0})
         assert d.rule == "HALTED" and not d.approved
 
     def test_unreadable_rejects_all(self):
         rc = _rc(unreadable=True)
-        d = rc._check_order_inner({"symbol": "600000.SHSE", "action": "SELL",
+        d = rc._check_order_inner({"symbol": "600000.XSHG", "action": "SELL",
                                    "volume": 100, "price": 10.0})
         assert d.rule == "HALT_UNREADABLE" and not d.approved
 
@@ -82,7 +82,7 @@ class TestMaxSingleAmountSellExempt:
                           side_effect=lambda o, a=None, **k: _etf_conv(o)):
             pass
         # 直测 _check_etf_conv 的 SELL 豁免（绕外链只测该函数）
-        d = _etf_conv({"symbol": "600000.SHSE", "action": "SELL",
+        d = _etf_conv({"symbol": "600000.XSHG", "action": "SELL",
                        "volume": 100000, "price": 100.0})
         assert d.approved and "豁免" in d.reason
 
@@ -141,8 +141,8 @@ class TestCloseAllPositions:
     def test_t1_skip_and_cost_price(self):
         from src.strategy_runner import trading as T
         adapter = self._adapter(
-            [self._pos("600000.SHSE", 1000, 0, 10.5),     # 全可卖（成本价 10.5）
-             self._pos("000001.SZSE", 500, 500, 12.0)],   # T+1 全冻
+            [self._pos("600000.XSHG", 1000, 0, 10.5),     # 全可卖（成本价 10.5）
+             self._pos("000001.XSHE", 500, 500, 12.0)],   # T+1 全冻
             9.87)
         rc = MagicMock()
         rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
@@ -152,7 +152,7 @@ class TestCloseAllPositions:
              patch.object(T, "write_cmd_result"), \
              patch("time.sleep"):
             out = T._close_all_positions(adapter, account_id=1, operator="t")
-        assert out["skipped_t1"] == ["000001.SZSE"], "T+1 冻结标的 skip 记名"
+        assert out["skipped_t1"] == ["000001.XSHE"], "T+1 冻结标的 skip 记名"
         assert out["closed_requested"] == 1
         o = adapter.send_order.call_args_list[0].args[0]
         # 价来自同源 tick 的参考价（9.87），不是成本价 10.5，也不打折
@@ -165,7 +165,7 @@ class TestCloseAllPositions:
 
     def test_rejected_summary(self):
         from src.strategy_runner import trading as T
-        adapter = self._adapter([self._pos("600000.SHSE", 100, 0, 10.0)], 10.0)
+        adapter = self._adapter([self._pos("600000.XSHG", 100, 0, 10.0)], 10.0)
         rc = MagicMock()
         rc.check_order.return_value = SimpleNamespace(approved=False, reason="某规则拒")
         with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
@@ -174,7 +174,7 @@ class TestCloseAllPositions:
              patch.object(T, "write_cmd_result"), \
              patch("time.sleep"):
             out = T._close_all_positions(adapter)
-        assert out["rejected"] and "600000.SHSE" in out["rejected"][0]
+        assert out["rejected"] and "600000.XSHG" in out["rejected"][0]
         adapter.send_order.assert_not_called()
 
 
@@ -318,15 +318,15 @@ class TestHeldVolumeSymbolAliases:
     def test_candidates_cover_shse_and_sse(self):
         # 批175d：候选函数迁至 symbology.aliases（语义不变：沪市双向、深市单值）
         from src.quant_common.symbology import aliases
-        assert aliases("600000.SHSE") == {"600000.SHSE", "600000.SSE"}
-        assert aliases("600000.SSE") == {"600000.SHSE", "600000.SSE"}
-        assert aliases("000001.SZSE") == {"000001.SZSE"}
+        assert aliases("600000.XSHG") == {"600000.XSHG", "600000.SSE"}
+        assert aliases("600000.SSE") == {"600000.XSHG", "600000.SSE"}
+        assert aliases("000001.XSHE") == {"000001.XSHE"}
 
     def test_held_volume_finds_sse_row(self):
         # 批175d：0182 CHECK 后 `.SSE` 结构性不可落库（原 DB 级场景消失）→ 改钉纯函数：
         # 沪市标的的双向候选仍含 `.SSE`（0181 归一前的历史行可查；归一后自然单值）。
         from src.quant_common.symbology import aliases
-        assert "999999.SSE" in aliases("999999.SHSE"), "沪市 SHSE 标的必须带 SSE 候选"
+        assert "999999.SSE" in aliases("999999.XSHG"), "沪市 SHSE 标的必须带 SSE 候选"
 
 class TestBodyWiring:
     """2026-11-09 e2e 抓真因：confirm/accounts 从 auth payload 取 ⇒ 恒 400 / 恒全量。
@@ -417,15 +417,15 @@ class TestCloseAllAuditAndQuote:
         from src.data_platform.db import get_conn
         from src.strategy_runner import trading as T
         req = "ut" + uuid.uuid4().hex[:8]
-        oid, cid = T._close_order_open("999999.SHSE", 100, 10.0, None, "t", req, 1, "SELL")
+        oid, cid = T._close_order_open("999999.XSHG", 100, 10.0, None, "t", req, 1, "SELL")
         try:
             assert oid, "急停单必须落 order_log（审计缺口）"
-            assert cid == f"emc-{req}-999999.SHSE-1", "预生成 cid 形态"
+            assert cid == f"emc-{req}-999999.XSHG-1", "预生成 cid 形态"
             with get_conn() as c:
                 row = c.execute(
                     "SELECT symbol, action, volume, status, client_order_id "
                     "FROM order_log WHERE id=%s", (oid,)).fetchone()
-            assert row[0] == "999999.SHSE" and row[1] == "SELL" and row[3] == "submitting"
+            assert row[0] == "999999.XSHG" and row[1] == "SELL" and row[3] == "submitting"
             assert row[4] == cid, "INSERT 在 send 前就写 client_order_id"
             adapter = MagicMock()
             adapter.get_vt_orderid.return_value = "XTP.1"

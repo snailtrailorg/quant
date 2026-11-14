@@ -302,20 +302,20 @@ class TestJudgeSupply:
 
     def test_sufficient_ok(self):
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", self.NEEDS, 300,
+        d = judge_supply("600000.XSHG", self.NEEDS, 300,
                          list_date_fn=lambda s: "2020-01-01")
         assert d["action"] == "ok"
 
     def test_no_bar_minute_declaration_ok(self):
         """无 bar_minute 声明 ⇒ 恒 ok（暖机落基线窗，不进判定）。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", {}, 0, list_date_fn=lambda s: None)
+        d = judge_supply("600000.XSHG", {}, 0, list_date_fn=lambda s: None)
         assert d["action"] == "ok"
 
     def test_old_listing_short_supply_degraded(self):
         """分支②a：上市 ≥ 声明窗而数据缺 ⇒ degraded（瞬态，同步层追）。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", self.NEEDS, 100,
+        d = judge_supply("600000.XSHG", self.NEEDS, 100,
                          list_date_fn=lambda s: "2020-01-01")
         assert d["action"] == "degraded"
         assert d["kind"] == "bar_minute" and d["declared"] == 250 and d["actual"] == 100
@@ -323,7 +323,7 @@ class TestJudgeSupply:
     def test_new_listing_reject(self):
         """分支②b：上市 < 声明窗（标的太新，真不可满足）⇒ reject。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", {"bar_minute": 5000}, 100,
+        d = judge_supply("600000.XSHG", {"bar_minute": 5000}, 100,
                          list_date_fn=lambda s: date.today().isoformat())
         assert d["action"] == "reject"
         assert "拒启" in d["reason"] or "不可满足" in d["reason"]
@@ -334,7 +334,7 @@ class TestJudgeSupply:
         反证钉：若误当『新标的』⇒ reject——用例红。
         """
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", self.NEEDS, 100, list_date_fn=lambda s: None)
+        d = judge_supply("600000.XSHG", self.NEEDS, 100, list_date_fn=lambda s: None)
         assert d["action"] == "degraded"
 
     def test_list_date_lookup_exception_degraded(self):
@@ -342,32 +342,32 @@ class TestJudgeSupply:
         from src.strategy_runner.main import judge_supply
         def _boom(s):
             raise RuntimeError("db down")
-        d = judge_supply("600000.SHSE", self.NEEDS, 100, list_date_fn=_boom)
+        d = judge_supply("600000.XSHG", self.NEEDS, 100, list_date_fn=_boom)
         assert d["action"] == "degraded"
 
     def test_dirty_list_date_degraded(self):
         """list_date 脏值 ⇒ 不猜，同无档 degraded。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", self.NEEDS, 100, list_date_fn=lambda s: "not-a-date")
+        d = judge_supply("600000.XSHG", self.NEEDS, 100, list_date_fn=lambda s: "not-a-date")
         assert d["action"] == "degraded"
 
     def test_l2_placeholder_reject(self):
         """分支①：L2 占位键 ⇒ reject（写侧已拦，DB 手改兜底）。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", {"depth": 5}, 100, list_date_fn=lambda s: None)
+        d = judge_supply("600000.XSHG", {"depth": 5}, 100, list_date_fn=lambda s: None)
         assert d["action"] == "reject"
 
     def test_unknown_kind_reject(self):
         """分支①：拼错键 ⇒ reject。"""
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("600000.SHSE", {"bar_1d": 5}, 100, list_date_fn=lambda s: None)
+        d = judge_supply("600000.XSHG", {"bar_1d": 5}, 100, list_date_fn=lambda s: None)
         assert d["action"] == "reject"
 
     def test_over_cap_reject_with_limit_in_message(self):
         """cap 拒启且报上限（不静默截）。"""
         from src.strategy_runner.main import judge_supply
         from src.strategy_runner import WARMUP_CAP
-        d = judge_supply("600000.SHSE", {"bar_minute": WARMUP_CAP + 1}, 100,
+        d = judge_supply("600000.XSHG", {"bar_minute": WARMUP_CAP + 1}, 100,
                          list_date_fn=lambda s: "2020-01-01")
         assert d["action"] == "reject"
         assert str(WARMUP_CAP) in d["reason"]
@@ -376,7 +376,7 @@ class TestJudgeSupply:
         """声明=cap 恰好合法（>cap 才拒）。"""
         from src.strategy_runner.main import judge_supply
         from src.strategy_runner import WARMUP_CAP
-        d = judge_supply("600000.SHSE", {"bar_minute": WARMUP_CAP}, WARMUP_CAP,
+        d = judge_supply("600000.XSHG", {"bar_minute": WARMUP_CAP}, WARMUP_CAP,
                          list_date_fn=lambda s: "2020-01-01")
         assert d["action"] == "ok"
 
@@ -410,7 +410,7 @@ class TestWarmupAdaptive:
                 return _FakeFrame(400), None
 
         with patch("src.data_platform.databus.DataBus", _Bus):
-            hist = runner_main._warmup_history("600000.SHSE", n=250)
+            hist = runner_main._warmup_history("600000.XSHG", n=250)
         assert len(hist) == 250   # 帧里有 400 根，窗取尾 250
 
     def test_warmup_default_n_is_baseline(self):
@@ -423,7 +423,7 @@ class TestWarmupAdaptive:
                 return _FakeFrame(400), None
 
         with patch("src.data_platform.databus.DataBus", _Bus):
-            hist = runner_main._warmup_history("600000.SHSE")
+            hist = runner_main._warmup_history("600000.XSHG")
         assert len(hist) == WARMUP_BASELINE
 
     def test_warmup_failure_fail_open(self):
@@ -435,7 +435,7 @@ class TestWarmupAdaptive:
                 raise RuntimeError("pg down")
 
         with patch("src.data_platform.databus.DataBus", _Bus):
-            hist = runner_main._warmup_history("600000.SHSE", n=100)
+            hist = runner_main._warmup_history("600000.XSHG", n=100)
         assert hist == []
 
 
@@ -447,7 +447,7 @@ class TestRunnerStartupPaths:
 
     def test_cap_reject_reason_mentions_not_silent(self):
         from src.strategy_runner.main import judge_supply
-        d = judge_supply("X.BINANCE", {"bar_minute": 9999}, 50,
+        d = judge_supply("X.XBIN", {"bar_minute": 9999}, 50,
                          list_date_fn=lambda s: "2020-01-01")
         assert d["action"] == "reject"
         assert "9999" in d["reason"]

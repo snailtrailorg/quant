@@ -238,10 +238,10 @@ class TestViewSync:
         """`symbol` 是 scope 键的一部分：同 sync_id 下标的级与家族级（`''`）互不干扰。"""
         sid = NS + "_v8"
         _vsync(sid, gaps=[("2026-10-02", "2026-10-03")])
-        _vsync(sid, "BTC.BINANCE", gaps=[("2026-10-05", "2026-10-05")])
+        _vsync(sid, "BTC.XBIN", gaps=[("2026-10-05", "2026-10-05")])
         _vsync(sid, gaps=[])
         st = _q("SELECT symbol, state FROM sync_gap WHERE sync_id=%s ORDER BY symbol", (sid,))
-        assert [(r[0], r[1]) for r in st] == [("", "closed"), ("BTC.BINANCE", "open")]
+        assert [(r[0], r[1]) for r in st] == [("", "closed"), ("BTC.XBIN", "open")]
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +273,7 @@ class TestTerminalWrite:
     def test_symbol_scoped_excluded_row(self):
         """per-symbol 排除段带 `symbol`（scope 精确到标的）——家族级用 `''`。"""
         sid = NS + "_t4"
-        engine._upsert_sync_gap([(sid, "BTC.BINANCE", "2019-11-12", "2020-01-01",
+        engine._upsert_sync_gap([(sid, "BTC.XBIN", "2019-11-12", "2020-01-01",
                                  "unreachable", "源可达下界（实测）")])
         assert _rows(sid) == [("2019-11-12", "2020-01-01", "unreachable", "源可达下界（实测）")]
 

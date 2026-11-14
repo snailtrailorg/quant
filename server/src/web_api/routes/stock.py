@@ -169,10 +169,10 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
             FROM daily_basic d
             LEFT JOIN asset_static_info s ON s.ts_code = d.ts_code
             LEFT JOIN screen_factor_cache f20
-                   ON f20.ts_code = d.ts_code AND f20.factor = 'momentum_20'
+                   ON f20.vt_symbol = d.vt_symbol AND f20.factor = 'momentum_20'
                   AND f20.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)
             LEFT JOIN screen_factor_cache f250
-                   ON f250.ts_code = d.ts_code AND f250.factor = 'price_vs_ma250'
+                   ON f250.vt_symbol = d.vt_symbol AND f250.factor = 'price_vs_ma250'
                   AND f250.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)
             WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
               AND (%s = 0 OR d.pe <= %s)
@@ -234,7 +234,7 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                 SELECT symbol, close FROM bar_1d
                 WHERE ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
                   AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day'
-            ) cd ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE'), '.BJ', '.BSE')
+            ) cd ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.XSHE'), '.SH', '.XSHG'), '.BJ', '.BJSE')
             LEFT JOIN (
                 SELECT d.ts_code, d.close FROM daily_basic d
                 WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)

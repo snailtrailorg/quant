@@ -154,7 +154,7 @@ class TestResolve:
         """验收①：bar_daily+600000+backtest → [local_pg, tushare①]（tencent quote-only 被硬过滤）。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", consumer_tag="backtest")
             ch = rt.resolve(req)
         assert [c.adapter for c in ch.candidates] == ["local_pg", "tushare"]
@@ -164,7 +164,7 @@ class TestResolve:
         """验收⑤：供给模式链无 local_pg（仓=对账基准非货源——28 §7.1 v3.2）。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", consumer_tag="sync", mode="supply")
             ch = rt.resolve(req)
         assert [c.adapter for c in ch.candidates] == ["tushare"]
@@ -173,7 +173,7 @@ class TestResolve:
         """验收②：position 改动（provider 沉后）下新链生效+epoch 递增。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",), temporality="historical")
             rows2 = [(3, "tencent", "astock", ["kline"], "{}", 1, True),
                      (1, "tushare", "astock", ["kline"], "{}", 2, True)]
             conn2 = _FakeConn(rows2, _POLICIES)
@@ -186,7 +186,7 @@ class TestResolve:
         """验收② epoch 半边：bump cfg:version 后新链 epoch 递增（原钉只断链序——盲审 A/B 补）。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",), temporality="historical")
             e1 = rt.resolve(req).epoch
             rds.kv[rt.CFG_VERSION_KEY] = "8"          # bump（新版本）
             rt._STATE.rows = []                        # 强制重载
@@ -201,7 +201,7 @@ class TestResolve:
         conn.rows = rows
         _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
         assert [c.adapter for c in ch.candidates] == ["akshare", "tushare"]   # 熔断沉底不剔除
@@ -210,7 +210,7 @@ class TestResolve:
         rt, conn, rds, patches = _setup()
         conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, False)]
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
         assert ch.candidates == ()
@@ -221,7 +221,7 @@ class TestResolve:
         2026-09-30 jsonb 收口：SQL 参数现为**驱动级 Jsonb 包装**，取 `.obj` 读回原对象。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            rt.resolve(DataRequest(kind="bar_daily", symbols=("600000.SHSE", "510300.SHSE"),
+            rt.resolve(DataRequest(kind="bar_daily", symbols=("600000.XSHG", "510300.XSHG"),
                                    temporality="historical", consumer_tag="backtest"))
         [p] = conn.inserts
         summary = p[1].obj
@@ -238,7 +238,7 @@ class TestFetchChain:
                      (2, "akshare", "astock", ["kline"], "{}", 2, True)]
         rt._STATE.rows = []
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
             calls = []
@@ -266,7 +266,7 @@ class TestFetchChain:
         rds_full = _FullRedis()
         rds_full.kv[rt.CFG_VERSION_KEY] = "7"
         with patches[0], patch.object(rt, "_r", return_value=rds_full):
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
             r = ch.fetch(lambda c: {"from": c.adapter}, req)
@@ -280,7 +280,7 @@ class TestFetchChain:
         conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, True)]
         _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
             with pytest.raises(Exception):
@@ -292,7 +292,7 @@ class TestFetchChain:
     def test_all_gap_raises_datagap(self, sm_covers_all, breakers_clean):
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
 
@@ -305,7 +305,7 @@ class TestFetchChain:
     def test_deadline_exhausted(self, sm_covers_all, breakers_clean):
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
+            req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",),
                               temporality="historical", mode="supply", deadline_ms=0)
             ch = rt.resolve(req)
             with pytest.raises(SourceUnavailable):
@@ -371,7 +371,7 @@ class TestEndpoints:
         import src.web_api.routes.routing as rr
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
-            r = rr.dry_run(kind="bar_daily", symbol="600000.SHSE", consumer="backtest", payload={})
+            r = rr.dry_run(kind="bar_daily", symbol="600000.XSHG", consumer="backtest", payload={})
         assert r["epoch"] == 7 and r["weights"]["completeness"] == 0.7
         assert [c["adapter"] for c in r["chain"]] == ["local_pg", "tushare"]
         assert r["chain"][0]["is_local"] is True and r["chain"][0]["health"] == "closed"

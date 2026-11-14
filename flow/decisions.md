@@ -795,4 +795,12 @@
 - **MIC 定案（官方 CSV）**：`XSHG`/`XSHE`/`BJSE`；`XNEE` 实为新西兰、`XBSE` 为罗马尼亚（社区文章张冠李戴）。
 - **实现**：175a/b/c/d 四次上产（`202611131711-1a85f7e`、`202611141046-64c3709`）；`symbology` 单一别名表 + 基线棘轮；`translate` 三态归一；0181 expand（mic_code + 去重归一）、0182 contract（CHECK + 真 DROP）。
 - **175e（彻底性检查后补）**：① `order_log` 审计史不改写，`/api/orders` 读侧 `replace(.SSE→.SHSE)`；② 入站棘轮覆盖四类结构 + 正向控制（原只认字符串值 dict，8 变体漏 6）；③ 新增 `symbology.vt_suffix` 作"仅交易所维度"出口，收编 4 处 ad-hoc 映射；④ `InstrumentSpec.mic_code` 提供读出口；⑤ `_flush_positions` 作唯一写入口兜底归一（不可归一→error+跳过）。另纠：tushare 交易历交易所名 `SZE` **不得**入别名表（违批131 `600000.SZE` 硬拒契约）。
+- **⚠️ 口径更正（2026-11-14）**：本节「internal canonical 保持 vt」是助手单方建议，曾被我写成「裁定（用户）」——**用户从未同意**。用户裁定为**全量切 ISO MIC**（见下节批177）。
 - **有意不做**：`markets.EXCHANGES` 不补 `SSE` 键（缺省 astock 已覆盖，补键会污染 mgmt 交易所枚举）；`market_of_symbol` 不改读 SM（hub N+1）；`order_log` 不加 `symbol_canonical`（GENERATED STORED 全表重写）；surrogate 主键/拆 `raw_code` 不做（`vt_symbol` 被全链引用）。
+
+## 2026-11-14 · 批177 内部 canonical 切 ISO MIC
+
+- **裁定**（用户）：「全量切MIC，crypto对于每个市场，给个自定义后缀」。
+- **形态**：`600036.XSHG` / `000001.XSHE` / `830799.BJSE`；crypto 自定义 `XBIN`（币安）、`XOKX`（欧易），官方 ISO 表未占用（已核 CSV）。
+- **推翻**：批175 的「canonical 保持 vt」作废；旧写法（`SHSE/SZSE/BSE/SSE/SH/SZ/BJ/BINANCE/OKX`）降为**入站别名**。
+- **代价与纪律**：17 张表 + 91 行代码 + 567 行测试夹具；`bar_1d` 1780 万行全表重写；迁移与代码**同一次 release**，上产前全量备份，回滚须代码+数据同批。

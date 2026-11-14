@@ -188,7 +188,7 @@ def test_backtest_rejects_negative_commission(authed_client):
                return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
          patch.object(_t.backtest_run_task, "delay"):
         r = authed_client.post("/api/backtest",
-                               json={"strategy_config_id": 1, "symbols": ["600000.SHSE"],
+                               json={"strategy_config_id": 1, "symbols": ["600000.XSHG"],
                                      "params": {"commission": -0.001}})
     assert r.status_code == 400 and "佣金" in r.json()["detail"]
 
@@ -201,7 +201,7 @@ def test_backtest_params_override_reserved_keys_checked(authed_client):
                return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
          patch.object(_t.backtest_run_task, "delay"):
         r = authed_client.post("/api/backtest",
-                               json={"strategy_config_id": 1, "symbols": ["600000.SHSE"],
+                               json={"strategy_config_id": 1, "symbols": ["600000.XSHG"],
                                      "params": {"capital": 5}})
     assert r.status_code == 400
 
@@ -226,19 +226,19 @@ def test_backtest_symbol_params_bypass_closed(authed_client):
                return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
          patch.object(_t.backtest_run_task, "delay"):
         r1 = authed_client.post("/api/backtest",
-                                json={"strategy_config_id": 1, "symbols": ["600000.SHSE"],
+                                json={"strategy_config_id": 1, "symbols": ["600000.XSHG"],
                                       "params": {"capital": 5e11},
-                                      "symbol_params": {"600000.SHSE": {"capital": 1000000}}})
+                                      "symbol_params": {"600000.XSHG": {"capital": 1000000}}})
         assert r1.status_code == 400   # ①run 级 5e11 不因 per-symbol 合法覆盖而放行
         r2 = authed_client.post("/api/backtest",
-                                json={"strategy_config_id": 1, "symbols": ["600000.SHSE"],
+                                json={"strategy_config_id": 1, "symbols": ["600000.XSHG"],
                                       "params": {"capital": 1000000},
-                                      "symbol_params": {"600000.SHSE": {"commission": 0.001}}})
+                                      "symbol_params": {"600000.XSHG": {"commission": 0.001}}})
         assert r2.status_code == 400 and "不可包含" in r2.json()["detail"]   # ②保留键禁入 symbol_params
         r3 = authed_client.post("/api/backtest",
-                                json={"strategy_config_id": 1, "symbols": ["600000.SHSE"],
+                                json={"strategy_config_id": 1, "symbols": ["600000.XSHG"],
                                       "params": {"capital": 1000000},
-                                      "symbol_params": {"600000.SHSE": {"my_param": 7}}})
+                                      "symbol_params": {"600000.XSHG": {"my_param": 7}}})
         assert r3.status_code == 200   # 正常路径：策略参数覆盖不受影响
 
 

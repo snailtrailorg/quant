@@ -90,9 +90,9 @@ class TestFamilyA:
         from src.data_sync import pool_reconcile as R
         metas = {"cyq_chips": {"pg_table": "cyq_chips", "pk": ["ts_code", "trade_date"]}}
         # 当日无行情标的不判（停牌/退市/次新）⇒ 这里显式放行两个标的
-        with patch.object(R, "_traded_on", return_value={"A.SHSE", "B.SZSE"}), \
-                patch.object(R, "last_dates", return_value={"A.SHSE": "20261020", "B.SZSE": "20261010"}):
-            out = R.check_family_a(metas, ["A.SHSE", "B.SZSE"], "20261020")
+        with patch.object(R, "_traded_on", return_value={"A.XSHG", "B.XSHE"}), \
+                patch.object(R, "last_dates", return_value={"A.XSHG": "20261020", "B.XSHE": "20261010"}):
+            out = R.check_family_a(metas, ["A.XSHG", "B.XSHE"], "20261020")
         assert len(out) == 1 and "1/2" in out[0] and "B" in out[0]
 
     def test_all_fresh_no_finding(self):

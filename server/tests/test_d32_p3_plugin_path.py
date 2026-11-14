@@ -81,7 +81,7 @@ def test_close_all_via_plugin_compat():
 
     ee = _EE()
     from vnpy.trader.constant import Direction as VnDirection
-    pos = position_data(symbol="600000.SHSE", volume=100, frozen=0, price=9.0,
+    pos = position_data(symbol="600000.XSHG", volume=100, frozen=0, price=9.0,
                         direction=VnDirection.LONG)
     gw = _Gw(ee, [pos])
     port = TD.XtpExecutionPort(ee, gw, _Api(), _slot(), lambda n: (lambda f: f))

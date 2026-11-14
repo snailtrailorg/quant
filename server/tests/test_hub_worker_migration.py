@@ -18,7 +18,7 @@ import src.strategy_runner.hub_worker as hw
 from src.strategy_framework.runtime.loop import EngineLoop
 from src.strategy_framework.runtime.xsleeper import XReadSleeper
 
-STREAM = "hub:bars:1:X.SHSE"   # 批 66b per-account 键（ctx.account_id=1）
+STREAM = "hub:bars:1:X.XSHG"   # 批 66b per-account 键（ctx.account_id=1）
 HB_TASK_KEY = "quant:hb:task:41001"
 
 
@@ -118,7 +118,7 @@ def wired():
     ee = MagicMock()
     ee._thread = None
     ctx = {
-        "tid": 41001, "sid": "smoke-strat", "symbol": "X.SHSE",
+        "tid": 41001, "sid": "smoke-strat", "symbol": "X.XSHG",
         "strategy": strategy, "adapter": StubAdapter(), "event_engine": ee,
         "td_api": td, "history": [], "frozen": {"now": False, "sticky": False},
         "warmup_pg": lambda: [], "stop_check": lambda: False,

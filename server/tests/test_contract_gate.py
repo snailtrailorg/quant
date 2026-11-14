@@ -77,7 +77,7 @@ class TestScope:
 
 class TestDataRequest:
     def test_defaults(self):
-        r = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
+        r = DataRequest(kind="bar_daily", symbols=("600000.XSHG",), temporality="historical")
         assert r.sub_kind is None and r.mode == "consume" and r.as_of is AsOf.LATEST
         assert r.deadline_ms == 10_000 and r.consumer_tag == "default"
 

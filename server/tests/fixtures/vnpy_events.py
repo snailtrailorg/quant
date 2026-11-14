@@ -15,7 +15,7 @@ def order_data(
     *,
     orderid: str = "1",
     vt: str = "TEST.1",
-    symbol: str = "600000.SHSE",
+    symbol: str = "600000.XSHG",
     direction: Direction = Direction.LONG,
     volume: float = 100,
     traded: float = 0,
@@ -38,7 +38,7 @@ def trade_data(
     vt_trade: str = "TEST.T1",
     orderid: str = "1",
     vt_order: str = "TEST.1",
-    symbol: str = "600000.SHSE",
+    symbol: str = "600000.XSHG",
     direction: Direction = Direction.LONG,
     volume: float = 100,
     price: float = 10.0,
@@ -57,7 +57,7 @@ def trade_data(
 
 def position_data(
     *,
-    symbol: str = "600000.SHSE",
+    symbol: str = "600000.XSHG",
     volume: float = 1000,
     frozen: float = 200,
     price: float = 9.05,

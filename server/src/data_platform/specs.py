@@ -97,7 +97,7 @@ class InstrumentSpec:
     position_side: str
     order_range: dict | None
     venue_flags: dict
-    mic_code: str | None = None     # 批175e：ISO 10383 venue 标识（crypto NULL；MPID 语义非证券主键）
+    mic_code: str | None = None     # venue 码：ISO 10383 MIC（XSHG/XSHE/BJSE）；crypto 为自定义 XBIN/XOKX
 
     @classmethod
     def of(cls, symbol: str) -> "InstrumentSpec":

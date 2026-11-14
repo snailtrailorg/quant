@@ -89,7 +89,7 @@ class TestAdapterGhostCache:
         adapter = XTPAdapter.__new__(XTPAdapter)   # 跳过 __init__
         adapter._gateway = MagicMock()
         adapter._lock = __import__("threading").Lock()
-        adapter._positions = {"ghost.SHSE": SimpleNamespace(vt_symbol="ghost.SHSE", volume=999,
+        adapter._positions = {"ghost.XSHG": SimpleNamespace(vt_symbol="ghost.XSHG", volume=999,
                                                             price=1.0, pnl=0.0)}
         adapter._gateway.query_position.return_value = None
         # _wait_update 打桩为立即返回（无新事件→缓存保持清空）

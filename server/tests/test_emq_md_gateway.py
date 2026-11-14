@@ -176,11 +176,11 @@ def test_subscribe_and_unsubscribe():
     with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
          patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
-    gw.subscribe("600000.SHSE")
-    gw.subscribe("000001.SZSE")
+    gw.subscribe("600000.XSHG")
+    gw.subscribe("000001.XSHE")
     api = _FakeQuoteApi.instances[-1]
     assert api.subs == [(["600000"], _FakeEMQExchange.SH), (["000001"], _FakeEMQExchange.SZ)]
-    gw.unsubscribe("600000.SHSE")
+    gw.unsubscribe("600000.XSHG")
     assert api.unsubs == [(["600000"], _FakeEMQExchange.SH)]
 
 
@@ -191,7 +191,7 @@ def test_subscribe_skips_when_disconnected():
          patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
     gw._connected = False   # 模拟 OnError 断连
-    gw.subscribe("600000.SHSE")
+    gw.subscribe("600000.XSHG")
     assert _FakeQuoteApi.instances[-1].subs == []
 
 
@@ -202,7 +202,7 @@ def test_subscribe_failure_alerts():
     with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
          patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
-    gw.subscribe("600000.SHSE")
+    gw.subscribe("600000.XSHG")
     assert gw._alert.call_count == 1
     assert gw._alert.call_args.kwargs["code"] == "emq.sub-fail"
 

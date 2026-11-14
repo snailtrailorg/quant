@@ -144,7 +144,7 @@
             {{ t('backtest.jsonHint') }}
           </div>
           <JsonInput ref="symParamsRef" v-model="form.symbolParamsStr" :rows="4"
-            placeholder='{"600000.SHSE": {"buy_threshold": 0.03}}' />   <!-- 批36b-β：JSON 校验组件 -->
+            placeholder='{"600000.XSHG": {"buy_threshold": 0.03}}' />   <!-- 批36b-β：JSON 校验组件 -->
         </template>
       </el-form>
       <template #footer>

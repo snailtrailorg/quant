@@ -18,7 +18,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 STUB_PROVIDER = "stubsrc_b75"
-STUB_SYMBOL = "999998.SHSE"          # 合成标的（不撞真实数据）
+STUB_SYMBOL = "999998.XSHG"          # 合成标的（不撞真实数据）
 DS_ROW_NAME = "stub75-behavior"
 
 

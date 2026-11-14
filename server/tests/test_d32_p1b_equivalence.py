@@ -82,7 +82,7 @@ def _adapter():
 def _run(fn, raw=None, domain=None, adapter=None, rows=None):
     conn = _Conn(rows)
     with patch("src.data_platform.db.get_conn", return_value=conn):
-        fn(domain if domain is not None else raw, adapter, "s1", "600000.SHSE")
+        fn(domain if domain is not None else raw, adapter, "s1", "600000.XSHG")
     return conn
 
 
@@ -133,7 +133,7 @@ def test_trade_cid_hit_without_row_does_not_fall_back_to_vt():
     a._vt2cid = {"TEST.1": "CID.1"}
     conn = _Conn([None])
     with patch("src.data_platform.db.get_conn", return_value=conn):
-        NEW.write_trade_log(LT.to_domain_trade(raw), a, "s1", "600000.SHSE")
+        NEW.write_trade_log(LT.to_domain_trade(raw), a, "s1", "600000.XSHG")
     selects = [c for c in conn.calls if "SELECT id, strategy_id" in c[0]]
     assert len(selects) == 1 and "client_order_id" in selects[0][0]
 
@@ -142,7 +142,7 @@ def test_trade_cid_empty_uses_vt():
     raw = trade_data(tradeid="T1", vt_order="TEST.1")
     conn = _Conn([None])
     with patch("src.data_platform.db.get_conn", return_value=conn):
-        NEW.write_trade_log(LT.to_domain_trade(raw), _adapter(), "s1", "600000.SHSE")
+        NEW.write_trade_log(LT.to_domain_trade(raw), _adapter(), "s1", "600000.XSHG")
     selects = [c for c in conn.calls if "SELECT id, strategy_id" in c[0]]
     assert len(selects) == 1 and "vt_orderid" in selects[0][0]
 
@@ -171,13 +171,13 @@ def test_cancel_missing_status_is_untranslatable():
 def test_reconcile_direction_text_uses_raw_value():
     a = _adapter()
     a.query_orders.return_value = [
-        SimpleNamespace(status=Status.NOTTRADED, symbol="600000.SHSE",
+        SimpleNamespace(status=Status.NOTTRADED, symbol="600000.XSHG",
                         direction=VnDirection.LONG, volume=100, price=9.0)]
     a.query_trades.return_value = []
     conn = _Conn([[]])
     with patch("src.data_platform.db.get_conn", return_value=conn), \
          patch.object(NEW, "_alert") as al:
-        NEW.reconcile_orders(a, "s1", "600000.SHSE")
+        NEW.reconcile_orders(a, "s1", "600000.XSHG")
     assert "Long" in al.call_args.args[1]
 
 
@@ -259,7 +259,7 @@ def test_cancel_unresolved_raises_lookup_error():
 def test_send_empty_receipt():
     ee, a = _EE(), _adapter()
     p = _port(ee, a)
-    r = p.send(Order("600000.SHSE", Action.BUY, 100, 10.0, OrderType.LIMIT, "CID.1"))
+    r = p.send(Order("600000.XSHG", Action.BUY, 100, 10.0, OrderType.LIMIT, "CID.1"))
     assert r.accepted is False and r.client_id == ""
 
 
@@ -309,7 +309,7 @@ def test_order_cid_with_empty_vt_queries_cid_only():
     conn = _Conn([None])
     d = LT.to_domain_order(order_data(status=Status.ALLTRADED, vt=""), "CID.9")
     with patch("src.data_platform.db.get_conn", return_value=conn):
-        NEW.write_order_status(d, a, "s1", "600000.SHSE")
+        NEW.write_order_status(d, a, "s1", "600000.XSHG")
     selects = [c for c in conn.calls if "SELECT id FROM order_log" in c[0]]
     assert len(selects) == 1 and "client_order_id" in selects[0][0]
 
@@ -353,11 +353,11 @@ def test_trade_ref_unique_on_real_db():
     ref = "p1b-eq-" + uuid.uuid4().hex[:10]
     a = _adapter()
     a.account_id = None
-    t = Trade(tradeid=ref, orderid="", symbol="600000.SHSE", direction=Direction.LONG,
+    t = Trade(tradeid=ref, orderid="", symbol="600000.XSHG", direction=Direction.LONG,
               price=1.0, volume=1)
     try:
-        NEW.write_trade_log(t, a, "p1b-eq", "600000.SHSE")
-        NEW.write_trade_log(t, a, "p1b-eq", "600000.SHSE")
+        NEW.write_trade_log(t, a, "p1b-eq", "600000.XSHG")
+        NEW.write_trade_log(t, a, "p1b-eq", "600000.XSHG")
         with get_conn() as c:
             n = c.execute("SELECT count(*) FROM trade_log WHERE trade_ref=%s", (ref,)).fetchone()[0]
         assert n == 1

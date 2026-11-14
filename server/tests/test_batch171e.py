@@ -32,10 +32,10 @@ class TestContinuityLock:
         def _exec(sql, *a):
             cur = MagicMock()
             if "security_master" in sql:
-                cur.fetchall.return_value = [("600000.SHSE",)]
+                cur.fetchall.return_value = [("600000.XSHG",)]
             else:
                 cur.fetchall.return_value = (
-                    [] if cnt == 0 else [("600000.SHSE", "2026-11-01", cnt)])
+                    [] if cnt == 0 else [("600000.XSHG", "2026-11-01", cnt)])
             return cur
 
         _redis_m = MagicMock()

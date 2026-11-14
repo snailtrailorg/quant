@@ -14,7 +14,7 @@ from src.data_platform.freeze_event import (
 )
 
 TID = 987_601        # 合成任务号（不撞真实 live_task 行；本表无 FK，引用即可）
-SYM = "999997.SHSE"
+SYM = "999997.XSHG"
 
 
 def _db_up() -> bool:

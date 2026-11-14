@@ -65,7 +65,7 @@ class TestExitCodes:
         cur = MagicMock()
         # 批 86-B：SELECT 加了 mode 列（main.py 任务模式分派）⇒ 桩行 10 → 11 元组；
         # 存量任务语义 = 'live'（0125 的 DEFAULT 'live' 即此意）
-        cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None, "admin", "live")
+        cur.fetchone.return_value = (8, "t", 1, "600000.XSHG", "{}", "{}", "stopped", None, None, "admin", "live")
         conn.execute.return_value = cur
         with patch.object(m, "_wait_for_deps", return_value=True), \
              patch("src.data_platform.db.get_conn", return_value=conn), \

@@ -174,12 +174,12 @@ class TestScope:
     def test_sm_universe_is_the_universe_source(self):
         """宇宙取自 `security_master`（裁定 Q3：前缀法漏 18 只转债；后缀法分不清 stock/etf）。"""
         astock = engine._sm_universe("stock")       # 批 110：三元组 (vt_symbol, updated_at, list_date)
-        assert astock and all(v.endswith((".SZSE", ".SHSE", ".BSE")) for v, _u, _ld in astock)
+        assert astock and all(v.endswith((".XSHE", ".XSHG", ".BJSE")) for v, _u, _ld in astock)
         # venue 收窄：crypto 两所共享 bar_1d ⇒ 必须按 exchange 区分
         binance = engine._sm_universe("perp", "BINANCE")
         okx = engine._sm_universe("perp", "OKX")
-        assert all(v.endswith(".BINANCE") for v, _u, _ld in binance)
-        assert all(v.endswith(".OKX") for v, _u, _ld in okx)
+        assert all(v.endswith(".XBIN") for v, _u, _ld in binance)
+        assert all(v.endswith(".XOKX") for v, _u, _ld in okx)
 
 
 # ---------------------------------------------------------------------------
@@ -196,11 +196,11 @@ class TestUncertainGate:
         「用源可达性冒充 inception」，本测必红（那是把「拉不到」恶化为「不认为缺失」）。
         """
         ad = _FakeCrypto(inception=None)
-        out, repulls, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), None)],
+        out, repulls, alerts = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), None)],
                                     local={"20261001", "20261002", "20261003", "20261004"},
                                     today_end=date(2026, 10, 4))
         assert out[SID]["uncertain"] == 1 and out[SID]["new_open"] == 0
-        assert _rows(SID) == [("BTC.BINANCE", "2019-12-31", "2026-10-04", "uncertain",
+        assert _rows(SID) == [("BTC.XBIN", "2019-12-31", "2026-10-04", "uncertain",
                                "inception_unknown", 0)]
         assert repulls == [] and alerts == [], "不确定态下不得重拉、不得告警"
 
@@ -209,7 +209,7 @@ class TestUncertainGate:
         """列表快照 age 超阈 ⇒ 期望集不完整 ⇒ `stale_source`（§九.1 依赖倒置的闭合口）。"""
         old = datetime.now(timezone.utc) - timedelta(days=engine._SNAPSHOT_STALE_DAYS + 1)
         ad = _FakeCrypto(inception="2026-10-01")
-        out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", old), ("ETH.BINANCE", old)],
+        out, _r, alerts = _run(ad, universe=[("BTC.XBIN", old), ("ETH.XBIN", old)],
                                local={"20261001"}, today_end=date(2026, 10, 4))
         assert out[SID]["stale_source"] is True and out[SID]["uncertain"] == 2
         assert {r[3] for r in _rows(SID)} == {"uncertain"}
@@ -220,19 +220,19 @@ class TestUncertainGate:
     def test_fresh_snapshot_with_known_inception_claims_gaps(self):
         """门槛之外的正常路径：inception 已知 ＋ 快照新鲜 ⇒ 差集落 `open` ＋ 聚合告警。"""
         ad = _FakeCrypto(inception="2026-10-01")     # 下界＝max(inception, src_lo)=2026-10-01
-        out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
+        out, _r, alerts = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), "2026-10-01")],
                                local={"20261001", "20261003", "20261004"},
                                today_end=date(2026, 10, 4))
         assert out[SID]["new_open"] == 1
-        assert _rows(SID) == [("BTC.BINANCE", "2026-10-02", "2026-10-02", "open", None, 0)]
+        assert _rows(SID) == [("BTC.XBIN", "2026-10-02", "2026-10-02", "open", None, 0)]
         assert alerts and alerts[0][0] == SID
-        assert "BTC.BINANCE" in alerts[0][1][0]
+        assert "BTC.XBIN" in alerts[0][1][0]
 
     @needs_db
     def test_expected_lower_bound_uses_window_floors(self):
         """下界＝`_window_floors`（**同一真源**）：retention 晚于 inception 时由 retention 绑。"""
         ad = _FakeCrypto(inception="2026-01-01")
-        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
+        out, _r, _a = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), "2026-10-01")],
                            local={"20261003"}, cfg_retention=date(2026, 10, 2),
                            today_end=date(2026, 10, 4))
         # 下界＝max(2026-01-01, retention 2026-10-02, 2019-12-31) = 2026-10-02
@@ -245,7 +245,7 @@ class TestUncertainGate:
     def test_floor_after_window_end_is_noop(self):
         """新上币（下界晚于窗口上界）⇒ 本轮无作业，**不是**缺口（也不得落 uncertain）。"""
         ad = _FakeCrypto(inception="2026-12-01")
-        out, _r, alerts = _run(ad, universe=[("NEW.BINANCE", datetime.now(timezone.utc),
+        out, _r, alerts = _run(ad, universe=[("NEW.XBIN", datetime.now(timezone.utc),
                                              "2026-12-01")],
                                local=set(), today_end=date(2026, 10, 4))
         assert out[SID]["new_open"] == 0 and out[SID]["uncertain"] == 0
@@ -281,14 +281,14 @@ class TestLimitedRepull:
         sid = SID
         ad = _FakeCrypto(inception="2026-10-01")
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
-              " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
+              " last_seen) VALUES (%s,'BTC.XBIN',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',0, now() - interval '2 days')", (sid,))
-        out, repulls, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
+        out, repulls, _a = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), "2026-10-01")],
                                 local={"20261001", "20261002", "20261003", "20261004"},
                                 today_end=date(2026, 10, 4))
         # 批 137a：形态归一由 adapter 负责（`_repull_symbol` 内 `to_source_symbol`）——crypto 直通，
         # binance 的 pull 内部再 `split(".")`；因此这里收到 vt 原值而非剥壳裸码。
-        assert repulls == [("BTC.BINANCE", "2026-10-02", "2026-10-02")], "按缺口区间重拉（vt 形态，源侧由 adapter 归一）"
+        assert repulls == [("BTC.XBIN", "2026-10-02", "2026-10-02")], "按缺口区间重拉（vt 形态，源侧由 adapter 归一）"
         assert out[SID]["repulled"] == 1 and out[SID]["closed"] == 1
         row = _rows(SID)[0]
         assert (row[1], row[2], row[3], row[5]) == ("2026-10-02", "2026-10-02", "closed", 1)
@@ -299,9 +299,9 @@ class TestLimitedRepull:
         sid = SID
         ad = _FakeCrypto(inception="2026-10-01")
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
-              " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
+              " last_seen) VALUES (%s,'BTC.XBIN',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',0, now() - interval '2 days')", (sid,))
-        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
+        out, _r, _a = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), "2026-10-01")],
                            local={"20261001", "20261003", "20261004"},
                            today_end=date(2026, 10, 4), repull_error=RuntimeError("代理不通"))
         assert out[SID]["errors"] == 1
@@ -322,9 +322,9 @@ class TestLimitedRepull:
         sid = SID
         ad = _FakeCrypto(inception="2026-10-01")
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
-              " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
+              " last_seen) VALUES (%s,'BTC.XBIN',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',9, now())", (sid,))
-        _out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
+        _out, _r, alerts = _run(ad, universe=[("BTC.XBIN", datetime.now(timezone.utc), "2026-10-01")],
                                 local={"20261001", "20261003", "20261004"},
                                 today_end=date(2026, 10, 4))
         assert alerts == [], "同一缺口续存 ⇒ 不是新 open"

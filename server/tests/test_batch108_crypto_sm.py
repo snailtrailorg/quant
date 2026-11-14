@@ -49,7 +49,7 @@ class TestUpsertRowsSignature:
     def test_session_id_persisted(self):
         import src.data_platform.db as dbm
         conn, cur = _mock_conn()
-        row = ("BTCUSDT.BINANCE", "crypto", "BINANCE", "perp", None, None, None,
+        row = ("BTCUSDT.XBIN", "crypto", "BINANCE", "perp", None, None, None,
                1, 0.01, "T+0", "2019-09-08", None, "crypto_247")
         with patch.object(dbm, "get_conn", return_value=conn):
             n = _sm_client().upsert_rows([row])
@@ -62,12 +62,12 @@ class TestUpsertRowsSignature:
     def test_missing_session_id_is_loud(self):
         """12 列（旧签名）⇒ 响亮 ValueError——不落 DB（否则整批 SM 行被 fail-soft 吞掉）。"""
         with pytest.raises(ValueError, match="13 列"):
-            _sm_client().upsert_rows([("600000.SHSE", "astock", "SHSE", "stock", "main",
+            _sm_client().upsert_rows([("600000.XSHG", "astock", "SHSE", "stock", "main",
                                        "x", None, 100, 0.01, "T+1", None, None)])
 
     def test_empty_session_id_is_loud(self):
         with pytest.raises(ValueError, match="session_id 非空"):
-            _sm_client().upsert_rows([("600000.SHSE", "astock", "SHSE", "stock", "main",
+            _sm_client().upsert_rows([("600000.XSHG", "astock", "SHSE", "stock", "main",
                                        "x", None, 100, 0.01, "T+1", None, None, "")])
 
 
@@ -84,7 +84,7 @@ def test_okx_inception_from_list_time():
     ms = int(datetime(2019, 11, 12, tzinfo=timezone.utc).timestamp() * 1000)
     inst._insts = [{"instId": "BTC-USDT-SWAP", "listTime": str(ms)}]
     assert inst.symbol_inception("BTC-USDT-SWAP") == "2019-11-12"
-    assert inst.symbol_inception("BTC-USDT-SWAP.OKX") == "2019-11-12"
+    assert inst.symbol_inception("BTC-USDT-SWAP.XOKX") == "2019-11-12"
 
 
 def test_okx_inception_missing_or_dirty_is_none():
@@ -108,12 +108,12 @@ def _capture(monkeypatch, adapter, syms):
 def test_crypto_row_shape(monkeypatch):
     adapter = SimpleNamespace(provider="binance", venue="BINANCE",
                               symbol_inception=lambda s: None)
-    rows = _capture(monkeypatch, adapter, ["BTCUSDT", "ETHUSDT.BINANCE"])
+    rows = _capture(monkeypatch, adapter, ["BTCUSDT", "ETHUSDT.XBIN"])
     assert len(rows) == 2
     r = rows[0]
     assert len(r) == 13
-    assert r[0] == "BTCUSDT.BINANCE"           # 无后缀 ⇒ 拼 venue
-    assert rows[1][0] == "ETHUSDT.BINANCE"     # 已带后缀 ⇒ 不重复拼
+    assert r[0] == "BTCUSDT.XBIN"           # 无后缀 ⇒ 拼 venue
+    assert rows[1][0] == "ETHUSDT.XBIN"     # 已带后缀 ⇒ 不重复拼
     assert (r[1], r[2], r[3]) == ("crypto", "BINANCE", "perp")
     assert r[9] == "T+0"
     assert r[10] is None                       # inception 未知 ⇒ None（显式未知）

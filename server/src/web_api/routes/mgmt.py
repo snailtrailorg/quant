@@ -593,7 +593,7 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
 # --- account_permission（D1：account 侧品种权限——权限人工配置，读/写侧） ---
 
 _VALID_CATEGORIES = {"stock", "listed_fund", "convertible", "fund", "reits", "perp"}   # 批 127 Step3：正名单键
-_VALID_EXCHANGES = {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
+_VALID_EXCHANGES = {"XSHG", "XSHE", "BJSE", "XBIN", "XOKX", "SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
 _VALID_BOARDS = {"main", "star", "chinext", "bse"}
 
 
