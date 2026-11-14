@@ -32,6 +32,36 @@ def _chain(col: str) -> str:
 
 def upgrade() -> None:
     op.execute("SET LOCAL statement_timeout = 0")
+    # 先并后转：窗口期新旧写法可能**同时存在**（旧进程写旧、新进程写新）——
+    # 直接 UPDATE 会撞唯一键（prod 实证：ux_reconcile_issue_open 511010）。
+    # 1) reconcile_issue：同 (归一 symbol, issue_type) 已有 open 的，删旧写法那条
+    op.execute(f"""
+        DELETE FROM reconcile_issue b
+        USING (SELECT r.id, {_chain('r.symbol')} AS new_sym, r.issue_type
+               FROM reconcile_issue r
+               WHERE r.symbol ~ '{_OLD}' AND r.status = 'open') d
+        WHERE b.id = d.id
+          AND EXISTS (SELECT 1 FROM reconcile_issue v
+                      WHERE v.symbol = d.new_sym AND v.issue_type = d.issue_type
+                        AND v.status = 'open')
+    """)
+    # 2) position_snapshot：同 (account, 归一 symbol, direction) 保 ts 最新
+    op.execute(f"""
+        DELETE FROM position_snapshot b
+        USING (SELECT p.ctid AS cid,
+                      row_number() OVER (PARTITION BY p.account_id, {_chain('p.symbol')}, p.direction
+                                         ORDER BY p.ts DESC NULLS LAST, p.ctid DESC) AS rn
+               FROM position_snapshot p WHERE p.symbol ~ '{_OLD}') d
+        WHERE b.ctid = d.cid AND d.rn > 1
+    """)
+    # 3) pool_symbols：同 (pool_id, 归一 symbol) 只留一条
+    op.execute(f"""
+        DELETE FROM pool_symbols b
+        USING (SELECT p.ctid AS cid,
+                      row_number() OVER (PARTITION BY p.pool_id, {_chain('p.symbol')}) AS rn
+               FROM pool_symbols p WHERE p.symbol ~ '{_OLD}') d
+        WHERE b.ctid = d.cid AND d.rn > 1
+    """)
     for table, col in _TABLES:
         op.execute(f"UPDATE {table} SET {col} = {_chain(col)} WHERE {col} ~ '{_OLD}'")
 
