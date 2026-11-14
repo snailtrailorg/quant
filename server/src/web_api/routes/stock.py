@@ -160,7 +160,10 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
     参数式=0 跳过（与既有四参同构）；field/op 通用面=164b。
     """
     def _f(x):
-        return float(x) if x is not None else None
+        # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
+        import math
+        v = float(x) if x is not None else None
+        return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT d.ts_code, s.name, d.close, d.pe, d.pe_ttm, d.pb, d.turnover_rate, d.total_mv,
@@ -215,7 +218,10 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
     原 remaining_min 死参退役（收参不进 SQL——双盲 B-P0-2 实证；表无剩余规模列）。
     """
     def _f(x):
-        return float(x) if x is not None else None
+        # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
+        import math
+        v = float(x) if x is not None else None
+        return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT b.ts_code, b.bond_short_name, b.stk_code, b.stk_short_name,
@@ -268,7 +274,10 @@ def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
                    payload: dict = Depends(require_perm("read"))):
     """场内基金筛选（listed_fund_basic + 规模/费率/跟踪误差;05 §5.9；批126q 正名——表含 ETF+LOF 全集）。"""
     def _f(x):
-        return float(x) if x is not None else None
+        # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
+        import math
+        v = float(x) if x is not None else None
+        return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT ts_code, name, management, fund_type, invest_type,
