@@ -12,14 +12,8 @@ from typing import Literal
 
 Freq = Literal["1min", "5min", "15min", "1H", "4H", "1D"]
 
-# Tushare 交易所 → vnpy Exchange 枚举映射
-TS_EXCHANGE_MAP = {
-    "SH": "SHSE",
-    "SZ": "SZSE",
-    "BJ": "BSE",
-    "SSE": "SHSE",  # Tushare 有时也用 SSE
-    "SZE": "SZSE",
-}
+# Tushare 交易所 → vnpy vt（**批175：派生自 symbology 单一入站别名表**，不再手写第二份）
+from src.quant_common.symbology import VENDOR_ALIASES as TS_EXCHANGE_MAP
 
 # 反向映射（vt_symbol → Tushare ts_code）
 EXCHANGE_TS_MAP = {v: k for k, v in TS_EXCHANGE_MAP.items() if k in ("SH", "SZ")}

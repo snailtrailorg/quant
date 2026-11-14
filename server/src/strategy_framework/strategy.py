@@ -177,25 +177,8 @@ def validate_params_against_defs(params, defs):
     return None
 
 
-_VT_EXCHANGE_ALIASES = {"SHSE": "SSE", "SSE": "SHSE"}
-
-
-def position_symbol_candidates(symbol: str) -> list[str]:
-    """持仓快照符号候选集（SELL 可卖仓查询用）。
-
-    2026-11-09（171n e2e 抓真因）：XTP 网关持仓事件的 symbol 用 vnpy Exchange 值
-    （SSE/SZSE），任务标的用项目 vt_symbol（SHSE/SZSE）——`600000.SHSE` 查
-    `symbol='600000.SHSE'` 恒 0 行 ⇒ `_held_volume()=0` ⇒ **所有 SELL 信号被
-    「截断到可卖仓 0」丢弃（止损失效）**。故 SH 侧两种写法都进候选。
-    """
-    if "." not in symbol:
-        return [symbol]
-    sym, ex = symbol.rsplit(".", 1)
-    out = [f"{sym}.{ex}"]
-    alt = _VT_EXCHANGE_ALIASES.get(ex.upper())
-    if alt:
-        out.append(f"{sym}.{alt}")
-    return out
+# 批 175d：双写候选统一由 `quant_common.symbology.aliases` 提供（唯一别名表），
+# 本模块不再自持映射（原 `_VT_EXCHANGE_ALIASES`/`position_symbol_candidates` 删除）。
 
 
 class Strategy:
@@ -358,8 +341,9 @@ class Strategy:
         """
         from ..data_platform.db import get_conn
         from ..data_platform.schema import to_vt_symbol
+        from ..quant_common.symbology import aliases
         vt = self.symbol if "." in self.symbol else to_vt_symbol(self.symbol)
-        syms = position_symbol_candidates(vt)   # SHSE/SSE 双写法（见函数注释）
+        syms = list(aliases(vt))                # 批 175d：唯一别名表（双向，过渡期安全）
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(volume - COALESCE(frozen,0)),0) FROM position_snapshot "

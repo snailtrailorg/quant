@@ -316,31 +316,17 @@ class TestHeldVolumeSymbolAliases:
     ⇒ 所有 SELL 被「截断到可卖仓 0」丢弃（止损失效）。"""
 
     def test_candidates_cover_shse_and_sse(self):
-        from src.strategy_framework.strategy import position_symbol_candidates
-        assert set(position_symbol_candidates("600000.SHSE")) == {"600000.SHSE", "600000.SSE"}
-        assert set(position_symbol_candidates("600000.SSE")) == {"600000.SSE", "600000.SHSE"}
-        assert position_symbol_candidates("000001.SZSE") == ["000001.ZSE"] if False else \
-            position_symbol_candidates("000001.SZSE") == ["000001.SZSE"]
+        # 批175d：候选函数迁至 symbology.aliases（语义不变：沪市双向、深市单值）
+        from src.quant_common.symbology import aliases
+        assert aliases("600000.SHSE") == {"600000.SHSE", "600000.SSE"}
+        assert aliases("600000.SSE") == {"600000.SHSE", "600000.SSE"}
+        assert aliases("000001.SZSE") == {"000001.SZSE"}
 
     def test_held_volume_finds_sse_row(self):
-        from src.data_platform.db import get_conn
-        from src.strategy_framework.strategy import Strategy
-        try:
-            with get_conn() as c:   # 临时账号（dev 库无 prod 账号——FK 需要）
-                c.execute("INSERT INTO trading_account (id,name,provider,market,capabilities) "
-                          "VALUES (990001,'e2e-gate','xtp','astock','{}')")
-                c.execute("INSERT INTO position_snapshot (account_id, symbol, direction, volume, frozen) "
-                          "VALUES (990001, '999999.SSE', 'direction_net', 100, 30)")
-                c.commit()
-            s = Strategy.__new__(Strategy)
-            s.symbol = "999999.SHSE"
-            s.account_id = 990001
-            assert s._held_volume() == 70, "SSE 行必须被 SHSE 标的匹配到"
-        finally:
-            with get_conn() as c:
-                c.execute("DELETE FROM position_snapshot WHERE account_id=990001")
-                c.execute("DELETE FROM trading_account WHERE id=990001")
-                c.commit()
+        # 批175d：0182 CHECK 后 `.SSE` 结构性不可落库（原 DB 级场景消失）→ 改钉纯函数：
+        # 沪市标的的双向候选仍含 `.SSE`（0181 归一前的历史行可查；归一后自然单值）。
+        from src.quant_common.symbology import aliases
+        assert "999999.SSE" in aliases("999999.SHSE"), "沪市 SHSE 标的必须带 SSE 候选"
 
 class TestBodyWiring:
     """2026-11-09 e2e 抓真因：confirm/accounts 从 auth payload 取 ⇒ 恒 400 / 恒全量。

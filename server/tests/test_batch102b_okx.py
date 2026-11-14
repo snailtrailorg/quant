@@ -756,8 +756,8 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        # 0181（批 175：security_master.mic_code + position_snapshot 归一，expand 型）
-        assert heads == {"0181"}, f"head 不是唯一 0181：{sorted(heads)}"   # 批 175：0181 新链头——链头钉随批交棒
+        # 0182（批 175d：position_snapshot 禁 .SSE 的 contract CHECK）
+        assert heads == {"0182"}, f"head 不是唯一 0182：{sorted(heads)}"   # 批 175d：0182 新链头——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

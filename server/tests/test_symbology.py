@@ -57,7 +57,7 @@ def test_mic_tables_consistent():
 
 
 # ——— 基线棘轮：全仓 "SSE"→"SHSE" dict 字面量只减不增（堵第五份映射）———
-_BASELINE_COUNT = 2          # schema.TS_EXCHANGE_MAP 1 处 + strategy._VT_EXCHANGE_ALIASES 1 处；只降不升
+_BASELINE_COUNT = 0          # 批175d：schema 已派生自 symbology、strategy 别名已删 → 全仓零字面量（只降不升）
 
 
 def _find_sse_alias_dicts() -> set[tuple[str, int]]:

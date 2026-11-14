@@ -29,6 +29,13 @@ _BIDIRECTIONAL: dict[str, tuple[str, ...]] = {
     "SHSE": ("SHSE", "SSE"), "SSE": ("SHSE", "SSE"),
 }
 
+# tushare 的 `SZE`（SZSE 变体）——对齐 schema.TS_EXCHANGE_MAP 历史键
+_VENDOR_ALIASES.setdefault("SZE", "SZSE")
+
+# 公开**只读**视图（供 schema 等派生；写者会在运行时 TypeError，而非污染 L0 唯一表）
+from types import MappingProxyType as _MPT
+VENDOR_ALIASES = _MPT(_VENDOR_ALIASES)
+
 _CRYPTO_VT = ("BINANCE", "OKX")
 
 
@@ -62,8 +69,15 @@ def to_mic(symbol: str) -> str | None:
 
 
 def aliases(symbol: str) -> set[str]:
-    """双向别名候选集（过渡期用，替代 `strategy._VT_EXCHANGE_ALIASES` 的查询语义）。"""
-    raw, ex = split_raw(symbol)
+    """双向别名候选集（替代 `strategy._VT_EXCHANGE_ALIASES` 的查询语义）。
+
+    裸码/无后缀返回 `{symbol}`（**不猜**、不抛）——调用方在 fail-closed 路径上
+    （`_held_volume`/手动 SELL 截断），抛错会把"截断到 0"变成"按原量提交"（fail-open）。
+    """
+    try:
+        raw, ex = split_raw(symbol)
+    except ValueError:
+        return {symbol}
     vt = _VENDOR_ALIASES.get(ex.upper(), ex.upper())
     out = {f"{raw}.{vt}"}
     for alt in _BIDIRECTIONAL.get(vt, ()):

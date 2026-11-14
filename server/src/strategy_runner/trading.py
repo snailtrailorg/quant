@@ -226,6 +226,15 @@ def _flush_positions(adapter, account_id, task_id) -> None:
                  len(positions), str(task_id) if task_id is not None else None))
             conn.commit()
     except Exception as e:
+        # 批175d：CHECK 违例（.SSE 未归一）是"快照冻结"级事故——必须 error 可见，
+        # 不能与瞬时网络错一起被 warning 吞掉（D15 健康监控据 position_refresh.ts 年龄告警）。
+        try:
+            from psycopg.errors import CheckViolation
+            if isinstance(e, CheckViolation):
+                logger.error("ST2 持仓快照写批撞 CHECK（symbol 未归一？快照冻结）: %s", e)
+                return
+        except ImportError:   # pragma: no cover —— 驱动缺 CheckViolation 时退回 warning
+            pass
         logger.warning("ST2 持仓快照写批失败（不阻断）: %s", e)
 
 
@@ -497,10 +506,9 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
 
     if action == "SELL":
         try:
-            # 批174：持仓快照 symbol 走 vnpy Exchange 值（沪市 .SSE），委托走项目 vt（.SHSE）——
-            # 复用项目既有 position_symbol_candidates 双写候选，否则沪市手动卖恒判 NO_SELLABLE_POSITION。
-            from src.strategy_framework.strategy import position_symbol_candidates
-            _cands = set(position_symbol_candidates(sym))
+            # 批175d：唯一别名表（`symbology.aliases` 双向），替代已删除的 position_symbol_candidates
+            from src.quant_common.symbology import aliases
+            _cands = aliases(sym)
             held = 0
             for p in (adapter.query_position() or []):
                 if getattr(p, "symbol", "") in _cands:

@@ -637,10 +637,10 @@ class TestS7SubscriptionSource:
                         "VALUES (%s,%s,'xtp','astock','{}')", (aid, f"s7-{aid}"))
                 c.execute(
                     "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
-                    "VALUES (%s,'689997.SSE','direction_net',100,0)", (acc_a,))
+                    "VALUES (%s,'689997.SHSE','direction_net',100,0)", (acc_a,))
                 c.execute(
                     "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
-                    "VALUES (%s,'689996.SSE','direction_net',100,0)", (acc_b,))
+                    "VALUES (%s,'689996.SHSE','direction_net',100,0)", (acc_b,))
                 c.commit()
             old = os.environ.get("ACCOUNT_ID")
             os.environ["ACCOUNT_ID"] = str(acc_a)
@@ -671,7 +671,7 @@ class TestS7SubscriptionSource:
             assert isinstance(sm, SubscriptionManager)
             want = sm._desired()
             assert "689997.SHSE" in want, "持仓 .SSE 必须归一 .SHSE 进订阅集"
-            assert "689996.SHSE" not in want and "689996.SSE" not in want, \
+            assert "689996.SHSE" not in want and "689996.SHSE" not in want, \
                 "他账号持仓标的不得到本 hub 订阅（account_id 过滤失效=红）"
         finally:
             with get_conn() as c:

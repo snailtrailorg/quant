@@ -233,7 +233,7 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                 SELECT symbol, close FROM bar_1d
                 WHERE ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
                   AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day'
-            ) cd ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE')
+            ) cd ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE'), '.BJ', '.BSE')
             LEFT JOIN (
                 SELECT d.ts_code, d.close FROM daily_basic d
                 WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)

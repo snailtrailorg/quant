@@ -197,7 +197,7 @@ _BASE = {
                  "LEFT JOIN (SELECT symbol, close, ts FROM bar_1d WHERE freq='1D' "
                  "AND ts >= (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') "
                  "AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day') cd "
-                 "ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE') "
+                 "ON cd.symbol = replace(replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE'), '.BJ', '.BSE') "
                  "LEFT JOIN (SELECT ts_code, close FROM daily_basic "
                  "WHERE trade_date = (SELECT max(trade_date) FROM daily_basic)) sd ON b.stk_code = sd.ts_code"),
         "ts_col": "b.ts_code", "latest": None, "order": "double_low NULLS LAST",
