@@ -42,7 +42,7 @@ def _fake_cb_df():
 
 class _FakeCbAdapter:
     provider = "tushare"
-    venue = "SHSE"
+    venue = "XSHG"
 
     @staticmethod
     def fetch_supply(kind, sub, **kw):

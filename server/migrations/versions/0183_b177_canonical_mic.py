@@ -44,6 +44,9 @@ def _chain(col: str, reverse: bool = False) -> str:
 
 
 def upgrade() -> None:
+    # 大表全表重写（bar_1d 千万级）——解除会话级 statement_timeout（D18 连接默认 60s）
+    op.execute("SET LOCAL statement_timeout = 0")
+    op.execute("SET LOCAL lock_timeout = 0")
     # 1) security_master：主键 + 交易所列 + MIC 列
     op.execute(f"UPDATE security_master SET vt_symbol = {_chain('vt_symbol')} "
                f"WHERE vt_symbol ~ '{_OLD_RE}'")
@@ -64,6 +67,7 @@ def upgrade() -> None:
         "UPDATE screen_factor_cache SET vt_symbol = "
         "split_part(ts_code, '.', 1) || CASE split_part(ts_code, '.', 2) "
         "  WHEN 'SH' THEN '.XSHG' WHEN 'SZ' THEN '.XSHE' WHEN 'BJ' THEN '.BJSE' "
+        "  WHEN 'BINANCE' THEN '.XBIN' WHEN 'OKX' THEN '.XOKX' "
         "  ELSE '.' || split_part(ts_code, '.', 2) END"
     )
     op.execute("CREATE INDEX IF NOT EXISTS idx_sfc_vt ON screen_factor_cache "
@@ -77,6 +81,32 @@ def upgrade() -> None:
         "  FROM unnest(allowed_exchanges) AS x) "
         "WHERE allowed_exchanges && ARRAY['SHSE','SZSE','BSE','BINANCE','OKX']"
     )
+
+    # 4b) 交易所枚举列（非 symbol 语义，但值域同源）
+    op.execute("UPDATE band_rules SET exchange = CASE exchange "
+               "  WHEN 'SHSE' THEN 'XSHG' WHEN 'SZSE' THEN 'XSHE' WHEN 'BSE' THEN 'BJSE' "
+               "  WHEN 'BINANCE' THEN 'XBIN' WHEN 'OKX' THEN 'XOKX' ELSE exchange END")
+    op.execute("UPDATE trading_account SET exchanges = ARRAY("
+               "  SELECT CASE x WHEN 'SHSE' THEN 'XSHG' WHEN 'SZSE' THEN 'XSHE' WHEN 'BSE' THEN 'BJSE' "
+               "              WHEN 'BINANCE' THEN 'XBIN' WHEN 'OKX' THEN 'XOKX' ELSE x END "
+               "  FROM unnest(exchanges) AS x) "
+               "WHERE exchanges && ARRAY['SHSE','SZSE','BSE','BINANCE','OKX']")
+    # 4c) 交易时段 scope 串（'SZSE|BSE|SHSE:STAR' 形态）
+    op.execute("""
+        UPDATE market_hours SET sessions = (
+            SELECT jsonb_agg(CASE WHEN s ? 'scope' THEN jsonb_set(
+                       s, '{scope}',
+                       to_jsonb(replace(replace(replace(s->>'scope', 'SHSE', 'XSHG'), 'SZSE', 'XSHE'),
+                                        'BSE', 'BJSE')))
+                   ELSE s END)
+            FROM jsonb_array_elements(sessions) AS s)
+        WHERE sessions::text ~ '(SHSE|SZSE|\|BSE)'
+    """)
+    # 4d) 历史回测运行参数（文本快照）——保证重跑用同口径
+    op.execute(f"UPDATE backtest_runs SET symbols = {_chain('symbols')}, "
+               f"symbol_params = {_chain('symbol_params')} "
+               "WHERE symbols ~ '\.(SHSE|SZSE|BSE|BINANCE|OKX)' OR "
+               "symbol_params ~ '\.(SHSE|SZSE|BSE|BINANCE|OKX)'")
 
     # 5) 对账差异单：先合并 vt 孪生 open 行，再裸码 → MIC（尾段前缀兜底）
     op.execute("""
@@ -93,6 +123,10 @@ def upgrade() -> None:
         ) dup
         WHERE b.id = dup.id
     """)
+    # 5a) 已带旧后缀的行先转 MIC（历史 vt 写法）
+    op.execute(f"UPDATE reconcile_issue SET symbol = {_chain('symbol')} "
+               f"WHERE symbol ~ '{_OLD_RE}'")
+    # 5b) 裸码回填
     op.execute("""
         UPDATE reconcile_issue r SET symbol = m.vt_symbol, updated_at = now()
         FROM security_master m
@@ -127,6 +161,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("SET LOCAL statement_timeout = 0")   # 同上：千万级表反向重写
+    op.execute("SET LOCAL lock_timeout = 0")
     op.execute("UPDATE reconcile_issue SET symbol = replace(replace(replace(replace(replace("
                "symbol, '.XSHG','.SHSE'), '.XSHE','.SZSE'), '.BJSE','.BSE'), "
                "'.XBIN','.BINANCE'), '.XOKX','.OKX') "
@@ -143,4 +179,27 @@ def downgrade() -> None:
                "  FROM unnest(allowed_exchanges) AS x) "
                "WHERE allowed_exchanges && ARRAY['XSHG','XSHE','BJSE','XBIN','XOKX']")
     op.execute("UPDATE screen_factor_cache SET vt_symbol = "
-               "replace(replace(replace(vt_symbol, '.XSHG','.SHSE'), '.XSHE','.SZSE'), '.BJSE','.BSE')")
+               "replace(replace(replace(replace(replace(vt_symbol, '.XSHG','.SHSE'), '.XSHE','.SZSE'), "
+               "'.BJSE','.BSE'), '.XBIN','.BINANCE'), '.XOKX','.OKX')")
+    op.execute("UPDATE band_rules SET exchange = CASE exchange "
+               "  WHEN 'XSHG' THEN 'SHSE' WHEN 'XSHE' THEN 'SZSE' WHEN 'BJSE' THEN 'BSE' "
+               "  WHEN 'XBIN' THEN 'BINANCE' WHEN 'XOKX' THEN 'OKX' ELSE exchange END")
+    op.execute("UPDATE trading_account SET exchanges = ARRAY("
+               "  SELECT CASE x WHEN 'XSHG' THEN 'SHSE' WHEN 'XSHE' THEN 'SZSE' WHEN 'BJSE' THEN 'BSE' "
+               "              WHEN 'XBIN' THEN 'BINANCE' WHEN 'XOKX' THEN 'OKX' ELSE x END "
+               "  FROM unnest(exchanges) AS x) "
+               "WHERE exchanges && ARRAY['XSHG','XSHE','BJSE','XBIN','XOKX']")
+    op.execute("""
+        UPDATE market_hours SET sessions = (
+            SELECT jsonb_agg(CASE WHEN s ? 'scope' THEN jsonb_set(
+                       s, '{scope}',
+                       to_jsonb(replace(replace(replace(s->>'scope', 'XSHG', 'SHSE'), 'XSHE', 'SZSE'),
+                                        'BJSE', 'BSE')))
+                   ELSE s END)
+            FROM jsonb_array_elements(sessions) AS s)
+        WHERE sessions::text ~ '(XSHG|XSHE|BJSE)'
+    """)
+    op.execute(f"UPDATE backtest_runs SET symbols = {_chain('symbols', reverse=True)}, "
+               f"symbol_params = {_chain('symbol_params', reverse=True)} "
+               "WHERE symbols ~ '\.(XSHG|XSHE|BJSE|XBIN|XOKX)' OR "
+               "symbol_params ~ '\.(XSHG|XSHE|BJSE|XBIN|XOKX)'")

@@ -38,6 +38,9 @@ replace(replace(replace(replace(replace(symbol,
 
 ## 四、分步（本次执行）
 
+> **状态（2026-11-14）**：S1–S5 完成——symbology/vnpy 边界/0183 迁移/前端/测试全绿（3403 passed / 2 skipped，dev 真库迁移往返通过）；待 S6 上产。
+
+
 1. **S1 单一映射层**：`symbology` canonical=MIC + crypto 自定义码 + 反向别名（旧 vt 仍可入）。
 2. **S2 代码扫尾**：`schema`/`transport`/`translate`/`md_gateway`/`markets`/`fees`/`risk`/`perms`/`adapters`/`data_sync`/`screen`/`routes` 全部改按 MIC。
 3. **S3 迁移 0185** + dev 演练（downgrade→upgrade→断言）。

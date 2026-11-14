@@ -34,9 +34,9 @@ def _crypto_provider(symbol: str) -> str | None:
     """加密 symbol 后缀 → provider（DataBus 暖机 source 路由用——multi-source 架构的
     provider 任务级路由，非键域判定）。批 66b：键判定退役 account_id 单一谓词后，
     本函数仅供 strategy_runner.main._warmup_history 的 DataRequest source 过滤。"""
-    if ".BINANCE" in symbol:
+    if symbol.endswith((".XBIN", ".BINANCE")):
         return "binance_perp"
-    if ".OKX" in symbol:
+    if symbol.endswith((".XOKX", ".OKX")):
         return "okx_perp"
     return None
 

@@ -14,12 +14,12 @@ import pytest
 from src.data_platform.perms import account_allows
 
 
-def _attr(category="stock", exchange="SHSE", board="main"):
+def _attr(category="stock", exchange="XSHG", board="main"):
     return SimpleNamespace(category=category, exchange=exchange, board=board)
 
 
 def _perm(cats=("stock", "etf", "convertible", "fund", "reits", "perp"),
-          exchs=("SHSE", "SZSE", "BSE"), boards=("main", "star", "chinext", "bse"),
+          exchs=("XSHG", "XSHE", "BJSE"), boards=("main", "star", "chinext", "bse"),
           is_st=False, conv=True):
     return (list(cats), list(exchs), list(boards), is_st, conv)
 
@@ -66,11 +66,11 @@ class TestAccountAllows:
 
     def test_exchange_mismatch_rejected(self):
         # account 无深股东户 → 深主板拒
-        assert _call(_attr(exchange="SZSE"), _perm(exchs=("SHSE", "BSE"))) is False
+        assert _call(_attr(exchange="XSHE"), _perm(exchs=("XSHG", "BJSE"))) is False
 
     def test_board_mismatch_rejected(self):
         # account 无创业板 → 创业板拒
-        assert _call(_attr(exchange="SZSE", board="chinext"),
+        assert _call(_attr(exchange="XSHE", board="chinext"),
                      _perm(boards=("main", "star", "bse"))) is False
 
     def test_board_none_fail_closed(self):
@@ -78,9 +78,9 @@ class TestAccountAllows:
 
     def test_board_exchange_consistency(self):
         # board=star 必 SHSE、bse 必 BSE（矛盾数据 fail-closed）
-        assert _call(_attr(exchange="SZSE", board="star"), _perm()) is False
-        assert _call(_attr(exchange="SZSE", board="bse"), _perm()) is False  # bse 却深市
-        assert _call(_attr(exchange="BSE", board="bse"), _perm()) is True   # 一致放行
+        assert _call(_attr(exchange="XSHE", board="star"), _perm()) is False
+        assert _call(_attr(exchange="XSHE", board="bse"), _perm()) is False  # bse 却深市
+        assert _call(_attr(exchange="BJSE", board="bse"), _perm()) is True   # 一致放行
 
     def test_st_rejected_when_not_allowed(self):
         # 批 117：board=main 且标的在 st_list 官方名单 且 account 未开 ST → 拒
@@ -90,11 +90,11 @@ class TestAccountAllows:
     def test_st_not_checked_for_non_main(self):
         # 科创/创业 ST 不走 is_st 检查（st 只 board=main 生效）
         st = {"name": "ST科创", "is_st": True}
-        assert _call(_attr(exchange="SHSE", board="star"), _perm(is_st=False), st=st) is True
+        assert _call(_attr(exchange="XSHG", board="star"), _perm(is_st=False), st=st) is True
 
     def test_etf_skips_board_exchange(self):
         # etf 跳过 exchange+board，仅 category 判定
-        assert _call(_attr(category="etf", exchange="SHSE", board=None),
+        assert _call(_attr(category="etf", exchange="XSHG", board=None),
                      _perm(exchs=(), boards=())) is True
 
     def test_convertible_needs_permission(self):
@@ -150,7 +150,7 @@ class TestAccountPermissionEndpoint:
         from src.web_api.errors import ApiError
         with pytest.raises(ApiError) as e:
             put_account_permission(4, AccountPermissionReq(
-                allowed_categories=["stock"], allowed_exchanges=["SHSE"],
+                allowed_categories=["stock"], allowed_exchanges=["XSHG"],
                 allowed_boards=["mainn"]), payload={"username": "test"})
         assert e.value.code == "ACCOUNT_PERM_BAD_VALUE"
 
@@ -160,6 +160,6 @@ class TestAccountPermissionEndpoint:
         from src.web_api.errors import ApiError
         with pytest.raises(ApiError) as e:
             put_account_permission(999999, AccountPermissionReq(
-                allowed_categories=["stock"], allowed_exchanges=["SHSE"],
+                allowed_categories=["stock"], allowed_exchanges=["XSHG"],
                 allowed_boards=["main"]), payload={"username": "test"})
         assert e.value.code == "ACCOUNT_NOT_FOUND"

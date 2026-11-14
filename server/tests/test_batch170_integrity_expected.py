@@ -30,8 +30,8 @@ def year_days():
 
 
 def test_exchange_and_crypto_detect():
-    assert exchange_of("000001.XSHE") == "SZSE"
-    assert exchange_of("BTCUSDT.XBIN") == "BINANCE"
+    assert exchange_of("000001.XSHE") == "XSHE"
+    assert exchange_of("BTCUSDT.XBIN") == "XBIN"
     assert exchange_of("BTCUSDT") == ""
     assert is_crypto("BTCUSDT.XBIN") and is_crypto("ETH-USDT.XOKX")
     assert not is_crypto("510300.XSHG")

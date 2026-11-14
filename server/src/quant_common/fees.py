@@ -21,9 +21,9 @@ def symbol_market(symbol: str) -> str | None:
     兼容裸代码（trade_log.symbol 是 vnpy TradeData.symbol 裸代码 "600000"，不带后缀）：
     A股=6 位数字裸代码或 SHSE/SZSE/SSE 后缀；可转债 11/12 开头；场内基金 50/51/56/58/15/16/18 开头。
     """
-    if ".BINANCE" in symbol:
+    if symbol.endswith((".XBIN", ".BINANCE")):
         return "binance_perp"
-    if ".OKX" in symbol:
+    if symbol.endswith((".XOKX", ".OKX")):
         return "okx_perp"
     code = symbol.split(".")[0]
     if code.startswith(("11", "12")):   # 沪/深可转债

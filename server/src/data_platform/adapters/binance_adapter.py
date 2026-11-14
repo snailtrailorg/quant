@@ -38,7 +38,7 @@ logger = logging.getLogger("quant")
 _BATCH = "https://data.binance.vision"
 _S3 = "https://s3.ap-northeast-1.amazonaws.com/data.binance.vision"
 _UM = "futures/um"
-_VENUE = "BINANCE"          # symbol 后缀（security_master._market_of_suffix 认它 → crypto）
+_VENUE = "XBIN"             # 批177：symbol 后缀（自定义 venue 码，ISO 表未占用；SM 认它 → crypto）
 _TIMEOUT = 30
 _MAX_WORKERS = 8            # 批量站是静态文件 CDN（无 weight 模型），礼貌性靠小并发表达
 

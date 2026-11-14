@@ -45,7 +45,7 @@ class TestSMBackfill:
         assert a.multiplier == 100            # 股 100 股/手
         assert a.trade_phase == "T+1"
         assert a.session_id == "astock_main"
-        assert a.market == "astock" and a.exchange == "SHSE"
+        assert a.market == "astock" and a.exchange == "XSHG"
 
     def test_convertible_t0(self, sm):
         a = sm.get("113531.XSHG")
@@ -60,7 +60,7 @@ class TestSMBackfill:
 
     def test_bse_backfilled(self, sm):
         a = sm.get("920726.BJSE")
-        assert a is not None and a.exchange == "BSE"
+        assert a is not None and a.exchange == "BJSE"
 
     def test_unknown_returns_none(self, sm):
         assert sm.get("NOPE.XSHG") is None
@@ -136,10 +136,10 @@ class TestMarketHours:
         assert {"pre", "auction", "open", "lunch"} <= main
 
     def test_band_rules(self, mh):
-        assert mh.band_of("SHSE", "main", False) == 10
-        assert mh.band_of("SHSE", "main", True) == 5      # ST 折半
-        assert mh.band_of("SZSE", "chinext", False) == 20
-        assert mh.band_of("BSE", "bse", False) == 30
+        assert mh.band_of("XSHG", "main", False) == 10
+        assert mh.band_of("XSHG", "main", True) == 5      # ST 折半
+        assert mh.band_of("XSHE", "chinext", False) == 20
+        assert mh.band_of("BJSE", "bse", False) == 30
 
 
 class TestSecurityApi:

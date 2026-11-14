@@ -10,7 +10,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_ROW = ("600000.XSHG", "astock", "SHSE", "stock", "main", "浦发银行", None,
+_ROW = ("600000.XSHG", "astock", "XSHG", "stock", "main", "浦发银行", None,
         100, 0.01, "T+1", "19991110", "", "astock_main")   # 批 108·步 2：+= session_id（第 13 列）
 
 
@@ -46,7 +46,7 @@ class TestUpsertRows:
     def test_dirty_date_nullified(self):
         import src.data_platform.db as dbm
         conn, cur = _mock_conn()
-        dirty = ("113531.XSHG", "astock", "SHSE", "convertible", None, "x", None,
+        dirty = ("113531.XSHG", "astock", "XSHG", "convertible", None, "x", None,
                  10, 0.001, "T+0", "None", "garbage", "astock_main")
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient

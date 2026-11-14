@@ -176,8 +176,8 @@ class TestScope:
         astock = engine._sm_universe("stock")       # 批 110：三元组 (vt_symbol, updated_at, list_date)
         assert astock and all(v.endswith((".XSHE", ".XSHG", ".BJSE")) for v, _u, _ld in astock)
         # venue 收窄：crypto 两所共享 bar_1d ⇒ 必须按 exchange 区分
-        binance = engine._sm_universe("perp", "BINANCE")
-        okx = engine._sm_universe("perp", "OKX")
+        binance = engine._sm_universe("perp", "XBIN")
+        okx = engine._sm_universe("perp", "XOKX")
         assert all(v.endswith(".XBIN") for v, _u, _ld in binance)
         assert all(v.endswith(".XOKX") for v, _u, _ld in okx)
 

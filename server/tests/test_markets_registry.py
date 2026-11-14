@@ -10,7 +10,7 @@ def test_registry_shapes():
     assert all(v["market"] in MARKETS for v in EXCHANGES.values())
     assert set(MARKET_OP_DECOMP) == {"convertible", "listed_fund", "astock", "binance_perp", "okx_perp"}   # 批127 Step3：正名单键
     d = MARKET_OP_DECOMP["binance_perp"]
-    assert d == ("crypto", "perp", "BINANCE")   # 三分混一立法化解
+    assert d == ("crypto", "perp", "XBIN")   # 三分混一立法化解
     # D25 v2：能力集 5 token（trading 保词——8 处 SQL 域谓词零改动）
     assert set(CAPABILITIES) == {"hist_quote", "rt_quote", "trading", "ref_data", "inst_event"}
     assert set(CAP_CLASS_LABELS) == set(CAPABILITIES)

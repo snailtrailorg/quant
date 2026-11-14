@@ -210,7 +210,7 @@ class TestRealDbParamsContract:
                 "capabilities": ["hist_quote"] if kind == cs.KIND_DATA else ["trading"],
                 "enabled": True}
         if kind == cs.KIND_TRADING:
-            vals["exchanges"] = ["SHSE"]
+            vals["exchanges"] = ["XSHG"]
             vals["account_key"] = f"PC-{tag}"        # UNIQUE(provider, account_key)
         return vals
 

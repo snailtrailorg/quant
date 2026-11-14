@@ -15,12 +15,10 @@ Freq = Literal["1min", "5min", "15min", "1H", "4H", "1D"]
 # 源格式（tushare）→ 内部 canonical MIC（**批177：派生自 symbology 单一入站别名表**）
 from src.quant_common.symbology import VENDOR_ALIASES as TS_EXCHANGE_MAP
 
-# 反向映射（MIC → Tushare ts_code）；历史写法一并保留（迁移期读旧行）
-EXCHANGE_TS_MAP = {
-    "XSHG": "SH", "SHSE": "SH", "SSE": "SH", "SH": "SH",
-    "XSHE": "SZ", "SZSE": "SZ", "SZ": "SZ",
-    "BJSE": "BJ", "BSE": "BJ", "BJ": "BJ",
-}
+# 反向映射（任意已知写法 → Tushare ts_code）；由 symbology 单一别名表派生，**不手写第二份**
+_TS_BY_MIC = {"XSHG": "SH", "XSHE": "SZ", "BJSE": "BJ"}
+EXCHANGE_TS_MAP = {alias: _TS_BY_MIC[mic] for alias, mic in TS_EXCHANGE_MAP.items()
+                   if mic in _TS_BY_MIC}
 
 
 def vt_to_ts(vt_symbol: str) -> str:

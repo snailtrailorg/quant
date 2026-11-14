@@ -42,7 +42,7 @@ from .base import BaseDataAdapter, UnsupportedFeature, register_adapter
 logger = logging.getLogger("quant")
 
 _BASE = "https://www.okx.com"      # 缺省基址；可由 proxy_binding.endpoint_override 覆盖（102a）
-_SYMBOL_SUFFIX = ".OKX"            # vt_symbol 后缀（security_master._market_of_suffix 认 → crypto）
+_SYMBOL_SUFFIX = ".XOKX"           # 批177：symbol 后缀（自定义 venue 码；SM 认 → crypto）
 _UA = "quant-data-sync/1.0"
 _TIMEOUT = 30
 
@@ -109,7 +109,7 @@ class OkxAdapter(BaseDataAdapter):
     """OKX USDⓈ-M 永续公开数据（`history-candles`；非实时）。"""
 
     provider = "okx"
-    venue = "OKX"             # 批 108·步 2：vt_symbol 后缀（与 `_SYMBOL_SUFFIX` 同值）
+    venue = "XOKX"            # 批177：与 `_SYMBOL_SUFFIX` 同值（自定义 venue 码）
     # 供给项（sync_id）：日线（102b）+ 盘中三档（批 116，manual 功能验证档）
     capabilities = {"okx_perp_daily", "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min"}
     # 契约层能力声明（粒度＝kind）。bar_daily/bar_minute 均非聚合域 ⇒ sub_kinds 必须为空

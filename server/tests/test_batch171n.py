@@ -318,9 +318,9 @@ class TestHeldVolumeSymbolAliases:
     def test_candidates_cover_shse_and_sse(self):
         # 批175d：候选函数迁至 symbology.aliases（语义不变：沪市双向、深市单值）
         from src.quant_common.symbology import aliases
-        assert aliases("600000.XSHG") == {"600000.XSHG", "600000.SSE"}
-        assert aliases("600000.SSE") == {"600000.XSHG", "600000.SSE"}
-        assert aliases("000001.XSHE") == {"000001.XSHE"}
+        assert aliases("600000.XSHG") == {"600000.XSHG", "600000.SHSE", "600000.SSE"}
+        assert aliases("600000.SSE") == {"600000.XSHG", "600000.SHSE", "600000.SSE"}
+        assert aliases("000001.XSHE") == {"000001.XSHE", "000001.SZSE"}
 
     def test_held_volume_finds_sse_row(self):
         # 批175d：0182 CHECK 后 `.SSE` 结构性不可落库（原 DB 级场景消失）→ 改钉纯函数：

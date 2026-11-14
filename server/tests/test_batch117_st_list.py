@@ -138,12 +138,12 @@ class TestPullNamechangePagination:
 # ---------------------------------------------------------------------------
 # 3：account_allows ST 三态（fail-closed + 冷启动保护）
 # ---------------------------------------------------------------------------
-def _attr(category="stock", exchange="SHSE", board="main"):
+def _attr(category="stock", exchange="XSHG", board="main"):
     return SimpleNamespace(category=category, exchange=exchange, board=board)
 
 
 def _perm(is_st=False, boards=("main", "star")):
-    return (["stock"], ["SHSE"], list(boards), is_st, True)
+    return (["stock"], ["XSHG"], list(boards), is_st, True)
 
 
 class _FakeCur:
@@ -220,7 +220,7 @@ class TestPermsStFailClosed:
     def test_st_check_only_for_main_board(self):
         """非 main 板不走 st_list 查（star 放行，即便连接对 st_list 查询会抛错）。"""
         # star 板：attr 检查通过（SHSE+star 一致），st_list 分支不进入 ⇒ exc 不触发
-        assert _call(_attr(exchange="SHSE", board="star"),
+        assert _call(_attr(exchange="XSHG", board="star"),
                      exc=RuntimeError("不应触达 st_list"), perm_is_st=False) is True
 
     def test_query_param_is_ts_form_not_vt(self):

@@ -159,7 +159,7 @@ DOMAIN_CAPS: dict[str, tuple] = {
 MARKET_OP_DECOMP: dict[str, tuple] = {
     "astock": ("astock", "stock", None),
     "convertible": ("astock", "convertible", None),
-    "binance_perp": ("crypto", "perp", "BINANCE"), "okx_perp": ("crypto", "perp", "OKX"),
+    "binance_perp": ("crypto", "perp", "XBIN"), "okx_perp": ("crypto", "perp", "XOKX"),
     "listed_fund": ("astock", "listed_fund", None),   # 批 127：正名键（etf 0153 清）
 }
 
