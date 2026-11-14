@@ -786,3 +786,12 @@
 - **两类根因**：① `Invalid security quantity`＝风控 `max_single_amount` 截断 `int(10万/price)` 未按手取整（554/541 非整百）；② XTP `error_id=10000`、`error_msg` 空＝A股「价格笼子」（买入价 > 买一×102%），根因在建仓脚本用腾讯 last×1.03 选价、非同源。
 - **修**（产品侧）：`risk.py` 截断按品种手数取整（stock/ETF 100、可转债 10）；`td.py` `write_error` 保留完整 `代码+信息`、新增 `pop_last_reject()`/`pop_order_error()`；**插件不写业务库**，`order_log.error` 由编排层 `write_order_status` 落（用户裁定「不能破坏设计架构」）。价格笼子属**调用方选价问题**，不改产品（应改用同源 hub tick 买一/卖一）。
 - **影响面**：仅「单笔超 10 万被截断」时生效、平仓单豁免；日常策略小额单零影响；修复前必废单→修复后小单可成交，净改善。`OrderState` 契约不动、vnpy_xtp 第三方包不改。
+
+## 2026-11-13/14 · 批175 标的主标识归一（L0-L3 全做）
+
+- **裁定**（用户）：「让不一致的仅仅局限在特定的小区域，一旦接入到我们平台，就统一」→ 四层落地；补正「L0-L3 都要做，L2 已有需对齐优化，L3 入库与显示正规化能减少后续混淆」。
+- **边界定义**：外部边界不止数据源 adapter——**vnpy 运行时也是**（`Exchange.SSE.value="SSE"` 经 `translate` 漏进 `position_snapshot`，批173/174 实证漏口）。
+- **「国标」用词纠正**：国内无强制国标；ISO 10383 MIC 只标识 **venue**，证券级唯一标识是 ISIN（ISO 6166）。分层＝venue→MIC、证券→ISIN(未来)、业务键/展示→vt，**不只统一后缀字符串**。
+- **MIC 定案（官方 CSV）**：`XSHG`/`XSHE`/`BJSE`；`XNEE` 实为新西兰、`XBSE` 为罗马尼亚（社区文章张冠李戴）。
+- **实现**：175a/b/c/d 四次上产（`202611131711-1a85f7e`、`202611141046-64c3709`）；`symbology` 单一别名表 + 基线棘轮；`translate` 三态归一；0181 expand（mic_code + 去重归一）、0182 contract（CHECK + 真 DROP）。
+- **有意不做**：`markets.EXCHANGES` 不补 `SSE` 键（缺省 astock 已覆盖，补键会污染 mgmt 交易所枚举）；`market_of_symbol` 不改读 SM（hub N+1）；`order_log` 不加 `symbol_canonical`（GENERATED STORED 全表重写）；surrogate 主键/拆 `raw_code` 不做（`vt_symbol` 被全链引用）。
