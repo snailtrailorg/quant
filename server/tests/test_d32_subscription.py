@@ -34,26 +34,26 @@ def acc():
 
 
 def test_empty_license_allows_all(acc):
-    assert licensed(acc, "600000.SHSE") is True
-    assert licensed(acc, "110000.SHSE") is True
+    assert licensed(acc, "600000.XSHG") is True
+    assert licensed(acc, "110000.XSHG") is True
 
 
 def test_category_whitelist(acc):
     specs.update_data_license(acc, "convertible")
     specs.invalidate()
-    assert licensed(acc, "110000.SHSE") is True
-    assert licensed(acc, "600000.SHSE") is False
-    assert denied_symbols(acc, {"110000.SHSE", "600000.SHSE"}) == {"600000.SHSE"}
+    assert licensed(acc, "110000.XSHG") is True
+    assert licensed(acc, "600000.XSHG") is False
+    assert denied_symbols(acc, {"110000.XSHG", "600000.XSHG"}) == {"600000.XSHG"}
 
 
 def test_symbol_whitelist_and_star(acc):
-    specs.update_data_license(acc, "600000.SHSE")
+    specs.update_data_license(acc, "600000.XSHG")
     specs.invalidate()
-    assert licensed(acc, "600000.SHSE") is True
-    assert licensed(acc, "600519.SHSE") is False
+    assert licensed(acc, "600000.XSHG") is True
+    assert licensed(acc, "600519.XSHG") is False
     specs.update_data_license(acc, "*")
     specs.invalidate()
-    assert licensed(acc, "600519.SHSE") is True
+    assert licensed(acc, "600519.XSHG") is True
 
 
 def test_unknown_symbol_fail_closed(acc):
@@ -63,4 +63,4 @@ def test_unknown_symbol_fail_closed(acc):
 
 
 def test_missing_account_fail_closed():
-    assert licensed(999999, "600000.SHSE") is False
+    assert licensed(999999, "600000.XSHG") is False

@@ -16,7 +16,7 @@ fail-fast 而非静默回落」——fail-fast 那一半已在 test_provider_reg
 - 桩经**正式注册通道**登记（`register_adapter` 装饰器 + `_REGISTRY`），不是短路
   `_ADAPTERS` 内部——即验证的正是"新增源=三处各注册一类，**引擎零改动**"（内容点 2）。
 
-用合成标的 `999999.SHSE`（不撞真实数据），用已有 sync_id `astock_daily`
+用合成标的 `999999.XSHG`（不撞真实数据），用已有 sync_id `astock_daily`
 （路由表是写死的 frozenset，新 sync_id 需改代码——provider 维才是本批的"零改动"维）。
 """
 import os
@@ -26,7 +26,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 STUB_PROVIDER = "stubsrc_b83"
-STUB_SYMBOL = "999999.SHSE"
+STUB_SYMBOL = "999999.XSHG"
 SYNC_ID = "astock_daily"
 BACKFILL_DAY = "20260930"      # 2026-09-30 = 周三（pd.date_range freq='B' 会取到它）
 

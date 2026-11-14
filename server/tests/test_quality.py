@@ -13,14 +13,14 @@ class TestSmReconcile:
         conn.__enter__.return_value = conn
         # execute 三次：security_master(vt_symbol) → static_symbols 在市(ts_code) → static_symbols 退市
         conn.execute.side_effect = [
-            MagicMock(fetchall=MagicMock(return_value=[("600000.SHSE",), ("000001.SZSE",)])),
+            MagicMock(fetchall=MagicMock(return_value=[("600000.XSHG",), ("000001.XSHE",)])),
             MagicMock(fetchall=MagicMock(return_value=[("600000.SH",), ("300750.SZ",)])),
             MagicMock(fetchall=MagicMock(return_value=[("000002.SZ",)])),
         ]
         with patch("src.data_platform.db.get_conn", return_value=conn):
             r = Q.sm_reconcile()
-        assert r["sm_only"] == ["000001.SZSE"]       # 库有 000001、上市清单无
-        assert r["static_only"] == ["300750.SZSE"]   # 上市清单有 300750、库无（ts_code 归一 .SZ→.SZSE）
+        assert r["sm_only"] == ["000001.XSHE"]       # 库有 000001、上市清单无
+        assert r["static_only"] == ["300750.XSHE"]   # 上市清单有 300750、库无（ts_code 归一 .SZ→.XSHE）
         assert r["delist_count"] == 1
 
     def test_db_error_soft(self):

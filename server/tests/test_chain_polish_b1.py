@@ -11,7 +11,7 @@ import pytest
 def _strategy(volume_type="SHARES", params=None):
     from src.strategy_framework.strategy import Strategy, StrategyConfig
     cfg = StrategyConfig(
-        id="t1", name="t", type="astock_analysis", symbol="600000.SHSE", adapter="xtp",
+        id="t1", name="t", type="astock_analysis", symbol="600000.XSHG", adapter="xtp",
         factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
         params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
                 "volume_type": volume_type, **(params or {})})
@@ -22,7 +22,7 @@ def _crypto_strategy(volume_type="SHARES", params=None):
     """crypto 策略辅助（无 A 股整百手约束）。"""
     from src.strategy_framework.strategy import Strategy, StrategyConfig
     cfg = StrategyConfig(
-        id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.BINANCE", adapter="binance_perp",
+        id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.XBIN", adapter="binance_perp",
         factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
         params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
                 "volume_type": volume_type, **(params or {})})
@@ -170,7 +170,7 @@ class TestSignalBackfill:
         """#2：因子模式聚合出的 Signal volume/price 恒 0 → 回填后可下单。"""
         from src.strategy_framework.strategy import Strategy, StrategyConfig, Action
         cfg = StrategyConfig(
-            id="t2", name="t", type="astock_analysis", symbol="600000.SHSE", adapter="xtp",
+            id="t2", name="t", type="astock_analysis", symbol="600000.XSHG", adapter="xtp",
             factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
             params={"mode": "python",
                     "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
@@ -207,7 +207,7 @@ class TestAggregatorSemantics:
         """P2-4：config.factors 缺 weight 键 fail-closed（不静默按 1.0）。"""
         import pytest
         from src.strategy_framework.strategy import Strategy, StrategyConfig
-        cfg = StrategyConfig(id="t", name="t", type="astock_analysis", symbol="x.SHSE",
+        cfg = StrategyConfig(id="t", name="t", type="astock_analysis", symbol="x.XSHG",
                              adapter="xtp", factors=[{"name": "ma_dev"}])  # 缺 weight
         with pytest.raises(ValueError):
             Strategy.from_config(cfg, MagicMock())
@@ -327,7 +327,7 @@ class TestRunStatusGates:
         """
         from src.strategy_framework.strategy import Strategy, StrategyConfig
         cfg = StrategyConfig(
-            id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.BINANCE", adapter="binance_spot",
+            id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.XBIN", adapter="binance_spot",
             factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
             params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
                     "volume_type": "PERCENT", "volume_pct": 30})

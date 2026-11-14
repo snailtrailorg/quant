@@ -351,7 +351,7 @@ class EmqMdGateway(MdGateway):
     def _emq_ex_for(self, symbol: str):
         """project 后缀（SHSE/SZSE/BSE）→ 绑定模块 EMQ_EXCHANGE_TYPE 枚举；未映射/未加载返 None。"""
         suffix = symbol.rsplit(".", 1)[-1]
-        name = {"SHSE": "SH", "SZSE": "SZ", "BSE": "BJGZ"}.get(suffix)
+        name = {"XSHG": "SH", "XSHE": "SZ", "BJSE": "BJGZ"}.get(suffix)
         if name is None or self._mod is None:
             return None
         return getattr(self._mod.EMQ_EXCHANGE_TYPE, name)

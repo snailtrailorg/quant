@@ -27,7 +27,7 @@ def _validate_strategy_category(stype: str, symbol: str, factors: list) -> dict:
     if not sym:
         t = (stype or "").lower()
         cat = "cb" if "convertible" in t or "cb" in t else ("etf" if ("etf" in t or "listed_fund" in t or "fund" in t) else "astock")   # 批 127：补正名词形（etf 容错留）
-        sym = {"cb": "113000.SHSE", "etf": "510300.SHSE", "astock": "600000.SHSE"}[cat]  # 探测代号
+        sym = {"cb": "113000.XSHG", "etf": "510300.XSHG", "astock": "600000.XSHG"}[cat]  # 探测代号
     return validate_strategy_factors(sym, factors)
 
 
@@ -263,7 +263,7 @@ def preview_factor_api(body: dict = Body(...),
 
     from src.strategy_framework.factor import BarContext, DSLFactor, _make_factor_class, validate_dsl_expr
     code = body.get("code", "")
-    symbol = body.get("symbol", "600000.SHSE")
+    symbol = body.get("symbol", "600000.XSHG")
     freq = body.get("freq", "1D")
     n = max(10, min(int(body.get("bars", 60)), 500))
     params = body.get("params") or {}

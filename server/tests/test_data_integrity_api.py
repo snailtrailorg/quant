@@ -57,7 +57,7 @@ def test_failure_returns_error_field_and_logs():
 
 
 def test_success_shape_unchanged():
-    rows = [("600000.SHSE", 3, date(2026, 9, 28), date(2026, 9, 30))]
+    rows = [("600000.XSHG", 3, date(2026, 9, 28), date(2026, 9, 30))]
     cal = [(date(2026, 9, 28),), (date(2026, 9, 29),), (date(2026, 9, 30),)]
     with patch.object(risk_mod, "get_conn_for_heavy_read", lambda *a, **k: _cm(_conn(rows, cal))):
         out = risk_mod.data_integrity_api(freq="1D", payload={"username": "t"})
@@ -66,7 +66,7 @@ def test_success_shape_unchanged():
     # 批 171j：summary 增 suspended_total（净化规模 Σ）；既有键不动（shape 守门扩面）
     assert out["summary"] == {"total": 1, "complete": 1, "partial": 0, "missing": 0,
                               "suspended_total": 0}
-    assert out["items"][0]["symbol"] == "600000.SHSE"
+    assert out["items"][0]["symbol"] == "600000.XSHG"
     assert out["items"][0]["pct"] == 100.0
     assert out["items"][0]["status"] == "complete"
     # 批 171j：净化对照列在（无停牌标的=0 对照消失语义）

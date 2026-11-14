@@ -149,7 +149,7 @@ class Scope:
 
 
 ASTOCK_ALL = Scope(frozenset({"astock"}), None, None)
-ASTOCK_SHSE_SZSE = Scope(frozenset({"astock"}), frozenset({"SHSE", "SZSE"}), None)  # stk_mins 无 BSE 的覆盖事实
+ASTOCK_SHSE_SZSE = Scope(frozenset({"astock"}), frozenset({"XSHG", "XSHE"}), None)  # stk_mins 无 BJSE 的覆盖事实
 CRYPTO_ALL = Scope(frozenset({"crypto"}), None, None)
 
 

@@ -38,7 +38,7 @@ class TestSparseCursorEnd:
     def test_nondigit_prefix_filtered_keeps_end(self):
         # minute/index 形失败串（非日期前缀）全滤 ⇒ 保持 end（与 171d-A next_from 闸同构）
         assert _sparse_cursor_end("20261106",
-                                 ["000001.SZSE:Timeout", "no_rows:x"]) == "20261106"
+                                 ["000001.XSHE:Timeout", "no_rows:x"]) == "20261106"
 
     def test_first_day_failure_rollback_bounded(self):
         start = "20261101"

@@ -43,7 +43,7 @@ def exchange_of(suffix: str) -> Any:
     "vt → vnpy 枚举"出口层——vnpy 沪市枚举名恰为 SSE，属出口语义而非入站别名）。"""
     from src.quant_common.symbology import vt_suffix
     c = constants()
-    mapping = {"SHSE": c.Exchange.SSE, "SZSE": c.Exchange.SZSE, "BSE": c.Exchange.BSE}
+    mapping = {"XSHG": c.Exchange.SSE, "XSHE": c.Exchange.SZSE, "BJSE": c.Exchange.BSE}
     try:
         return mapping.get(vt_suffix(suffix or ""), c.Exchange.SSE)
     except ValueError:

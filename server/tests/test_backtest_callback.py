@@ -13,7 +13,7 @@ def test_on_bar_callback():
 
     engine = BacktestEngine(initial_capital=100000)
     cfg = StrategyConfig(
-        id="t", name="t", type="astock_analysis", symbol="600000.SHSE",
+        id="t", name="t", type="astock_analysis", symbol="600000.XSHG",
         adapter="xtp", factors=[{"name": "ma_dev", "weight": 1, "params": {"n": 5}}],
         aggregator={"threshold_buy": 0.0, "threshold_sell": 0.0},
     )

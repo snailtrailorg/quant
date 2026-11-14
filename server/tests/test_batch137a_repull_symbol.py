@@ -35,7 +35,7 @@ class TestRepullNormalization:
         from src.data_platform.schema import vt_to_ts
         ad = _RecAdapter(mapper=vt_to_ts)
         from src.data_sync.engine import _repull_symbol
-        _repull_symbol(ad, "bar_minute", None, "1min", "600000.SHSE", "20260901", "20260902")
+        _repull_symbol(ad, "bar_minute", None, "1min", "600000.XSHG", "20260901", "20260902")
         assert ad.calls[0][2]["symbol"] == "600000.SH"
 
     def test_crypto_zero_drift(self):
@@ -44,8 +44,8 @@ class TestRepullNormalization:
         ad = _RecAdapter(mapper=BaseDataAdapter.to_source_symbol.__get__(object()))
         from src.data_sync.engine import _repull_symbol
         ad.provider = "binance"
-        _repull_symbol(ad, "bar_minute", "perp", "1min", "BTCUSDT.BINANCE", "20260901", "20260902")
-        assert ad.calls[0][2]["symbol"] == "BTCUSDT.BINANCE"
+        _repull_symbol(ad, "bar_minute", "perp", "1min", "BTCUSDT.XBIN", "20260901", "20260902")
+        assert ad.calls[0][2]["symbol"] == "BTCUSDT.XBIN"
 
 
 class TestSupplyMapping:
@@ -82,9 +82,9 @@ class TestSymbolMatrix:
 
     def test_matrix_unchanged(self):
         from src.data_platform.schema import vt_to_ts
-        assert vt_to_ts("600000.SHSE") == "600000.SH"
-        assert vt_to_ts("000001.SZSE") == "000001.SZ"
-        assert vt_to_ts("920196.BSE") == "920196.BJ"
+        assert vt_to_ts("600000.XSHG") == "600000.SH"
+        assert vt_to_ts("000001.XSHE") == "000001.SZ"
+        assert vt_to_ts("920196.BJSE") == "920196.BJ"
         assert vt_to_ts("600000.SH") == "600000.SH"
 
     def test_alias_is_single_implementation(self):

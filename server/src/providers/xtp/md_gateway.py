@@ -44,8 +44,9 @@ class XtpMdGateway(MdGateway):
         self._context_fn = lambda: ""
         self._sup = MdSessionSupervisor(self._sess, counters, make_alert(), role="hub",
                                         context=lambda: self._context_fn())
-        self._EX = {"SHSE": Exchange.SSE, "SZSE": Exchange.SZSE,
-                    "BSE": getattr(Exchange, "BSE", Exchange.SSE)}
+        # 批177：canonical=MIC（vnpy 枚举值 SSE/SZSE/BSE 只在此边界出现）
+        self._EX = {"XSHG": Exchange.SSE, "XSHE": Exchange.SZSE,
+                    "BJSE": getattr(Exchange, "BSE", Exchange.SSE)}
         self.event_engines = (self._ee,)   # EngineLoop 事件线程存活检查面（R-BR12 原语义）
 
         # MD 生命周期可见化（2026-08-24 僵尸会话事件）：连接/断开/重登日志走 EVENT_LOG（原 hub on_log 段

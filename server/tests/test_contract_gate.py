@@ -54,18 +54,18 @@ class TestKindRegistry:
 class TestScope:
     def test_covers_none_wildcard(self):
         s = ASTOCK_ALL
-        assert s.covers_one("astock", "BSE", "reits")     # 全所全品类通配
-        assert not s.covers_one("crypto", "BINANCE", "perp")
+        assert s.covers_one("astock", "BJSE", "reits")     # 全所全品类通配
+        assert not s.covers_one("crypto", "XBIN", "perp")
 
     def test_covers_exchange_filter(self):
         s = ASTOCK_SHSE_SZSE
-        assert s.covers_one("astock", "SHSE", "stock")
-        assert not s.covers_one("astock", "BSE", "stock")  # stk_mins 无 BSE 覆盖事实
+        assert s.covers_one("astock", "XSHG", "stock")
+        assert not s.covers_one("astock", "BJSE", "stock")  # stk_mins 无 BSE 覆盖事实
 
     def test_covers_category_filter(self):
         s = Scope(frozenset({"astock"}), None, frozenset({"convertible"}))
-        assert s.covers_one("astock", "SHSE", "convertible")
-        assert not s.covers_one("astock", "SHSE", "stock")
+        assert s.covers_one("astock", "XSHG", "convertible")
+        assert not s.covers_one("astock", "XSHG", "stock")
 
     def test_markets_nonempty_enforced(self):
         # 29 §三立法：markets 非空——全市场=显式列全集，防跨市场通配非法态（盲审 A/B 收回钉）
@@ -77,7 +77,7 @@ class TestScope:
 
 class TestDataRequest:
     def test_defaults(self):
-        r = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
+        r = DataRequest(kind="bar_daily", symbols=("600000.XSHG",), temporality="historical")
         assert r.sub_kind is None and r.mode == "consume" and r.as_of is AsOf.LATEST
         assert r.deadline_ms == 10_000 and r.consumer_tag == "default"
 

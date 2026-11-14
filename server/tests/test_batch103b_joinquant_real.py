@@ -111,7 +111,7 @@ class _FakeJQAdapter:
         return pd.DataFrame([{"i": i} for i in range(self._rows_per_date)])
 
     def to_bar_rows(self, df, freq, adj_map=None):
-        return [("000001.SZSE", "1D", datetime(2026, 6, 1, tzinfo=timezone.utc),
+        return [("000001.XSHE", "1D", datetime(2026, 6, 1, tzinfo=timezone.utc),
                  1.0, 2.0, 0.5, 1.5, 100.0, 200.0, None, "joinquant")
                 for _ in range(len(df))]
 
@@ -173,8 +173,8 @@ class TestNormalizeFrame:
 class TestSymbolNormalization:
     def test_to_source_symbol(self):
         a = JQ.JoinQuantAdapter()
-        assert a.to_source_symbol("000001.SZSE") == "000001.XSHE"
-        assert a.to_source_symbol("600000.SHSE") == "600000.XSHG"
+        assert a.to_source_symbol("000001.XSHE") == "000001.XSHE"
+        assert a.to_source_symbol("600000.XSHG") == "600000.XSHG"
         assert a.to_source_symbol("000001.SZ") == "000001.XSHE"
         assert a.to_source_symbol("600000.SH") == "600000.XSHG"
         assert a.to_source_symbol("") == "" and a.to_source_symbol("000001") == "000001"
@@ -202,7 +202,7 @@ class TestToBarRows:
         assert len(rows) == 2
         r = rows[0]
         assert len(r) == 11
-        assert r[0] == "000001.SZSE"          # vt_symbol（内部键，与 tushare 行同键）
+        assert r[0] == "000001.XSHE"          # vt_symbol（内部键，与 tushare 行同键）
         assert r[1] == "1D"
         assert r[7] == 95_459_569.0           # volume＝股，与 bar_1d 同单位（**不 ÷100**）
         assert r[8] == 1_042_306_456.0        # amount＝元
@@ -228,7 +228,7 @@ class TestPullDaily:
         """三个参数必须显式传——`fq` 默认 `pre` 会改价（破坏未复权契约）。"""
         fake = _FakeJQModule(_single_symbol_frame())
         a = self._adapter_with(fake)
-        df = a.pull_daily("000001.SZSE", "20260601", "20260602")
+        df = a.pull_daily("000001.XSHE", "20260601", "20260602")
         assert len(fake.calls) == 1
         c = fake.calls[0]
         assert c["fq"] is None, "fq 必须 pin 成 None（否则拿到前复权价）"
@@ -243,7 +243,7 @@ class TestPullDaily:
     def test_batches_by_800(self):
         fake = _FakeJQModule(pd.DataFrame())
         a = self._adapter_with(fake)
-        syms = [f"{i:06d}.SZSE" for i in range(1700)]
+        syms = [f"{i:06d}.XSHE" for i in range(1700)]
         a.pull_daily("", "20260601", "20260601", symbols=syms)
         sizes = [len(c["security"]) for c in fake.calls]
         assert sizes == [800, 800, 100], sizes
@@ -264,7 +264,7 @@ class TestPullDaily:
 
         fake.get_price = _flaky
         a = self._adapter_with(fake)
-        syms = [f"{i:06d}.SZSE" for i in range(900)]     # 2 批（800 + 100）
+        syms = [f"{i:06d}.XSHE" for i in range(900)]     # 2 批（800 + 100）
         out = a.pull_daily("", "20260601", "20260601", symbols=syms)
         assert len(fake.calls) > 2, "首批发须被二分（否则整批丢）"
         assert len(out) == 900, f"二分后 900 只应全部投递，实得 {len(out)}"
@@ -274,7 +274,7 @@ class TestPullDaily:
         fake = _FakeJQModule(_single_symbol_frame())
         a = self._adapter_with(fake)
         a.pull_daily("", "20260601", "20260601",
-                     symbols=["000001.SZSE", "920000.BJ", "600000.SHSE"])
+                     symbols=["000001.XSHE", "920000.BJ", "600000.XSHG"])
         assert len(fake.calls) == 1
         assert fake.calls[0]["security"] == ["000001.XSHE", "600000.XSHG"], fake.calls[0]["security"]
         assert a.last_skipped == ["920000.BJ"], a.last_skipped
@@ -301,7 +301,7 @@ class TestPullDaily:
 
         fake = _RejectBad()
         a = self._adapter_with(fake)
-        syms = ["000001.SZSE", "000002.SZSE", "600000.SHSE", "600519.SHSE"]
+        syms = ["000001.XSHE", "000002.XSHE", "600000.XSHG", "600519.XSHG"]
         out = a.pull_daily("", "20260601", "20260601", symbols=syms)
         assert a.last_skipped == [bad], a.last_skipped
         assert len(out) == 3, f"4 只中 1 只坏 ⇒ 其余 3 只照投递，实得 {len(out)}"
@@ -315,12 +315,12 @@ class TestPullDaily:
     def test_pull_daily_batch_rejects_non_astock(self):
         from src.data_platform.adapters.base import UnsupportedFeature
         with pytest.raises(UnsupportedFeature):
-            JQ.JoinQuantAdapter().pull_daily_batch("20260601", "etf", symbols=["000001.SZSE"])
+            JQ.JoinQuantAdapter().pull_daily_batch("20260601", "etf", symbols=["000001.XSHE"])
 
     def test_pull_minute_unsupported(self):
         from src.data_platform.adapters.base import UnsupportedFeature
         with pytest.raises(UnsupportedFeature):
-            JQ.JoinQuantAdapter().pull_minute("000001.SZSE", "1m", "20260601", "20260602")
+            JQ.JoinQuantAdapter().pull_minute("000001.XSHE", "1m", "20260601", "20260602")
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +388,7 @@ class TestDataSourceCredentials:
 
 class TestHandler:
     def _run(self, adapter, cfg=None, end="20260603", backfill=None,
-             dates=("20260601", "20260602", "20260603"), symbols=("000001.SZSE",),
+             dates=("20260601", "20260602", "20260603"), symbols=("000001.XSHE",),
              acquired=True, saved=2):
         from src.data_sync import engine
         from src.data_sync import sync_lock as sl
@@ -525,7 +525,7 @@ class TestHandler:
         ad = _FakeJQAdapter()
         seen = []
         with patch.object(engine, "_get_kline_adapter", return_value=ad), \
-             patch.object(engine, "_list_static_ts_codes", return_value=["000001.SZSE"]), \
+             patch.object(engine, "_list_static_ts_codes", return_value=["000001.XSHE"]), \
              patch.object(engine, "_trade_dates_in_range", return_value=["20260601", "20260602"]), \
              patch("src.data_sync.sync_lock.SyncLock", _Lock(True)), \
              patch("src.data_platform.db.save_bars_overwrite", return_value=1):

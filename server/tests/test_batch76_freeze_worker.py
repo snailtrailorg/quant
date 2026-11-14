@@ -91,7 +91,7 @@ def _bar(seq, ts):
 def wired():
     fake = FakeValkey()
     ctx = {
-        "tid": 41001, "sid": "smoke-strat", "symbol": "X.SHSE",
+        "tid": 41001, "sid": "smoke-strat", "symbol": "X.XSHG",
         "strategy": StubStrategy(), "adapter": SimpleNamespace(), "event_engine": MagicMock(),
         "td_api": SimpleNamespace(connect_status=True), "history": [],
         "frozen": {"now": False, "sticky": False, "sticky_cause": None},

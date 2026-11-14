@@ -8,12 +8,12 @@ import src.strategy_runner.hub_worker as hw
 
 class TestCryptoProvider:
     def test_crypto_suffix(self):
-        assert hw._crypto_provider("BTCUSDT.BINANCE") == "binance_perp"
-        assert hw._crypto_provider("ETHUSDT.OKX") == "okx_perp"
+        assert hw._crypto_provider("BTCUSDT.XBIN") == "binance_perp"
+        assert hw._crypto_provider("ETHUSDT.XOKX") == "okx_perp"
 
     def test_astock_none(self):
-        assert hw._crypto_provider("600000.SHSE") is None
-        assert hw._crypto_provider("000001.SZSE") is None
+        assert hw._crypto_provider("600000.XSHG") is None
+        assert hw._crypto_provider("000001.XSHE") is None
         assert hw._crypto_provider("688001.SSE") is None
 
 
@@ -21,19 +21,19 @@ class TestStreamKey:
     """批 66b（D26）：全市场统一 per-account 键——A 股/加密同形，无市场分支。"""
 
     def test_astock_per_account(self):
-        assert hw.bar_stream_key("600000.SHSE", account_id=1) == "hub:bars:1:600000.SHSE"
-        assert hw.bar_stream_key("000001.SZSE", account_id=4) == "hub:bars:4:000001.SZSE"
+        assert hw.bar_stream_key("600000.XSHG", account_id=1) == "hub:bars:1:600000.XSHG"
+        assert hw.bar_stream_key("000001.XSHE", account_id=4) == "hub:bars:4:000001.XSHE"
 
     def test_crypto_per_account(self):
-        assert hw.bar_stream_key("BTCUSDT.BINANCE", account_id=7) == "hub:bars:7:BTCUSDT.BINANCE"
-        assert hw.bar_stream_key("ETHUSDT.OKX", account_id=9) == "hub:bars:9:ETHUSDT.OKX"
+        assert hw.bar_stream_key("BTCUSDT.XBIN", account_id=7) == "hub:bars:7:BTCUSDT.XBIN"
+        assert hw.bar_stream_key("ETHUSDT.XOKX", account_id=9) == "hub:bars:9:ETHUSDT.XOKX"
 
     def test_none_raises_no_bare_fallback(self):
         """批 66b 钉：account_id 必填——裸键形态退役（无「退回裸键」分支，防复活）。"""
         with pytest.raises(ValueError):
-            hw.bar_stream_key("600000.SHSE", account_id=None)
+            hw.bar_stream_key("600000.XSHG", account_id=None)
         with pytest.raises(ValueError):
-            hw.bar_stream_key("BTCUSDT.BINANCE", account_id=None)
+            hw.bar_stream_key("BTCUSDT.XBIN", account_id=None)
 
 
 class TestAccountMismatch:
@@ -79,7 +79,7 @@ class TestGetBarsSourceFilter:
         import src.data_platform.db as db
         conn = self._conn()
         with patch.object(db, "get_conn", return_value=conn), patch.object(db, "ensure_table"):
-            db.get_bars("X.BINANCE", "1min", None, None, source="binance_perp")
+            db.get_bars("X.XBIN", "1min", None, None, source="binance_perp")
         sql = conn.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
         assert "AND source = %s" in sql
         assert sql.index("AND source") < sql.index("ORDER BY")   # 双盲审 P0 回归钉：AND 必须在 ORDER BY 之前
@@ -89,6 +89,6 @@ class TestGetBarsSourceFilter:
         import src.data_platform.db as db
         conn = self._conn()
         with patch.object(db, "get_conn", return_value=conn), patch.object(db, "ensure_table"):
-            db.get_bars("X.BINANCE", "1min", None, None)
+            db.get_bars("X.XBIN", "1min", None, None)
         sql = conn.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
         assert "AND source" not in sql

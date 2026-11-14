@@ -168,9 +168,9 @@ class SMClient:
     @staticmethod
     def _market_of_suffix(exch: str) -> str | None:
         """交易所后缀→市场（无档近似维度；未知后缀 None=不否决——SM 未回填≠不可用）。"""
-        if exch in ("SHSE", "SZSE", "BSE"):
+        if exch in ("XSHG", "XSHE", "BJSE", "SHSE", "SZSE", "BSE"):
             return "astock"
-        if exch in ("BINANCE", "OKX"):
+        if exch in ("XBIN", "XOKX", "BINANCE", "OKX"):
             return "crypto"
         return None
 

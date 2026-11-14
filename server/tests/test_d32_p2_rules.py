@@ -41,7 +41,7 @@ def _db_up() -> bool:
 
 
 def _intent(**kw):
-    base = dict(symbol="600000.SHSE", action="BUY", volume=100, price=10.0,
+    base = dict(symbol="600000.XSHG", action="BUY", volume=100, price=10.0,
                 order_type="limit", reason="")
     base.update(kw)
     return SimpleNamespace(**base)
@@ -89,7 +89,7 @@ def test_dynamic_rules_registered():
 
 @pytest.mark.skipif(not _db_up(), reason="真库不可用")
 def test_lot_size_and_price_band_validation():
-    rs = rules_for(None, "600000.SHSE")
+    rs = rules_for(None, "600000.XSHG")
     with pytest.raises(RuleViolation) as ei:
         rs.validate(_intent(volume=50), {"last_price": 10.0}, "open")
     assert ei.value.code == "LOT_SIZE"
@@ -104,20 +104,20 @@ def test_lot_size_and_price_band_validation():
 @pytest.mark.skipif(not _db_up(), reason="真库不可用")
 def test_round_price_follows_security_master_tick():
     a = _A()
-    assert a.round_close_price(10.126, {}, "600000.SHSE") == pytest.approx(10.13)
-    assert a.round_close_price(100.1234, {}, "110000.SHSE") == pytest.approx(100.123)
+    assert a.round_close_price(10.126, {}, "600000.XSHG") == pytest.approx(10.13)
+    assert a.round_close_price(100.1234, {}, "110000.XSHG") == pytest.approx(100.123)
 
     with get_conn() as c:
-        prev = c.execute("SELECT tick_size FROM security_master WHERE vt_symbol='600000.SHSE'").fetchone()[0]
-        c.execute("UPDATE security_master SET tick_size=0.05 WHERE vt_symbol='600000.SHSE'")
+        prev = c.execute("SELECT tick_size FROM security_master WHERE vt_symbol='600000.XSHG'").fetchone()[0]
+        c.execute("UPDATE security_master SET tick_size=0.05 WHERE vt_symbol='600000.XSHG'")
         c.commit()
     try:
         from src.data_platform import specs
         specs.invalidate()
-        assert a.round_close_price(10.12, {}, "600000.SHSE") == pytest.approx(10.10)
+        assert a.round_close_price(10.12, {}, "600000.XSHG") == pytest.approx(10.10)
     finally:
         with get_conn() as c:
-            c.execute("UPDATE security_master SET tick_size=%s WHERE vt_symbol='600000.SHSE'", (prev,))
+            c.execute("UPDATE security_master SET tick_size=%s WHERE vt_symbol='600000.XSHG'", (prev,))
             c.commit()
         from src.data_platform import specs
         specs.invalidate()
@@ -133,8 +133,8 @@ def test_adapter_uses_account_close_policy():
         a = _A()
         a.account_id = acc_id
         assert a.close_reference_price({"bid": [10.0], "ask": [10.1]},
-                                       SimpleNamespace(symbol="600000.SHSE"), "SELL") == pytest.approx(8.0)
-        assert a.max_close_order_qty("600000.SHSE") == 500
+                                       SimpleNamespace(symbol="600000.XSHG"), "SELL") == pytest.approx(8.0)
+        assert a.max_close_order_qty("600000.XSHG") == 500
     finally:
         with get_conn() as c:
             c.execute("UPDATE trading_account SET params=%s::jsonb WHERE id=%s",
@@ -156,7 +156,7 @@ class _RC:
             halted=False, total_drawdown=0.0, daily_loss=0.0, available=True)
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "t"}
+BUY = {"symbol": "600000.XSHG", "action": "BUY", "volume": 100, "price": 10.0, "operator": "t"}
 
 
 @pytest.fixture
@@ -205,24 +205,24 @@ def test_stale_fallback_uses_last_good_snapshot():
     """读失败 → 沿用上次成功规格 + state=stale（不是重新抛/静默 fresh）。"""
     from src.data_platform import specs
     specs.invalidate()
-    first = InstrumentSpec.of("600000.SHSE")
+    first = InstrumentSpec.of("600000.XSHG")
     with patch("src.data_platform.specs._cfg_version", return_value=999), \
          patch("src.data_platform.specs._load_instrument", side_effect=RuntimeError("db down")):
-        again = InstrumentSpec.of("600000.SHSE")
-        assert rules_for(None, "600000.SHSE").state == "stale"
+        again = InstrumentSpec.of("600000.XSHG")
+        assert rules_for(None, "600000.XSHG").state == "stale"
     assert again == first
-    assert specs.is_stale("instrument", "600000.SHSE") is True
+    assert specs.is_stale("instrument", "600000.XSHG") is True
     specs.invalidate()
-    assert specs.is_stale("instrument", "600000.SHSE") is False
+    assert specs.is_stale("instrument", "600000.XSHG") is False
 
 
 def test_cfg_version_bump_and_specs_invalidate():
     from src.data_platform import specs
     from src.data_platform.routing import bump_config_version
-    a = InstrumentSpec.of("600000.SHSE") if _db_up() else None
+    a = InstrumentSpec.of("600000.XSHG") if _db_up() else None
     v1 = bump_config_version()
     v2 = bump_config_version()
     assert v2 == v1 + 1
     specs.invalidate()
     if a is not None:
-        assert InstrumentSpec.of("600000.SHSE") is not a
+        assert InstrumentSpec.of("600000.XSHG") is not a

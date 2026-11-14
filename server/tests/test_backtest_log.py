@@ -7,7 +7,7 @@ def test_strategy_log_uses_injected_log_fn():
     """Strategy.log 注入 _log_fn 后走收集器，不 fallback 模块 logger。"""
     from src.strategy_framework.strategy import Strategy, StrategyConfig
     cfg = StrategyConfig(id="t", name="t", type="astock_analysis",
-                         symbol="600000.SHSE", adapter="xtp",
+                         symbol="600000.XSHG", adapter="xtp",
                          factors=[{"name": "ma_dev", "weight": 1, "params": {"n": 5}}],
                          aggregator={"threshold_buy": 0.0, "threshold_sell": 0.0})
     s = Strategy(cfg, None)
@@ -23,7 +23,7 @@ def test_run_result_has_logs_field():
     from src.strategy_framework.strategy import StrategyConfig
     engine = BacktestEngine(initial_capital=100000)
     cfg = StrategyConfig(
-        id="t", name="t", type="astock_analysis", symbol="600000.SHSE",
+        id="t", name="t", type="astock_analysis", symbol="600000.XSHG",
         adapter="xtp", factors=[{"name": "ma_dev", "weight": 1, "params": {"n": 5}}],
         aggregator={"threshold_buy": 0.0, "threshold_sell": 0.0},
     )
@@ -46,7 +46,7 @@ def test_engine_insufficient_funds_logged():
     from src.strategy_framework.strategy import StrategyConfig
     engine = BacktestEngine(initial_capital=100)   # 现金极低，必资金不足
     cfg = StrategyConfig(
-        id="t", name="t", type="astock_analysis", symbol="600000.SHSE",
+        id="t", name="t", type="astock_analysis", symbol="600000.XSHG",
         adapter="xtp", factors=[{"name": "ma_dev", "weight": 1, "params": {"n": 5}}],
         aggregator={"threshold_buy": 0.0, "threshold_sell": 0.0},
     )

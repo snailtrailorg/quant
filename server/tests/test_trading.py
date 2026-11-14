@@ -15,7 +15,7 @@ from src.strategy_runner import trading
 from vnpy.trader.constant import Status
 
 
-def _pos(symbol="600000.SHSE", volume=1000, direction="direction_long", frozen=200, yd=800):
+def _pos(symbol="600000.XSHG", volume=1000, direction="direction_long", frozen=200, yd=800):
     return SimpleNamespace(symbol=symbol, volume=volume, avg_price=9.05, pnl=50.0,
                            direction=direction, frozen=frozen, yd_volume=yd)
 
@@ -24,7 +24,7 @@ def _acct(balance=1_000_000.0, frozen=0.0):
     return SimpleNamespace(balance=balance, frozen=frozen)
 
 
-def _trade(direction=Direction.LONG, vt_orderid="x.1", vt_tradeid="t1", symbol="600000.SHSE"):
+def _trade(direction=Direction.LONG, vt_orderid="x.1", vt_tradeid="t1", symbol="600000.XSHG"):
     # 批 56b 盲审 B：datetime=naive datetime（vnpy xtp_gateway strptime 真形态——非字符串）
     # 172b：domain Trade（tradeid/orderid 存 vt 键；client_id 留空由 _vt2cid 兜底）
     from datetime import datetime as _dt
@@ -87,7 +87,7 @@ class TestFlushPositions:
 
     def test_short_rows_written_not_filtered(self):
         """N-S3：两融 Short 行如实写（不过滤），端点侧再选向。"""
-        conn = self._run([_pos(), _pos(symbol="600000.SHSE", volume=100, direction="direction_short")])
+        conn = self._run([_pos(), _pos(symbol="600000.XSHG", volume=100, direction="direction_short")])
         cur = conn.cursor.return_value.__enter__.return_value
         rows = cur.executemany.call_args.args[1]
         assert len(rows) == 2 and rows[1][2] == "direction_short"
@@ -106,7 +106,7 @@ class TestWriteTradeLog:
         adapter = _adapter()
         conn.execute.return_value.fetchone.return_value = None   # F-50：cid 与 vt_orderid 均无匹配
         with patch.object(db, "get_conn", return_value=conn):
-            trading.write_trade_log(_trade(), adapter, "s1", "600000.SHSE")
+            trading.write_trade_log(_trade(), adapter, "s1", "600000.XSHG")
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("ON CONFLICT (trade_ref) DO NOTHING RETURNING id" in s for s in sqls)
         insert = [c for c in conn.execute.call_args_list if "INSERT INTO trade_log" in c.args[0]][0]
@@ -123,7 +123,7 @@ class TestWriteTradeLog:
         adapter._vt2cid = {"x.1": "CID-9"}
         conn.execute.return_value.fetchone.return_value = (42, "s-owner")
         with patch.object(db, "get_conn", return_value=conn):
-            trading.write_trade_log(_trade(), adapter, "s1", "600000.SHSE")
+            trading.write_trade_log(_trade(), adapter, "s1", "600000.XSHG")
         lookup = conn.execute.call_args_list[0]
         assert "FROM order_log WHERE client_order_id=%s" in lookup.args[0]
         assert lookup.args[1] == ("CID-9",)
@@ -136,7 +136,7 @@ class TestWriteTradeLog:
         adapter = _adapter()   # _vt2cid 空
         conn.execute.return_value.fetchone.return_value = (99, "s-owner")
         with patch.object(db, "get_conn", return_value=conn):
-            trading.write_trade_log(_trade(), adapter, "s1", "600000.SHSE")
+            trading.write_trade_log(_trade(), adapter, "s1", "600000.XSHG")
         lookup = conn.execute.call_args_list[0]
         assert "FROM order_log WHERE vt_orderid=%s" in lookup.args[0]
         assert lookup.args[1] == ("x.1",)
@@ -146,13 +146,13 @@ class TestWriteTradeLog:
     def test_sell_direction_mapped(self):
         conn = self._conn()
         with patch.object(db, "get_conn", return_value=conn):
-            trading.write_trade_log(_trade(direction=Direction.SHORT), _adapter(), "s1", "X.SHSE")
+            trading.write_trade_log(_trade(direction=Direction.SHORT), _adapter(), "s1", "X.XSHG")
         insert = [c for c in conn.execute.call_args_list if "INSERT INTO trade_log" in c.args[0]][0]
         assert insert.args[1][4] == "SELL"
 
     def test_db_error_never_raises(self):
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
-            trading.write_trade_log(_trade(), _adapter(), "s1", "X.SHSE")   # 不抛即过
+            trading.write_trade_log(_trade(), _adapter(), "s1", "X.XSHG")   # 不抛即过
 
 
 class TestAccountBaseline:
@@ -381,7 +381,7 @@ class TestReconcileOrders:
     def test_working_orders_alerted_not_cancelled(self):
         adapter = MagicMock()
         adapter.query_orders.return_value = [
-            SimpleNamespace(status=Status.NOTTRADED, symbol="600000.SHSE", direction=Direction.LONG,
+            SimpleNamespace(status=Status.NOTTRADED, symbol="600000.XSHG", direction=Direction.LONG,
                             volume=100, price=9.0)]
         adapter.query_trades.return_value = []
         conn = MagicMock()
@@ -390,7 +390,7 @@ class TestReconcileOrders:
         with patch.object(db, "get_conn", return_value=conn), \
              patch.object(trading, "_alert") as al, \
              patch.object(trading, "write_trade_log") as wt:
-            trading.reconcile_orders(adapter, "s1", "600000.SHSE")
+            trading.reconcile_orders(adapter, "s1", "600000.XSHG")
         adapter.cancel_order.assert_not_called()   # v1：只告警不自动撤
         al.assert_called_once()
         assert "启动对账发现 1 笔在场委托" in al.call_args.args[0]
@@ -406,12 +406,12 @@ class TestReconcileOrders:
         with patch.object(db, "get_conn", return_value=conn), \
              patch.object(trading, "_alert"), \
              patch.object(trading, "write_trade_log") as wt:
-            trading.reconcile_orders(adapter, "s1", "600000.SHSE")
+            trading.reconcile_orders(adapter, "s1", "600000.XSHG")
         assert wt.call_count == 2
         last = wt.call_args_list[-1]
         assert isinstance(last.args[0], Trade)
         assert last.args[0].tradeid == "t2" and last.args[0].orderid == "x.1"
-        assert last.args[1:] == (adapter, "s1", "600000.SHSE")
+        assert last.args[1:] == (adapter, "s1", "600000.XSHG")
 
     def test_wal_orphans_alerted(self):
         adapter = MagicMock()
@@ -419,17 +419,17 @@ class TestReconcileOrders:
         adapter.query_trades.return_value = []
         conn = MagicMock()
         conn.__enter__.return_value = conn
-        conn.execute.return_value.fetchall.return_value = [(7, "600000.SHSE", "BUY", 100)]
+        conn.execute.return_value.fetchall.return_value = [(7, "600000.XSHG", "BUY", 100)]
         with patch.object(db, "get_conn", return_value=conn), \
              patch.object(trading, "_alert") as al:
-            trading.reconcile_orders(adapter, "s1", "600000.SHSE")
+            trading.reconcile_orders(adapter, "s1", "600000.XSHG")
         wal_alert = [c for c in al.call_args_list if "WAL 残留" in c.args[0]]
         assert wal_alert and "1 笔" in wal_alert[0].args[0]
 
     def test_query_failure_never_raises(self):
         adapter = MagicMock()
         adapter.query_orders.side_effect = Exception("TD 断")
-        trading.reconcile_orders(adapter, "s1", "X.SHSE")   # 不抛即过
+        trading.reconcile_orders(adapter, "s1", "X.XSHG")   # 不抛即过
 
 
 class TestRealConnectionSmoke:
@@ -468,7 +468,7 @@ class TestRealConnectionSmoke:
                 cur = conn.execute("SELECT rows, task_id FROM position_refresh "
                                    "WHERE account_id=%s", (vid,))
                 ref = cur.fetchone()
-            assert rows and rows[0][0] == "600000.SHSE" and rows[0][2] == "direction_long"
+            assert rows and rows[0][0] == "600000.XSHG" and rows[0][2] == "direction_long"
             assert ref and ref[0] == 1 and ref[1] == "99"
             # 空批覆盖（N-F1 全链）：再跑空批 → 行清空 refresh rows=0
             adapter2 = MagicMock()

@@ -189,7 +189,7 @@ class TestNonBarShapeLaw:
 
         from src.quant_common.contract import BAR_COLUMNS, ContractError, to_contract
         naive = datetime(2025, 1, 1)
-        row = ("600000.SHSE", "1D", naive, 1, 1, 1, 1, 1, 1, None, "tushare")
+        row = ("600000.XSHG", "1D", naive, 1, 1, 1, 1, 1, 1, None, "tushare")
         assert len(row) == 11
         with pytest.raises(ContractError):
             to_contract([row], source="t", kind="bar_daily", freq="1D")

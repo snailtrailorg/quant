@@ -35,7 +35,7 @@ export const fmtPrice = (v, digits = 2) => {
 export const dash = v => (v === null || v === undefined || v === '' || (typeof v === 'number' && !isFinite(v))) ? '—' : v
 
 // 批175f：删除 fmtCode（原实现剥掉交易所后缀并注释"内部命名空间不裸露"）。
-// 现行口径相反——标的**展示必须带交易所后缀**（`600000.SHSE`），统一由后端 canonical 提供，
+// 现行口径相反——标的**展示必须带交易所后缀**（`600000.XSHG`），统一由后端 canonical 提供，
 // 前端禁止再剥（守门：server/tests/test_web_symbol_display.py）。
 
 

@@ -16,7 +16,7 @@ namechange `limit/offset` 分页真生效、全量恰 10000=单次上限截断�
    - 表非空 + 标的在档（ST）+ 账户 is_st=False ⇒ 拒；is_st=True ⇒ 按权限放行；
    - 读库异常 ⇒ fail-closed 拒（既有不变量）。
 4. `_derive_st_states_from_st_list`：在档⇒is_st=true、effective_from=trade_date、
-   ts_code→vt_symbol 映射（600000.SH→600000.SHSE）；脏行跳过。
+   ts_code→vt_symbol 映射（600000.SH→600000.XSHG）；脏行跳过。
 
 无库环境可跑（mock 连接），惯例同 test_account_permission。
 """
@@ -138,12 +138,12 @@ class TestPullNamechangePagination:
 # ---------------------------------------------------------------------------
 # 3：account_allows ST 三态（fail-closed + 冷启动保护）
 # ---------------------------------------------------------------------------
-def _attr(category="stock", exchange="SHSE", board="main"):
+def _attr(category="stock", exchange="XSHG", board="main"):
     return SimpleNamespace(category=category, exchange=exchange, board=board)
 
 
 def _perm(is_st=False, boards=("main", "star")):
-    return (["stock"], ["SHSE"], list(boards), is_st, True)
+    return (["stock"], ["XSHG"], list(boards), is_st, True)
 
 
 class _FakeCur:
@@ -183,7 +183,7 @@ def _call(attr, exists=True, has_any=True, st_rows=(1,), exc=None, perm_is_st=Fa
                     perm_is_st=perm_is_st)
     with patch("src.data_platform.security_master.SMClient", return_value=sm), \
          patch("src.data_platform.db.get_conn", return_value=conn):
-        return account_allows(1, "600000.SHSE")
+        return account_allows(1, "600000.XSHG")
 
 
 class TestPermsStFailClosed:
@@ -220,13 +220,13 @@ class TestPermsStFailClosed:
     def test_st_check_only_for_main_board(self):
         """非 main 板不走 st_list 查（star 放行，即便连接对 st_list 查询会抛错）。"""
         # star 板：attr 检查通过（SHSE+star 一致），st_list 分支不进入 ⇒ exc 不触发
-        assert _call(_attr(exchange="SHSE", board="star"),
+        assert _call(_attr(exchange="XSHG", board="star"),
                      exc=RuntimeError("不应触达 st_list"), perm_is_st=False) is True
 
     def test_query_param_is_ts_form_not_vt(self):
         """步4复审 P0-1 反证钉：st_list 查询 params 必须是 tushare 形态。
 
-        account_allows 收 vt_symbol（600000.SHSE）；st_list.ts_code 是 tushare 形态
+        account_allows 收 vt_symbol（600000.XSHG）；st_list.ts_code 是 tushare 形态
         （600000.SH）。读侧漏转＝恒无交集＝表非空后全市场 main 板 fail-closed 全拒
         （mock 按 SQL 关键词分派不咬 params，实值须显式断言——去掉 vt_to_ts 即红）。
         """
@@ -235,7 +235,7 @@ class TestPermsStFailClosed:
         conn = _st_conn(st_rows=(1,), perm_is_st=True)
         with patch("src.data_platform.security_master.SMClient", return_value=sm), \
              patch("src.data_platform.db.get_conn", return_value=conn):
-            account_allows(1, "600000.SHSE")
+            account_allows(1, "600000.XSHG")
         # 翻 execute 调用记录：标的查询（ORDER BY trade_date DESC）那条的 params[0]
         for args, kwargs in conn.execute.call_args_list:
             sql = args[0] if args else kwargs.get("sql", "")
@@ -270,7 +270,7 @@ class TestDeriveFromStList:
         with patch("src.data_sync.engine._sm_upsert_state", side_effect=_capture):
             _derive_st_states_from_st_list(df)
         rows = captured["rows"]
-        assert rows[0][0] == "600000.SHSE"          # ts_code → vt_symbol
+        assert rows[0][0] == "600000.XSHG"          # ts_code → vt_symbol
         assert rows[0][1] == "2026-10-09"           # effective_from=快照 trade_date
         assert rows[0][2] == "st"
         assert rows[0][3]["is_st"] is True

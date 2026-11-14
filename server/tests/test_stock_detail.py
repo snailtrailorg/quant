@@ -98,22 +98,22 @@ class TestMarketSnapshot:
 class TestStockDetail:
     def test_normalize(self):
         from src.data_platform.stock_detail import _normalize
-        assert _normalize("600000.SH") == ("600000.SH", "600000.SHSE")
-        assert _normalize("600000.SHSE") == ("600000.SH", "600000.SHSE")
+        assert _normalize("600000.SH") == ("600000.SH", "600000.XSHG")
+        assert _normalize("600000.XSHG") == ("600000.SH", "600000.XSHG")
 
     def test_quote_fallback_hub_to_tencent(self):
         """批 70c：公共表单 GET（per-account 键写侧仍双写但读者已切 pub）。"""
         from src.data_platform import stock_detail as sd
-        r, store = _fake_redis({"hub:latest_tick:pub:600000.SHSE": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00", "_ts_epoch": 1.0, "account_id": 1})})
+        r, store = _fake_redis({"hub:latest_tick:pub:600000.XSHG": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00", "_ts_epoch": 1.0, "account_id": 1})})
         with patch.object(sd, "_r", return_value=r):
-            q = sd._quote_block("600000.SH", "600000.SHSE")
+            q = sd._quote_block("600000.SH", "600000.XSHG")
         assert q["source"] == "hub" and q["last"] == 9.0 and "_ts_epoch" not in q
         # hub miss → tencent（_quote_block 函数内 from .market_snapshot import——patch 源模块）
         r2, _ = _fake_redis()
         from src.data_platform import market_snapshot as ms
         with patch.object(sd, "_r", return_value=r2), \
              patch.object(ms, "get_quote", return_value={"last": 1.0, "source": "tencent"}) as mg:
-            q2 = sd._quote_block("600000.SH", "600000.SHSE")
+            q2 = sd._quote_block("600000.SH", "600000.XSHG")
         assert q2["source"] == "tencent" and mg.called
 
     def test_slow_block_partial_not_cached(self):
@@ -151,10 +151,10 @@ class TestStockDetail:
         from src.data_platform import db as _db
         with patch.object(_db, "get_conn", return_value=_Conn()) as _mg, \
              patch.object(sd, "logger"):
-            sd._touch_transient_sub("600519.SHSE")
+            sd._touch_transient_sub("600519.XSHG")
         upserts = [c for c in calls if "INSERT INTO hub_transient_subs" in c[0]]
         evicts = [c for c in calls if "OFFSET 100" in c[0]]
-        assert upserts and upserts[0][1] == ("600519.SHSE",) and "30 minutes" in upserts[0][0]
+        assert upserts and upserts[0][1] == ("600519.XSHG",) and "30 minutes" in upserts[0][0]
         assert evicts, "应执行挤旧清理"
 
     def test_touch_transient_sub_fail_silent(self):
@@ -163,7 +163,7 @@ class TestStockDetail:
         from src.data_platform import db as _db
         with patch.object(_db, "get_conn", side_effect=RuntimeError("db down")), \
              patch.object(sd, "logger"):
-            sd._touch_transient_sub("600519.SHSE")   # 不抛即过
+            sd._touch_transient_sub("600519.XSHG")   # 不抛即过
 
     def test_detail_json_serializable(self):
         """整体可序列化（Decimal/date 曾炸缓存写）——allow_nan=False 对齐 starlette（O 审 S2）。"""
@@ -217,9 +217,9 @@ class TestHubLatestTick:
         r = MagicMock()
         r.set.side_effect = lambda k, v, ex=None: store.__setitem__(k, (v, ex))
         fail_ts: dict = {}
-        _write_latest_tick(r, "600000.SHSE", self._make_tick(), fail_ts)
-        assert LATEST_TICK_PREFIX + "600000.SHSE" in store
-        payload, ex = store[LATEST_TICK_PREFIX + "600000.SHSE"]
+        _write_latest_tick(r, "600000.XSHG", self._make_tick(), fail_ts)
+        assert LATEST_TICK_PREFIX + "600000.XSHG" in store
+        payload, ex = store[LATEST_TICK_PREFIX + "600000.XSHG"]
         d = json.loads(payload)
         assert d["upper_limit"] == 9.99 and d["lower_limit"] == 8.17   # S1 防回归
         assert d["bid"][0] == 9.00 and d["ask"][0] == 9.01
@@ -229,7 +229,7 @@ class TestHubLatestTick:
         """M1：竞价 0 价不上屏。"""
         from src.md_hub.main import _write_latest_tick
         r = MagicMock()
-        _write_latest_tick(r, "600000.SHSE", self._make_tick(last=0), {})
+        _write_latest_tick(r, "600000.XSHG", self._make_tick(last=0), {})
         r.set.assert_not_called()
 
     def test_failure_backoff(self):
@@ -238,10 +238,10 @@ class TestHubLatestTick:
         r = MagicMock()
         r.set.side_effect = ConnectionError("valkey down")
         fail_ts: dict = {}
-        _write_latest_tick(r, "600000.SHSE", self._make_tick(), fail_ts)
-        _write_latest_tick(r, "600000.SHSE", self._make_tick(), fail_ts)
+        _write_latest_tick(r, "600000.XSHG", self._make_tick(), fail_ts)
+        _write_latest_tick(r, "600000.XSHG", self._make_tick(), fail_ts)
         assert r.set.call_count == 1          # 第二次被退避拦下
-        assert "600000.SHSE" in fail_ts
+        assert "600000.XSHG" in fail_ts
 
 
 # ── 端点（薄壳）──
@@ -271,7 +271,7 @@ class TestStockApiEndpoints:
 
     def test_detail_endpoint_thin_shell(self, admin_client):
         from src.data_platform import stock_detail as sd
-        fake = {"symbol": "600000.SHSE", "ts_code": "600000.SH", "name": "浦发银行", "quote": None}
+        fake = {"symbol": "600000.XSHG", "ts_code": "600000.SH", "name": "浦发银行", "quote": None}
         with patch.object(sd, "get_stock_detail", return_value=fake) as m:
             r = admin_client.get("/api/stock/600000.SH/detail")
         assert r.status_code == 200 and r.json() == fake and m.called
@@ -287,14 +287,14 @@ class TestStockApiEndpoints:
         fake_detail = {"ts_code": "600519.SH", "name": "贵州茅台", "industry": "白酒",
                        "in_pool": False, "quote": {"last": 1291.0, "name": "贵州茅台"},
                        "limit": None, "moneyflow": [], "events": [], "name_changes": [],
-                       "chips": None, "finance": None, "symbol": "600519.SHSE"}
+                       "chips": None, "finance": None, "symbol": "600519.XSHG"}
         fake_resp = MagicMock(content="结构化分析文本")
         with patch.object(sd, "_r", return_value=r), \
              patch.object(sd, "get_stock_detail", return_value=fake_detail), \
              patch.object(gw, "chat", return_value=fake_resp) as mc, \
              patch("src.web_api.routes.stock.audit_log") as ma:   # B7：防真写 audit_log
             r1 = admin_client.post("/api/stock/600519.SH/analyze")
-            r2 = admin_client.post("/api/stock/600519.SHSE/analyze")   # M3：异型 symbol 同 key
+            r2 = admin_client.post("/api/stock/600519.XSHG/analyze")   # M3：异型 symbol 同 key
         assert r1.status_code == 200 and r1.json()["cached"] is False
         assert r2.json()["cached"] is True and mc.call_count == 1   # 第二次走缓存（归一后同 key）
 

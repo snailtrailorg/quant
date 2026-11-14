@@ -5,7 +5,7 @@
 from datetime import datetime
 
 
-def _row(ts, o=10.0, h=10.0, l=10.0, c=10.0, sym="600000.SHSE"):
+def _row(ts, o=10.0, h=10.0, l=10.0, c=10.0, sym="600000.XSHG"):
     """造一行 11 字段 bar row（ohlc 默认 10，正常）。"""
     return (sym, "1D", ts, o, h, l, c, 100.0, 1000.0, None, "tushare")
 

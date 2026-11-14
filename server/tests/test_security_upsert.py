@@ -10,7 +10,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_ROW = ("600000.SHSE", "astock", "SHSE", "stock", "main", "浦发银行", None,
+_ROW = ("600000.XSHG", "astock", "XSHG", "stock", "main", "浦发银行", None,
         100, 0.01, "T+1", "19991110", "", "astock_main")   # 批 108·步 2：+= session_id（第 13 列）
 
 
@@ -46,7 +46,7 @@ class TestUpsertRows:
     def test_dirty_date_nullified(self):
         import src.data_platform.db as dbm
         conn, cur = _mock_conn()
-        dirty = ("113531.SHSE", "astock", "SHSE", "convertible", None, "x", None,
+        dirty = ("113531.XSHG", "astock", "XSHG", "convertible", None, "x", None,
                  10, 0.001, "T+0", "None", "garbage", "astock_main")
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient
@@ -61,7 +61,7 @@ class TestUpsertState:
         conn, cur = _mock_conn()
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient
-            n = SMClient().upsert_state([("600000.SHSE", "2026-01-01", "st", {"is_st": False})])
+            n = SMClient().upsert_state([("600000.XSHG", "2026-01-01", "st", {"is_st": False})])
         assert n == 1
         cur.executemany.assert_called_once()
         sql, params = cur.executemany.call_args[0]
@@ -78,4 +78,4 @@ class TestUpsertState:
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient
             with pytest.raises(TypeError):
-                SMClient().upsert_state([("600000.SHSE", "2026-01-01", "st", '{"is_st": false}')])
+                SMClient().upsert_state([("600000.XSHG", "2026-01-01", "st", '{"is_st": false}')])

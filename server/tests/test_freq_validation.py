@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 
 def _row(ts="2026-08-18"):
-    return ("600000.SHSE", "1D", ts, 9.0, 9.1, 8.9, 9.05, 100000, 905000, None, "tushare")
+    return ("600000.XSHG", "1D", ts, 9.0, 9.1, 8.9, 9.05, 100000, 905000, None, "tushare")
 
 
 def test_save_bars_accepts_uppercase_1D():

@@ -16,14 +16,14 @@ from src.quant_common.contract import DataRequest, DataGap
 from src.data_platform.tz import as_utc
 
 
-def _req(kind="bar_daily", symbol="600000.SHSE", freq="1D"):
+def _req(kind="bar_daily", symbol="600000.XSHG", freq="1D"):
     return DataRequest(kind=kind, symbols=(symbol,), temporality="historical", freq=freq,
                        range_=(datetime(2025, 9, 21), datetime(2026, 9, 21)))
 
 
 def _bar_df(n=2):
     ts = as_utc(datetime(2026, 9, 18))
-    rows = [("600000.SHSE", "1D", ts, 10.0, 10.5, 9.8, 10.2, 1000.0, 10000.0, 1.0, "tushare")
+    rows = [("600000.XSHG", "1D", ts, 10.0, 10.5, 9.8, 10.2, 1000.0, 10000.0, 1.0, "tushare")
             for _ in range(n)]
     return pd.DataFrame(rows, columns=["symbol", "freq", "ts", "open", "high", "low",
                                        "close", "volume", "amount", "adj_factor", "source"])
@@ -31,7 +31,7 @@ def _bar_df(n=2):
 
 def _frame():
     from src.quant_common.contract import to_contract
-    rows = [("600000.SHSE", "1D", as_utc(datetime(2026, 9, 18)), 10.0, 10.5, 9.8, 10.2,
+    rows = [("600000.XSHG", "1D", as_utc(datetime(2026, 9, 18)), 10.0, 10.5, 9.8, 10.2,
              1000.0, 10000.0, 1.0, "tushare")]
     return to_contract(rows, source="tushare", kind="bar_daily", freq="1D")
 
@@ -100,7 +100,7 @@ class TestDataBus:
         """bar 族外 kind 维持旧降级空帧（consume 口径不在本批——不做路由不拉远端）。"""
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        req = DataRequest(kind="astock_basic", symbols=("600000.SHSE",), temporality="historical")
+        req = DataRequest(kind="astock_basic", symbols=("600000.XSHG",), temporality="historical")
         with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
              patch("src.data_platform.routing.resolve") as rs:
             out, wm = bus.get_bars(req)
@@ -153,7 +153,7 @@ class TestFetchOnMiss:
     def test_multi_symbol_degrades_without_resolve(self):
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        req = DataRequest(kind="bar_daily", symbols=("a.SHSE", "b.SHSE"),
+        req = DataRequest(kind="bar_daily", symbols=("a.XSHG", "b.XSHG"),
                           temporality="historical", freq="1D",
                           range_=(datetime(2025, 9, 21), datetime(2026, 9, 21)))
         with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
@@ -168,7 +168,7 @@ class TestFetchOnMiss:
         """无显式区间（拉取窗不定）→ 降级，不真拉。"""
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical", freq="1D")
+        req = DataRequest(kind="bar_daily", symbols=("600000.XSHG",), temporality="historical", freq="1D")
         with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
              patch("src.data_platform.routing.resolve") as rs, \
              patch.object(bus.store, "save") as sv:
@@ -207,7 +207,7 @@ class TestFetchOnMiss:
 def _min_frame(minutes):
     """分钟 bar 帧（2026-09-22 上午，分钟末标注 ts=10:m:00 UTC 锚测试——实产为上海本地对应 UTC）。"""
     from src.quant_common.contract import to_contract
-    rows = [("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 10, m)), 10.0, 10.5, 9.8, 10.2,
+    rows = [("600000.XSHG", "1min", as_utc(datetime(2026, 9, 22, 10, m)), 10.0, 10.5, 9.8, 10.2,
              1000.0, 10000.0, 1.0, "hub") for m in minutes]
     return to_contract(rows, source="local_pg", kind="bar_minute", freq="1min")
 
@@ -237,7 +237,7 @@ class TestSubscribe:
         rows = _xrev([1, 2, 3, 4, 5], dup_ts=4)
         r.xrevrange.return_value = rows
         wm = as_utc(datetime(2026, 9, 22, 10, 3))
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1, from_watermark=wm)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         tss = [datetime.fromisoformat(m["ts"]).minute for m in h.bars]
@@ -245,13 +245,13 @@ class TestSubscribe:
         assert h.bars[0]["gen"] == "164"  # 同 ts 留新 gen（切换交界信号保留）
         assert h.warmup is None
         assert h.last_id == rows[0][0]  # poll 起点=流内最新 id
-        assert h.stream_key == "hub:bars:1:600000.SHSE"
+        assert h.stream_key == "hub:bars:1:600000.XSHG"
 
     def test_multi_symbol_fails_fast(self):
         from src.quant_common.contract import Subscription
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        sub = Subscription(kind="bar_minute", symbols=("a.SHSE", "b.SHSE"), account_id=1)
+        sub = Subscription(kind="bar_minute", symbols=("a.XSHG", "b.XSHG"), account_id=1)
         with pytest.raises(ValueError):
             bus.subscribe(sub)
 
@@ -262,7 +262,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1,
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1,
                            from_watermark=datetime(2026, 9, 22, 10, 1))  # naive
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
@@ -276,7 +276,7 @@ class TestSubscribe:
         r = MagicMock()
         r.xrevrange.return_value = _xrev([8, 9, 10])          # 窗头 10:08，wm=10:01 → 洞
         wm = as_utc(datetime(2026, 9, 22, 10, 1))
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1, from_watermark=wm)
         frame = _frame()
         with patch("src.data_platform.databus._r", return_value=r), \
              patch.object(bus, "_local_fetch", return_value=frame):
@@ -290,7 +290,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = []
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         h.poll()
@@ -302,7 +302,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=None)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1, from_watermark=None)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         assert [datetime.fromisoformat(m["ts"]).minute for m in h.bars] == [1, 2, 3]
@@ -316,7 +316,7 @@ class TestSubscribe:
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
         wm = as_utc(datetime(2026, 9, 22, 15, 0))   # 水位线超前于流内全部根
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1, from_watermark=wm)
         frame = _frame()
         with patch("src.data_platform.databus._r", return_value=r), \
              patch.object(bus, "_local_fetch", return_value=frame) as lf:
@@ -331,10 +331,10 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1)
+        sub = Subscription(kind="bar_minute", symbols=("600000.XSHG",), account_id=1)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
-        r.xread.return_value = [("hub:bars:1:600000.SHSE", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]
+        r.xread.return_value = [("hub:bars:1:600000.XSHG", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]
         assert len(h.poll()) == 1 and h.last_id == "1-9"
         r.xread.side_effect = Exception("down")
         assert h.poll() == []          # 失败不崩，下次再试
@@ -357,8 +357,8 @@ class TestWatermark:
         """11:30 → 13:01 午休锚=期望衔接（缺口=13:01 起回走跨锚连续）。"""
         from src.quant_common.contract import to_contract
         from src.data_platform.databus import DataBus
-        rows = [("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 11, 30)), 1, 1, 1, 1, 1, 1, 1, "hub"),
-                ("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 13, 1)), 1, 1, 1, 1, 1, 1, 1, "hub")]
+        rows = [("600000.XSHG", "1min", as_utc(datetime(2026, 9, 22, 11, 30)), 1, 1, 1, 1, 1, 1, 1, "hub"),
+                ("600000.XSHG", "1min", as_utc(datetime(2026, 9, 22, 13, 1)), 1, 1, 1, 1, 1, 1, 1, "hub")]
         wm = DataBus._watermark(to_contract(rows, source="hub", kind="bar_minute", freq="1min"), "1min")
         assert wm == as_utc(datetime(2026, 9, 22, 13, 1))   # as_utc=按上海本地解释（11:30→13:01 跨锚连续）
 

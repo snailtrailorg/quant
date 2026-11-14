@@ -45,7 +45,7 @@ def test_delete_by_sync_item_deletes_all_symbols():
     assert "ANY" in delete_sql
     # 断言 vts 转换（ts_code → vt_symbol）
     vts = conn.execute.call_args_list[0].args[1][0]
-    assert set(vts) == {"600000.SHSE", "000001.SZSE"}
+    assert set(vts) == {"600000.XSHG", "000001.XSHE"}
     # 断言游标重置 UPDATE
     update_sql = conn.execute.call_args_list[1].args[0]
     assert "UPDATE sync_config" in update_sql

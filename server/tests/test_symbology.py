@@ -11,40 +11,42 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.mark.parametrize("inp,out", [
-    ("600036.SHSE", "600036.SHSE"), ("600036.SSE", "600036.SHSE"),
-    ("600036.XSHG", "600036.SHSE"), ("600036.SH", "600036.SHSE"),
-    ("000001.SZSE", "000001.SZSE"), ("000001.XSHE", "000001.SZSE"), ("000001.SZ", "000001.SZSE"),
-    ("830799.BSE", "830799.BSE"), ("830799.BJSE", "830799.BSE"), ("830799.BJ", "830799.BSE"),
-    ("BTCUSDT.BINANCE", "BTCUSDT.BINANCE"), ("BTCUSDT.OKX", "BTCUSDT.OKX"),
-    ("600036.shse", "600036.SHSE"),
+    ("600036.XSHG", "600036.XSHG"), ("600036.SHSE", "600036.XSHG"),
+    ("600036.SSE", "600036.XSHG"), ("600036.SH", "600036.XSHG"),
+    ("600036.shse", "600036.XSHG"),
+    ("000001.XSHE", "000001.XSHE"), ("000001.SZSE", "000001.XSHE"), ("000001.SZ", "000001.XSHE"),
+    ("830799.BJSE", "830799.BJSE"), ("830799.BSE", "830799.BJSE"), ("830799.BJ", "830799.BJSE"),
+    ("BTCUSDT.XBIN", "BTCUSDT.XBIN"), ("BTCUSDT.BINANCE", "BTCUSDT.XBIN"),
+    ("BTCUSDT.XOKX", "BTCUSDT.XOKX"), ("BTCUSDT.OKX", "BTCUSDT.XOKX"),
 ])
 def test_canonical(inp, out):
     assert S.canonical(inp) == out
     assert S.canonical(S.canonical(inp)) == out          # 幂等
 
 
-@pytest.mark.parametrize("bad", ["600036", "600036.", ".SHSE", "", "600036.UNKNOWN"])
+@pytest.mark.parametrize("bad", ["600036", "600036.", ".XSHG", "", "600036.UNKNOWN"])
 def test_canonical_rejects(bad):
     with pytest.raises(ValueError):
         S.canonical(bad)
 
 
 @pytest.mark.parametrize("inp,mic", [
-    ("600036.SHSE", "XSHG"), ("000001.SZSE", "XSHE"), ("830799.BSE", "BJSE"),
+    ("600036.XSHG", "XSHG"), ("000001.XSHE", "XSHE"), ("830799.BJSE", "BJSE"),
     ("600036.SSE", "XSHG"),
-    ("BTCUSDT.BINANCE", None), ("BTCUSDT.OKX", None), ("600036", None), ("x.UNKNOWN", None),
+    ("BTCUSDT.XBIN", None), ("BTCUSDT.XOKX", None), ("600036", None), ("x.UNKNOWN", None),
 ])
 def test_to_mic(inp, mic):
     assert S.to_mic(inp) == mic
 
 
-@pytest.mark.parametrize("alias,vt", [
-    ("SSE", "SHSE"), ("SHSE", "SHSE"), ("sh", "SHSE"), ("XSHG", "SHSE"),
-    ("SZSE", "SZSE"), ("XSHE", "SZSE"), ("BJ", "BSE"), ("BJSE", "BSE"),
-    ("BINANCE", "BINANCE"), ("okx", "OKX"),
+@pytest.mark.parametrize("alias,mic", [
+    ("SSE", "XSHG"), ("SHSE", "XSHG"), ("sh", "XSHG"), ("XSHG", "XSHG"),
+    ("SZSE", "XSHE"), ("XSHE", "XSHE"), ("SZ", "XSHE"),
+    ("BJ", "BJSE"), ("BJSE", "BJSE"), ("BSE", "BJSE"),
+    ("BINANCE", "XBIN"), ("XBIN", "XBIN"), ("okx", "XOKX"), ("XOKX", "XOKX"),
 ])
-def test_vt_suffix(alias, vt):
-    assert S.vt_suffix(alias) == vt
+def test_vt_suffix(alias, mic):
+    assert S.vt_suffix(alias) == mic
 
 
 @pytest.mark.parametrize("bad", ["", "  ", None, "OF", "UNKNOWN", "SZE"])   # SZE=交易历交易所名，非 vt 后缀
@@ -53,22 +55,25 @@ def test_vt_suffix_rejects(bad):
         S.vt_suffix(bad)
 
 
-@pytest.mark.parametrize("inp", ["600036.SHSE", "600036.SSE", "600036.SH", "600036.XSHG"])
+@pytest.mark.parametrize("inp", ["600036.XSHG", "600036.SHSE", "600036.SSE", "600036.SH"])
 def test_aliases_bidirectional_shanghai(inp):
-    assert S.aliases(inp) == {"600036.SHSE", "600036.SSE"}
+    assert S.aliases(inp) == {"600036.XSHG", "600036.SHSE", "600036.SSE"}
 
 
-def test_aliases_shenzhen_and_crypto_single():
-    assert S.aliases("000001.SZSE") == {"000001.SZSE"}
-    assert S.aliases("BTCUSDT.BINANCE") == {"BTCUSDT.BINANCE"}
+def test_aliases_shenzhen_bj_and_crypto():
+    assert S.aliases("000001.XSHE") == {"000001.XSHE", "000001.SZSE"}
+    assert S.aliases("830799.BJSE") == {"830799.BJSE", "830799.BSE"}
+    assert S.aliases("BTCUSDT.XBIN") == {"BTCUSDT.XBIN", "BTCUSDT.BINANCE"}
+    assert S.aliases("BTCUSDT.XOKX") == {"BTCUSDT.XOKX", "BTCUSDT.OKX"}
+    assert S.aliases("600036") == {"600036"}            # 裸码不猜、不抛
 
 
 def test_mic_tables_consistent():
-    assert set(S.VT_TO_MIC) == {"SHSE", "SZSE", "BSE"}
-    assert all(S.MIC_TO_VT[m] == vt for vt, m in S.VT_TO_MIC.items())
-    assert S.VT_TO_MIC["BSE"] == "BJSE"                   # 官方: XNEE=新西兰, XBSE=罗马尼亚
-    for vt in S.VT_TO_MIC:
-        assert S.to_mic(f"600000.{vt}") == S.VT_TO_MIC[vt]
+    assert set(S.MIC_BY_VENUE) == {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
+    assert S.MIC_BY_VENUE["BSE"] == "BJSE"                 # 官方: XNEE=新西兰, XBSE=罗马尼亚
+    assert S.MIC_BY_VENUE["BINANCE"] == "XBIN"             # 自定义（ISO 表未占用）
+    for alias, mic in S.VENDOR_ALIASES.items():
+        assert S.vt_suffix(alias) == mic
 
 
 # ——— 入站别名棘轮：全仓**入站映射形态**的 "SSE" 常量必须为零（唯一表=symbology）———

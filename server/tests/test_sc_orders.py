@@ -33,7 +33,7 @@ class FakeAdapter:
 @pytest.fixture
 def strat():
     cfg = StrategyConfig(id="t-sc", name="t", type="astock_analysis",
-                         symbol="600000.SHSE", adapter="xtp")
+                         symbol="600000.XSHG", adapter="xtp")
     s = Strategy(cfg, None)
     s.operator = "tester"   # 批15：runner 注入位（place_order 读 getattr）
     return s
@@ -55,7 +55,7 @@ def rc_ok(monkeypatch):
 
 
 def _sig(volume=100, price=10.0, action=Action.BUY):
-    return Signal(action=action, score=0.5, symbol="600000.SHSE",
+    return Signal(action=action, score=0.5, symbol="600000.XSHG",
                   volume=volume, price=price, reason="test")
 
 

@@ -89,7 +89,7 @@ class TestAdapterGhostCache:
         adapter = XTPAdapter.__new__(XTPAdapter)   # 跳过 __init__
         adapter._gateway = MagicMock()
         adapter._lock = __import__("threading").Lock()
-        adapter._positions = {"ghost.SHSE": SimpleNamespace(vt_symbol="ghost.SHSE", volume=999,
+        adapter._positions = {"ghost.XSHG": SimpleNamespace(vt_symbol="ghost.XSHG", volume=999,
                                                             price=1.0, pnl=0.0)}
         adapter._gateway.query_position.return_value = None
         # _wait_update 打桩为立即返回（无新事件→缓存保持清空）
@@ -118,10 +118,10 @@ class TestOWiringContracts:
 
     def test_reconcile_normalizes_symbols_both_sides(self):
         """O-F2：reconcile 两侧符号必须 split_part 归一（vt_symbol vs 裸 ticker 命名空间）。"""
-        src = open("src/scheduler/tasks.py").read()
-        i_rec = src.index("持仓账实分离")
-        seg = src[i_rec - 1500:i_rec]
-        assert seg.count("split_part(symbol, '.', 1)") >= 2, "join 两侧都要归一"
+        # 批177：比对 SQL 抽成模块常量 _POSITION_DIFF_SQL（两侧仍按裸码比对、落库取 canonical）
+        from src.scheduler.tasks import _POSITION_DIFF_SQL as sql
+        assert sql.count("split_part(symbol, '.', 1)") >= 2, "join 两侧都要归一"
+        assert "sym_vt" in sql and "security_master" in sql, "落库键必须 canonical"
 
 
 class TestRealConnectionSmoke:

@@ -25,7 +25,7 @@ def _run(order, category):
 
 def test_clip_stock_rounds_to_100():
     # int(100000/180.26)=554 → 500（原值 554 非整百必被交易所拒 Invalid security quantity）
-    d = _run({"symbol": "001232.SZSE", "action": "BUY", "volume": 900, "price": 180.26}, "stock")
+    d = _run({"symbol": "001232.XSHE", "action": "BUY", "volume": 900, "price": 180.26}, "stock")
     assert d.approved and d.adjusted["volume"] == 500
 
 
@@ -95,14 +95,14 @@ def test_write_order_status_writes_reject_error():
 
 
 def test_sell_matches_shse_sse_alias():
-    """持仓 vnpy 口径 .SSE、委托项目口径 .SHSE → 双写候选匹配（否则沪市手动卖恒拒 NO_SELLABLE）。"""
+    """持仓 vnpy 口径 .SSE、委托项目口径 .XSHG → 双写候选匹配（否则沪市手动卖恒拒 NO_SELLABLE）。"""
     from src.strategy_runner import trading
     a = MagicMock()
     a.send_order.return_value = "vt-1"
     a.get_vt_orderid.return_value = "vt-1"
     a.query_position.return_value = [NS(symbol="600036.SSE", volume=800, frozen=0)]
     dec = NS(approved=True, adjusted=None)
-    body = {"symbol": "600036.SHSE", "action": "SELL", "volume": 500, "price": 44.2,
+    body = {"symbol": "600036.XSHG", "action": "SELL", "volume": 500, "price": 44.2,
             "client_order_id": "mo-x"}
     with patch("src.risk_control.risk.RiskControl.get") as get, \
          patch.object(trading, "manual_order_open", return_value=42), \

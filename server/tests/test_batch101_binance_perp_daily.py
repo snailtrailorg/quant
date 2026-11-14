@@ -362,7 +362,7 @@ class TestToBarRows:
         rows = BC.BinanceAdapter().to_bar_rows(self._df(), "1D")
         assert len(rows) == 2
         sym, freq, ts, o, h, lo, c, vol, amt, adj, src = rows[0]
-        assert sym == "BTCUSDT.BINANCE"                 # vt_symbol 形态（security_master 认）
+        assert sym == "BTCUSDT.XBIN"                 # vt_symbol 形态（security_master 认）
         assert freq == "1D"
         assert (o, h, lo, c) == (1.0, 2.0, 0.5, 1.5)
         assert (vol, amt) == (100.0, 150.0)             # volume=base 数量；amount=quote_volume
@@ -397,9 +397,9 @@ class TestToBarRows:
     def test_already_suffixed_symbol_not_doubled(self):
         ad = BC.BinanceAdapter()
         df = pd.DataFrame([dict(zip(BC._COLS, _row(_ms(2024, 1, 2))))])
-        df["binance_symbol"] = "BTCUSDT.BINANCE"
+        df["binance_symbol"] = "BTCUSDT.XBIN"
         rows = ad.to_bar_rows(df, "1D")
-        assert rows[0][0] == "BTCUSDT.BINANCE"
+        assert rows[0][0] == "BTCUSDT.XBIN"
 
     def test_freq_passthrough(self):
         rows = BC.BinanceAdapter().to_bar_rows(self._df(), "1d")
@@ -529,7 +529,7 @@ class _FakeAdapter:
     def to_bar_rows(self, df, freq, adj_map=None):
         out = []
         for _ in range(self._rows):
-            out.append(("BTCUSDT.BINANCE", freq, datetime(2024, 1, 2, tzinfo=timezone.utc),
+            out.append(("BTCUSDT.XBIN", freq, datetime(2024, 1, 2, tzinfo=timezone.utc),
                         1.0, 2.0, 0.5, 1.5, 100.0, 150.0, None, "binance"))
         return out
 
@@ -639,7 +639,7 @@ class TestCapabilityCompleteness:
         assert declared - set(broken) == {"binance_perp_daily"}, "判据无法发现漏登记"
 
     def test_crypto_symbol_convention_agrees_with_data_layer(self):
-        """数据层写的 `.BINANCE` 后缀 → crypto 市场（markets 与 security_master 双单源一致）。"""
+        """数据层写的 `.XBIN` 后缀 → crypto 市场（markets 与 security_master 双单源一致）。"""
         from src.data_platform.security_master import SMClient
         from src.quant_common.markets import market_of_symbol
         sym = f"BTCUSDT.{BC._VENUE}"

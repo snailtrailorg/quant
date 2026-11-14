@@ -13,7 +13,7 @@ from src.quant_common.domain import Direction, OrderState, OrderStatus
 
 
 def _d(status, vt="EMT.123"):
-    return OrderState(orderid="", vt_orderid=vt, symbol="600000.SHSE", direction=Direction.LONG,
+    return OrderState(orderid="", vt_orderid=vt, symbol="600000.XSHG", direction=Direction.LONG,
                       status=status, volume=0, traded=0, price=0)
 
 
@@ -112,7 +112,7 @@ class TestRealDbSql:
         with get_conn() as c:
             oid = c.execute(
                 "INSERT INTO order_log (ts, strategy_id, symbol, action, volume, price, status, client_order_id) "
-                "VALUES (now(), 'e2e-gate', '600000.SHSE', 'BUY', 100, 10, 'submitted', %s) RETURNING id",
+                "VALUES (now(), 'e2e-gate', '600000.XSHG', 'BUY', 100, 10, 'submitted', %s) RETURNING id",
                 (cid,)).fetchone()[0]
             upd = c.execute("UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
                             ("all_traded", oid, list(ORDER_FINAL_STATES)))

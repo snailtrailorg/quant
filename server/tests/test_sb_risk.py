@@ -34,8 +34,8 @@ def _state(drawdown=0.0, daily=0.0, available=True):
     return RiskState(halted=False, total_drawdown=drawdown, daily_loss=daily, available=available)
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "tester"}
-SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
+BUY = {"symbol": "600000.XSHG", "action": "BUY", "volume": 100, "price": 10.0, "operator": "tester"}
+SELL = {"symbol": "600000.XSHG", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
 
 
 class TestFailClosed:
@@ -138,23 +138,23 @@ class TestRulesIntegrity:
 
 class TestMarketOf:
     def test_etf_588(self, rc):
-        assert rc._market_of("588000.SHSE") == "listed_fund"  # F-42
+        assert rc._market_of("588000.XSHG") == "listed_fund"  # F-42
 
     def test_others_unchanged(self, rc):
-        assert rc._market_of("600000.SHSE") == "astock"
-        assert rc._market_of("113000.SHSE") == "convertible"
-        assert rc._market_of("510300.SHSE") == "listed_fund"
-        assert rc._market_of("159915.SZSE") == "listed_fund"
-        assert rc._market_of("BTCUSDT.BINANCE") == "binance_perp"
+        assert rc._market_of("600000.XSHG") == "astock"
+        assert rc._market_of("113000.XSHG") == "convertible"
+        assert rc._market_of("510300.XSHG") == "listed_fund"
+        assert rc._market_of("159915.XSHE") == "listed_fund"
+        assert rc._market_of("BTCUSDT.XBIN") == "binance_perp"
 
     def test_listed_funds_all_segments(self, rc):
         """P2 批 08-28：场内基金全体入 etf 分项（沪 50x/51/56/58 + 深 15/16/18）。"""
-        for sym in ("500058.SHSE", "501000.SHSE", "502000.SHSE",   # 沪 封基/LOF
-                    "508000.SHSE",                                  # 沪 REITs
-                    "510300.SHSE", "517800.SHSE", "560010.SHSE", "588000.SHSE",  # 沪 ETF 各段
-                    "159915.SZSE", "150018.SZSE",                   # 深 ETF(含分级残余)
-                    "160211.SZSE", "166005.SZSE",                   # 深 LOF
-                    "180101.SZSE", "184801.SZSE"):                  # 深 REITs/封基
+        for sym in ("500058.XSHG", "501000.XSHG", "502000.XSHG",   # 沪 封基/LOF
+                    "508000.XSHG",                                  # 沪 REITs
+                    "510300.XSHG", "517800.XSHG", "560010.XSHG", "588000.XSHG",  # 沪 ETF 各段
+                    "159915.XSHE", "150018.XSHE",                   # 深 ETF(含分级残余)
+                    "160211.XSHE", "166005.XSHE",                   # 深 LOF
+                    "180101.XSHE", "184801.XSHE"):                  # 深 REITs/封基
             assert rc._market_of(sym) == "listed_fund", sym
 
 

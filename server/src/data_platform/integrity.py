@@ -19,7 +19,7 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from datetime import date
 
-CRYPTO_EXCHANGES: frozenset[str] = frozenset({"BINANCE", "OKX"})
+CRYPTO_EXCHANGES: frozenset[str] = frozenset({"XBIN", "XOKX", "BINANCE", "OKX"})
 
 # 每交易日根数（A 股/场内基金：4 小时连续竞价）
 BARS_PER_DAY: dict[str, int] = {"1D": 1, "1min": 240, "5min": 48}

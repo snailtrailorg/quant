@@ -12,18 +12,13 @@ from typing import Literal
 
 Freq = Literal["1min", "5min", "15min", "1H", "4H", "1D"]
 
-# Tushare 交易所 → vnpy vt（**批175：派生自 symbology 单一入站别名表**，不再手写第二份）
+# 源格式（tushare）→ 内部 canonical MIC（**批177：派生自 symbology 单一入站别名表**）
 from src.quant_common.symbology import VENDOR_ALIASES as TS_EXCHANGE_MAP
 
-# 反向映射（vt_symbol → Tushare ts_code）
-EXCHANGE_TS_MAP = {v: k for k, v in TS_EXCHANGE_MAP.items() if k in ("SH", "SZ")}
-# 补充
-EXCHANGE_TS_MAP["SHSE"] = "SH"
-EXCHANGE_TS_MAP["SZSE"] = "SZ"
-EXCHANGE_TS_MAP["BSE"] = "BJ"
-# 批 137a：`.SSE` 是本仓合法形态（fees.py:33 / risk.py:340 / tasks.py:241 实证快照即 600000.SSE）——
-# 缺这一项时 vt_to_ts("600000.SSE") 原样返回 .SSE，发给 tushare 必失败。
-EXCHANGE_TS_MAP["SSE"] = "SH"
+# 反向映射（任意已知写法 → Tushare ts_code）；由 symbology 单一别名表派生，**不手写第二份**
+_TS_BY_MIC = {"XSHG": "SH", "XSHE": "SZ", "BJSE": "BJ"}
+EXCHANGE_TS_MAP = {alias: _TS_BY_MIC[mic] for alias, mic in TS_EXCHANGE_MAP.items()
+                   if mic in _TS_BY_MIC}
 
 
 def vt_to_ts(vt_symbol: str) -> str:
@@ -39,12 +34,12 @@ def vt_to_ts(vt_symbol: str) -> str:
 
 
 def to_vt_symbol(ts_code: str) -> str:
-    """Tushare ts_code → vnpy vt_symbol。
+    """Tushare ts_code → 内部 canonical MIC。
 
     >>> to_vt_symbol("600000.SH")
-    "600000.SHSE"
+    "600000.XSHG"
     >>> to_vt_symbol("000001.SZ")
-    "000001.SZSE"
+    "000001.XSHE"
     """
     if "." not in ts_code:
         return ts_code
@@ -55,9 +50,9 @@ def to_vt_symbol(ts_code: str) -> str:
 
 
 def to_ts_code(vt_symbol: str) -> str:
-    """vnpy vt_symbol → Tushare ts_code。
+    """内部 canonical MIC（或历史写法）→ Tushare ts_code。
 
-    >>> to_ts_code("600000.SHSE")
+    >>> to_ts_code("600000.XSHG")
     "600000.SH"
     """
     if "." not in vt_symbol:

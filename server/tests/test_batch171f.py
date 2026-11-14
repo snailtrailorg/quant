@@ -34,7 +34,7 @@ def _scratch():
     """scratch 表隔离（不污染 bar_1d）。"""
     from src.data_platform.db import get_conn
     tbl = "bar_1min"      # 复用合法 freq 名建 scratch 语义（独立符号前缀隔离）
-    pfx = "ZZ171F.SZSE"
+    pfx = "ZZ171F.XSHE"
     with get_conn() as conn:
         conn.execute("DELETE FROM bar_1min WHERE symbol LIKE %s", (pfx + "%",))
         conn.commit()
@@ -87,7 +87,7 @@ class TestRecalcTriggerGate:
                    return_value=[object()]), \
              patch("src.data_platform.db.save_bars", return_value=0) as sb:   # 全冲突轮
             gc.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = [
-                ("600000.SHSE", "2026-11-01", 1)]
+                ("600000.XSHG", "2026-11-01", 1)]
             out = engine.__dict__  # noqa: F841 —— 占位防误用
             from src.scheduler import tasks
             tasks.data_continuity_check.run()

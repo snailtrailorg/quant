@@ -12,7 +12,7 @@ from src.data_platform.adapters.base import TushareAdapter
 
 
 def _req(kind, **kw):
-    base = dict(kind=kind, symbols=("600000.SHSE",), sub_kind=None, freq="1D",
+    base = dict(kind=kind, symbols=("600000.XSHG",), sub_kind=None, freq="1D",
                 range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)),
                 mode="consume", temporality="historical", consumer_tag="t",
                 preserve_current_normalization=True)
@@ -23,9 +23,9 @@ def _req(kind, **kw):
 class TestSymbolMatrix:
     def test_vt_to_ts(self):
         ad = TushareAdapter()
-        assert ad.to_source_symbol("600000.SHSE") == "600000.SH"
-        assert ad.to_source_symbol("000001.SZSE") == "000001.SZ"
-        assert ad.to_source_symbol("920196.BSE") == "920196.BJ"
+        assert ad.to_source_symbol("600000.XSHG") == "600000.SH"
+        assert ad.to_source_symbol("000001.XSHE") == "000001.SZ"
+        assert ad.to_source_symbol("920196.BJSE") == "920196.BJ"
 
     def test_sse_alias(self):
         assert TushareAdapter().to_source_symbol("600000.SSE") == "600000.SH"
@@ -56,7 +56,7 @@ class TestPoolEndpointNormalization:
 
         class _Cur:
             def fetchall(self):
-                return [("600000.SHSE",), ("000001.SZSE",)]
+                return [("600000.XSHG",), ("000001.XSHE",)]
 
         class _Conn:
             def execute(self, *a, **k):

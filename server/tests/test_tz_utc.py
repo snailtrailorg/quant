@@ -74,8 +74,8 @@ class TestHubAggregationUtc:
                              last_price=10.0, volume=100, turnover=0.0)
         t1 = SimpleNamespace(datetime=datetime(2026, 9, 21, 10, 1, 2, tzinfo=SHANGHAI),
                              last_price=10.2, volume=300, turnover=0.0)
-        agg.on_tick("600000.SHSE", t0)
-        bar = agg.on_tick("600000.SHSE", t1)
+        agg.on_tick("600000.XSHG", t0)
+        bar = agg.on_tick("600000.XSHG", t1)
         assert bar["ts"] == datetime(2026, 9, 21, 2, 1, 0, tzinfo=timezone.utc)  # 10:01 上海 = 02:01 UTC
 
 
@@ -125,10 +125,10 @@ class TestWarmupMergeBehavior:
         from src.md_hub.main import MinuteAggregator
         from types import SimpleNamespace
         agg = MinuteAggregator()
-        agg.on_tick("600000.SHSE", SimpleNamespace(
+        agg.on_tick("600000.XSHG", SimpleNamespace(
             datetime=datetime(2026, 9, 21, 9, 30, 40, tzinfo=SHANGHAI),
             last_price=10.0, volume=100, turnover=0.0))
-        b1 = agg.on_tick("600000.SHSE", SimpleNamespace(   # 跨分钟 → finalize [9:30) 桶（分钟末标注 9:31）
+        b1 = agg.on_tick("600000.XSHG", SimpleNamespace(   # 跨分钟 → finalize [9:30) 桶（分钟末标注 9:31）
             datetime=datetime(2026, 9, 21, 9, 31, 5, tzinfo=SHANGHAI),
             last_price=10.1, volume=300, turnover=0.0))
         [b2] = agg.flush_minute(9 * 60 + 31)               # [9:31) 桶（分钟末标注 9:32）
@@ -149,7 +149,7 @@ class TestReadWriteFunnel:
 
     def test_validate_bars_funnel(self):
         from src.data_platform.db import validate_bars
-        row = ("600000.SHSE", "1min", datetime(2026, 9, 21, 9, 31), 1.0, 1.0, 1.0, 1.0, 100, 100_000.0, 1.0, "tushare")
+        row = ("600000.XSHG", "1min", datetime(2026, 9, 21, 9, 31), 1.0, 1.0, 1.0, 1.0, 100, 100_000.0, 1.0, "tushare")
         [r] = validate_bars([row])
         assert r[2] == datetime(2026, 9, 21, 1, 31, tzinfo=timezone.utc)
 
@@ -167,7 +167,7 @@ class TestReadWriteFunnel:
         cur.fetchall.return_value = []
         with patch.object(dbm, "get_conn", return_value=conn), \
              patch.object(dbm, "ensure_table"):
-            dbm.get_bars("600000.SHSE", "1D", datetime(2026, 9, 1), datetime(2026, 9, 21))
+            dbm.get_bars("600000.XSHG", "1D", datetime(2026, 9, 1), datetime(2026, 9, 21))
         bind = cur.execute.call_args[0][1]
         assert bind[1].tzinfo is not None and bind[1].utcoffset() == timedelta(0)
         assert bind[2].tzinfo is not None and bind[2].utcoffset() == timedelta(0)

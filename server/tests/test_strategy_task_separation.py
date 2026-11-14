@@ -62,7 +62,7 @@ class TestParameterDefs:
 class TestStrategyConfig:
     def test_strategy_config_has_params_field(self):
         cfg = StrategyConfig(
-            id="t", name="t", type="astock", symbol="600000.SHSE", adapter="xtp",
+            id="t", name="t", type="astock", symbol="600000.XSHG", adapter="xtp",
             params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()",
                     "parameter_defs": [{"name": "x", "type": "number", "default": 1}]}
         )
@@ -94,9 +94,9 @@ class TestBacktestSymbolParams:
     def test_symbol_params_merge(self):
         """symbol_params 覆盖默认参数。"""
         strategy_params = {"mode": "python", "python_code": "...", "buy_threshold": 0.02}
-        symbol_params = {"600000.SHSE": {"buy_threshold": 0.03}, "600001.SHSE": {}}
+        symbol_params = {"600000.XSHG": {"buy_threshold": 0.03}, "600001.XSHG": {}}
         # 标的 600000 用 0.03，标的 600001 用默认 0.02
-        for symbol, expected_threshold in [("600000.SHSE", 0.03), ("600001.SHSE", 0.02)]:
+        for symbol, expected_threshold in [("600000.XSHG", 0.03), ("600001.XSHG", 0.02)]:
             per_symbol = symbol_params.get(symbol, {})
             merged = {**strategy_params, **per_symbol}
             assert merged["buy_threshold"] == expected_threshold

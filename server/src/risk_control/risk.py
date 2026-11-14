@@ -406,9 +406,10 @@ class RiskControl:
                 return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，禁止开仓（平仓放行）", severity="warn", rule="DAILY_LOSS_LIMIT")
 
         # 4. 分市场检查
-        if ".BINANCE" in symbol or ".OKX" in symbol or "PERP" in symbol:
+        # 批177：canonical=MIC（.XBIN/.XOKX）；同时兼容历史行旧写法
+        if symbol.endswith((".XBIN", ".XOKX", ".BINANCE", ".OKX")) or "PERP" in symbol:
             return self._check_crypto(order, state)
-        elif ".SHSE" in symbol or ".SZSE" in symbol or ".SSE" in symbol:
+        elif symbol.endswith((".XSHG", ".XSHE", ".BJSE", ".SHSE", ".SZSE", ".SSE", ".BSE")):
             return self._check_etf_conv(order, account_id)
         return RiskDecision(approved=True, reason="通过")
 

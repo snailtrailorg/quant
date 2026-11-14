@@ -940,14 +940,14 @@ def _factor_class_of(vt_symbol: str) -> str:
     except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     sym = vt_symbol.upper()
-    if any(x in sym for x in (".BINANCE", ".OKX", "PERP")):
+    if any(x in sym for x in (".XBIN", ".XOKX", ".BINANCE", ".OKX", "PERP")):
         return "crypto"
     code = sym.split(".")[0]
     if code.startswith(("11", "12")):
         return "convertible"
     if code.startswith(("15", "16", "51", "52")):
         return "etf"
-    if any(x in sym for x in (".SHSE", ".SZSE", ".BSE")):
+    if any(x in sym for x in (".XSHG", ".XSHE", ".BJSE", ".SHSE", ".SZSE", ".BSE")):
         return "astock"
     return "unknown"
 

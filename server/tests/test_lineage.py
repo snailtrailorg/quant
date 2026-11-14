@@ -64,11 +64,11 @@ class TestFrameSourceAggregate:
         from datetime import datetime, timezone as tz
         ts = datetime(2026, 9, 18, tzinfo=tz.utc)   # to_contract 校验 ts 须 UTC aware
         df = pd.DataFrame([
-            ("600000.SHSE", "1min", ts, 1, 1, 1, 1, 1, 1, 1.0, "tushare"),
-            ("600000.SHSE", "1min", ts, 1, 1, 1, 1, 1, 1, 1.0, "xtp"),
+            ("600000.XSHG", "1min", ts, 1, 1, 1, 1, 1, 1, 1.0, "tushare"),
+            ("600000.XSHG", "1min", ts, 1, 1, 1, 1, 1, 1, 1.0, "xtp"),
         ], columns=["symbol", "freq", "ts", "open", "high", "low",
                     "close", "volume", "amount", "adj_factor", "source"])
-        req = DataRequest(kind="bar_minute", symbols=("600000.SHSE",), temporality="historical",
+        req = DataRequest(kind="bar_minute", symbols=("600000.XSHG",), temporality="historical",
                           freq="1min", range_=(ts, ts))
         with patch("src.data_platform.db.get_bars", return_value=df):
             frame = DataBus()._local_fetch(req)

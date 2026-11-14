@@ -85,7 +85,7 @@ class TestLocalDatesMapSince:
     @needs_db
     def test_since_superset_projection_equivalence(self):
         """since 下界 ⇒ 返回=全集在 [since,∞) 的投影（超集语义——expected 消费零漂移）。"""
-        syms = ["600000.SHSE", "000001.SZSE"]
+        syms = ["600000.XSHG", "000001.XSHE"]
         dexpr = "to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD')"
         full = engine._local_dates_map("bar_1d", dexpr, syms)
         cut = engine._local_dates_map("bar_1d", dexpr, syms, since="20100101")
@@ -97,7 +97,7 @@ class TestLocalDatesMapSince:
     @needs_db
     def test_since_none_zero_drift(self):
         """since=None ⇒ 与旧签名逐字同值（零漂移铁律）。"""
-        syms = ["600000.SHSE"]
+        syms = ["600000.XSHG"]
         dexpr = "to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD')"
         a = engine._local_dates_map("bar_1d", dexpr, syms)
         b = engine._local_dates_map("bar_1d", dexpr, syms, since=None)

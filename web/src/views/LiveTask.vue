@@ -258,7 +258,7 @@ const searchSymbols = async (q) => {
   try {
     const r = await api.get('/sync/symbols/astock_daily', { params: { q, page: 1, size: 20 } })
     // ts_code → vt_symbol 归一（后端全链 SM/account_allows/XTP 均为 vt 口径——.SH 会导致建任务 ACCOUNT_NOT_ALLOWED）
-    const EX = { SH: 'SHSE', SZ: 'SZSE', BJ: 'BSE' }
+    const EX = { SH: 'XSHG', SZ: 'XSHE', BJ: 'BJSE' }
     symbolOptions.value = (r.items || []).slice(0, 20).map(i => {
       const m = String(i.ts_code).toUpperCase().match(/^(.+\.[A-Z]+)$/)
       if (!m) return i.ts_code

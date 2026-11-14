@@ -22,8 +22,8 @@ def test_backtest_metrics_by_type_aggregates():
                 "2026-02": {"1": {"return": 2.0, "alpha": 0.2}, "3": {"return": 3.0, "alpha": 0.3}}}
     rolling2 = {"2026-01": {"1": {"return": 3.0, "alpha": 0.5}, "3": None},
                 "2026-02": {"1": {"return": 4.0, "alpha": 0.6}, "3": {"return": 5.0, "alpha": 0.7}}}
-    conn = _conn_with_results([("600000.SHSE", {"metrics": {"rolling": rolling1}}),
-                               ("000001.SZSE", {"metrics": {"rolling": rolling2}})])
+    conn = _conn_with_results([("600000.XSHG", {"metrics": {"rolling": rolling1}}),
+                               ("000001.XSHE", {"metrics": {"rolling": rolling2}})])
     with patch.object(b, "get_conn", return_value=conn):
         r = b.backtest_metrics(1, "return", {})
     assert r["data"]["2026-01"]["1"] == 2.0   # (1.0+3.0)/2
@@ -36,7 +36,7 @@ def test_backtest_metrics_alpha_type():
     """type=alpha 返回 alpha 键，非 return。"""
     from src.web_api.routes import backtest as b
     rolling = {"2026-01": {"1": {"return": 1.0, "alpha": 0.15}}}
-    conn = _conn_with_results([("600000.SHSE", {"metrics": {"rolling": rolling}})])
+    conn = _conn_with_results([("600000.XSHG", {"metrics": {"rolling": rolling}})])
     with patch.object(b, "get_conn", return_value=conn):
         r = b.backtest_metrics(1, "alpha", {})
     assert r["data"]["2026-01"]["1"] == 0.15
@@ -58,9 +58,9 @@ def test_backtest_export_generates_xlsx():
     result = {"total_return_pct": 10.5,
               "trades": [{"ts": "2026-01-01", "action": "BUY", "volume": 100, "price": 10, "commission": 0.5}],
               "daily_values": [{"ts": "2026-01-01", "close": 10, "position": 100, "avg_price": 10, "cash": 9000, "value": 10000}]}
-    conn = _conn_with_results([("600000.SHSE", result)])
+    conn = _conn_with_results([("600000.XSHG", result)])
     with patch.object(b, "get_conn", return_value=conn):
-        resp = b.backtest_export(1, "600000.SHSE", {})
+        resp = b.backtest_export(1, "600000.XSHG", {})
     assert resp.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert "backtest_1.xlsx" in resp.headers["Content-Disposition"]
 
@@ -71,13 +71,13 @@ def test_backtest_export_pdf_generates():
     result = {"total_return_pct": 10.5,
               "trades": [{"ts": "2026-01-01", "action": "BUY", "volume": 100, "price": 10, "commission": 0.5}],
               "daily_values": [{"ts": "2026-01-01", "close": 10, "position": 100, "avg_price": 10, "cash": 9000, "value": 10000}]}
-    conn = _conn_with_results([("600000.SHSE", result)])
+    conn = _conn_with_results([("600000.XSHG", result)])
     fake_html = MagicMock()
     with patch.object(b, "get_conn", return_value=conn), \
          patch("weasyprint.HTML", fake_html):
-        resp = b.backtest_export_pdf(1, "600000.SHSE", "zh", {})
+        resp = b.backtest_export_pdf(1, "600000.XSHG", "zh", {})
     assert resp.media_type == "application/pdf"
     assert "backtest_1.pdf" in resp.headers["Content-Disposition"]
     html_str = fake_html.call_args.kwargs.get("string") or fake_html.call_args.args[0]
     assert "标的" in html_str          # zh 列头渲染
-    assert "600000.SHSE" in html_str   # 数据经 _esc 入模板
+    assert "600000.XSHG" in html_str   # 数据经 _esc 入模板

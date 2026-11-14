@@ -193,7 +193,7 @@ class TestCreateValidation:
         with _ConnPatch():
             r = admin_client.post(TRADING_URL, json={
                 "name": "t", "provider": "xtp", "market": "astock",
-                "exchanges": ["BINANCE"], "capabilities": ["trading"]})
+                "exchanges": ["XBIN"], "capabilities": ["trading"]})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_EXCHANGE_UNKNOWN"
 
     def test_empty_caps_rejected(self, admin_client):
@@ -232,7 +232,7 @@ class TestCreateValidation:
                 "capabilities": ["trading"]})
         assert r.status_code == 200
         args = conn.executed[0][1]
-        assert args[3] == ["BINANCE"]   # exchanges 位=推导单所
+        assert args[3] == ["XBIN"]   # exchanges 位=推导单所
 
     def test_create_position_per_table_sequence(self, admin_client):
         """position=**本表** max+1（83a 单表单序列）——两族各自打自己的表，无域谓词。"""
@@ -543,7 +543,7 @@ class TestAccountPermission:
     def test_put_checks_trading_account(self, admin_client):
         with _ConnPatch(one=None) as conn:
             r = admin_client.put("/api/accounts/4/permission", json={
-                "allowed_categories": ["stock"], "allowed_exchanges": ["SHSE"],
+                "allowed_categories": ["stock"], "allowed_exchanges": ["XSHG"],
                 "allowed_boards": ["main"]})
         assert r.status_code == 404 and r.json()["code"] == "ACCOUNT_NOT_FOUND"
         assert "FROM trading_account" in conn.executed[0][0]
@@ -551,7 +551,7 @@ class TestAccountPermission:
     def test_put_bad_value_rejected_before_db(self, admin_client):
         with _ConnPatch(one=(4,)) as conn:
             r = admin_client.put("/api/accounts/4/permission", json={
-                "allowed_categories": ["bogus"], "allowed_exchanges": ["SHSE"],
+                "allowed_categories": ["bogus"], "allowed_exchanges": ["XSHG"],
                 "allowed_boards": ["main"]})
         assert r.status_code == 400 and r.json()["code"] == "ACCOUNT_PERM_BAD_VALUE"
         assert conn.executed == []          # 值域校验在查库之前
@@ -559,7 +559,7 @@ class TestAccountPermission:
     def test_put_upserts_on_trading_account(self, admin_client):
         with _ConnPatch(one=(4,)) as conn:
             r = admin_client.put("/api/accounts/4/permission", json={
-                "allowed_categories": ["stock"], "allowed_exchanges": ["SHSE"],
+                "allowed_categories": ["stock"], "allowed_exchanges": ["XSHG"],
                 "allowed_boards": ["main"], "is_st_allowed": True})
         assert r.status_code == 200
         assert any("INTO account_permission" in sql for sql, _ in conn.executed)
@@ -604,7 +604,7 @@ class TestRealDbRoundTrip:
                 "capabilities": ["hist_quote"] if kind == cs.KIND_DATA else ["trading"],
                 "enabled": True}
         if kind == cs.KIND_TRADING:
-            vals["exchanges"] = ["SHSE"]
+            vals["exchanges"] = ["XSHG"]
             vals["account_key"] = f"RT-{tag}"          # UNIQUE(provider, account_key)——uuid 唯一
         return vals
 
@@ -634,7 +634,7 @@ class TestRealDbRoundTrip:
             assert d["capabilities"] == vals["capabilities"]     # text[] 往返
             assert d["has_credentials"] is False
             if kind == cs.KIND_TRADING:
-                assert d["exchanges"] == ["SHSE"]                # 交易族专有两列
+                assert d["exchanges"] == ["XSHG"]                # 交易族专有两列
                 assert d["account_key"] == f"RT-{tag}"
             else:
                 assert d["exchanges"] is None and d["account_key"] is None   # 数据源族无此二列
