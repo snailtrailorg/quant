@@ -31,3 +31,20 @@ def test_screen_cb_api_sanitizes_non_finite():
     with patch.object(R, "get_conn", return_value=conn):
         out = R.screen_cb_api(payload={})
     assert out[0]["double_low"] is None and out[0]["premium_pct"] is None
+
+def test_run_query_sanitizes_decimal_infinity():
+    """numeric 列是 Decimal：Decimal('Infinity') 也必须降级 None。"""
+    from decimal import Decimal
+    from unittest.mock import MagicMock, patch
+    from src.data_platform import screen as SC
+
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cur = MagicMock()
+    cur.description = [("ts_code",), ("premium_pct",)]
+    cur.fetchall.return_value = [("113056.SH", Decimal("Infinity")), ("127061.SZ", Decimal("NaN"))]
+    conn.execute.return_value = cur
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch.object(SC, "build_base_from", return_value="SELECT 1 AS ts_code"):
+        out = SC.run_query("convertible", [], "", [], 10, [])
+    assert all(r["premium_pct"] is None for r in out["rows"])

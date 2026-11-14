@@ -162,6 +162,9 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
     def _f(x):
         # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
         import math
+        from decimal import Decimal
+        if isinstance(x, Decimal) and not x.is_finite():
+            return None
         v = float(x) if x is not None else None
         return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:
@@ -220,6 +223,9 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
     def _f(x):
         # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
         import math
+        from decimal import Decimal
+        if isinstance(x, Decimal) and not x.is_finite():
+            return None
         v = float(x) if x is not None else None
         return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:
@@ -276,6 +282,9 @@ def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
     def _f(x):
         # 批178：inf/nan 无法 JSON 序列化（allow_nan=False）→ 500；派生值一律降级 None
         import math
+        from decimal import Decimal
+        if isinstance(x, Decimal) and not x.is_finite():
+            return None
         v = float(x) if x is not None else None
         return v if (v is None or math.isfinite(v)) else None
     with get_conn() as conn:

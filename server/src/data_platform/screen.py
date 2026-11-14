@@ -151,9 +151,13 @@ def run_query(category: str, fields: list, where: str, params: list, limit: int,
         # 批178：派生指标除零/极小分母会溢出成 inf/nan —— JSONResponse 用 allow_nan=False，
         # 序列化即 500（可转债 conv_price 极小的行触发）。展示层一律降级为 None。
         import math as _math
+        from decimal import Decimal as _Decimal
         for _r in rows:
             for _k, _v in _r.items():
+                # numeric 列取回是 Decimal：Decimal('Infinity'/'NaN') 同样过不了 allow_nan=False
                 if isinstance(_v, float) and not _math.isfinite(_v):
+                    _r[_k] = None
+                elif isinstance(_v, _Decimal) and not _v.is_finite():
                     _r[_k] = None
         # 批175f：展示口径=项目 vt（原只回 ts_code，前端显示 600000.SH 属源格式）
         from .schema import to_vt_symbol
