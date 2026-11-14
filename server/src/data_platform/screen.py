@@ -148,6 +148,11 @@ def run_query(category: str, fields: list, where: str, params: list, limit: int,
         cur = conn.execute(q, params)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # 批175f：展示口径=项目 vt（原只回 ts_code，前端显示 600000.SH 属源格式）
+        from .schema import to_vt_symbol
+        for r in rows:
+            if r.get("ts_code"):
+                r["vt_symbol"] = to_vt_symbol(r["ts_code"])
         if null_fields:
             # 被条件剔除的 NULL 行 =（满足其余条件 ∩ 引用字段为空）——须带同一 where（评审 P1）
             null_checks = " OR ".join(f + " IS NULL" for f in null_fields)

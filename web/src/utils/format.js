@@ -34,8 +34,9 @@ export const fmtPrice = (v, digits = 2) => {
 /** 空值治理（04 §3.5）：null/undefined/NaN → '—'（禁止 '缺'/null 上屏） */
 export const dash = v => (v === null || v === undefined || v === '' || (typeof v === 'number' && !isFinite(v))) ? '—' : v
 
-/** 证券代码展示：'600000.SHSE' → '600000'（内部命名空间不裸露给用户，04 §3.3） */
-export const fmtCode = sym => dash(String(sym ?? '').split('.')[0])
+// 批175f：删除 fmtCode（原实现剥掉交易所后缀并注释"内部命名空间不裸露"）。
+// 现行口径相反——标的**展示必须带交易所后缀**（`600000.SHSE`），统一由后端 canonical 提供，
+// 前端禁止再剥（守门：server/tests/test_web_symbol_display.py）。
 
 
 /** 枚举中文化映射表（01 G10：SELL/running/complete… 不裸英文上屏） */

@@ -25,7 +25,7 @@
         <TableShell :data="positions" size="small" storage-key="trading-positions">
           <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-link type="primary" @click="gotoDetail(row.symbol)">{{ (row.symbol||'').split('.')[0] }}</el-link>
+              <el-link type="primary" @click="gotoDetail(row.symbol)">{{ row.symbol }}</el-link>
             </template>
           </el-table-column>
           <!-- P2-11（05 §5.2/06 B#4）：API 已有字段全展示——direction/frozen/cost/pnl（现状只 2 列） -->
@@ -36,7 +36,7 @@
           <el-table-column prop="frozen" :label="t('trading.frozenCol')" min-width="80" class-name="num" />
           <el-table-column prop="cost_price" :label="t('trading.costCol')" min-width="90" class-name="num" />
           <el-table-column prop="last_price" :label="t('trading.lastPrice')" min-width="80" class-name="num">
-            <template #default="{ row }">{{ lastPrices[row.symbol?.split('.')[0]] || '—' }}</template>
+            <template #default="{ row }">{{ lastPrices[row.symbol] || '—' }}</template>
           </el-table-column>
           <el-table-column prop="pnl" :label="t('trading.pnlCol')" min-width="110" class-name="num">
             <template #default="{ row }">
@@ -207,7 +207,7 @@ const loadPrices = async () => {
     try {
       const d = await stockDetail(symbol)   // 带后缀（detail 端点 to_vt_symbol 不推断交易所，去后缀=404）
       const q = d?.quote
-      if (q?.last != null) lastPrices.value[symbol.split('.')[0]] = q.last
+      if (q?.last != null) lastPrices.value[symbol] = q.last     // 键=完整 vt，与持仓行 row.symbol 对齐
     } catch { /* 单标的行情失败不阻塞其余 */ }
   }))
 }

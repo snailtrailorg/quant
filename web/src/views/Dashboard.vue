@@ -73,7 +73,7 @@
       <el-col :xs="24" :sm="12" :md="6"><el-card>
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="p in topPositions" :key="p.symbol" class="pos-row">
-          <span>{{ (p.symbol || '').split('.')[0] }}</span>
+          <span>{{ p.symbol }}</span>
           <span class="num" :class="pnlClass(p.pnl)">{{ pnlArrow(p.pnl) }} {{ fmtMoney(p.pnl) }}</span>
         </div>
         <EmptyState size="small" :description="t('dashboard.noPositions')" :action-label="t('dashboard.goStrategy')" @action="$router.push('/trading')" />
@@ -82,7 +82,7 @@
         <template #header>{{ t('dashboard.todayOrders') }}</template>
         <div v-for="o in todayOrders.slice(0, 6)" :key="o.id" class="evt-row">
           <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
-          {{ (o.symbol || '').split('.')[0] }} ×{{ o.volume }}
+          {{ o.symbol }} ×{{ o.volume }}
           <span style="color: var(--text-secondary)">{{ fmtTime.s(o.ts) }}</span>
         </div>
         <EmptyState size="small" :description="t('dashboard.noOrders')" />

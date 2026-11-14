@@ -14,7 +14,7 @@
       </template>
       <TableShell :data="pagedRows" @selection-change="onSelChange" storage-key="screener-cb">
         <el-table-column type="selection" width="40" />
-        <el-table-column prop="ts_code" label="Code" min-width="110" />
+        <el-table-column prop="vt_symbol" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('screener.bondName')" min-width="120" show-overflow-tooltip />
         <el-table-column prop="stk_code" :label="t('cols.underlyingCode')" min-width="184" />
         <el-table-column v-if="colOn('stk_name')" prop="stk_name" :label="t('screener.stkName')" min-width="120" show-overflow-tooltip />
@@ -89,7 +89,7 @@ const colDefs = computed(() => [
 const visible = ref([])
 const colOn = k => visible.value.includes(k)
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
-const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }
+const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.vt_symbol)) }
 
 const loadPresets = async () => {
   plansLoading.value = true
@@ -120,10 +120,9 @@ const addToPool = async () => {
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
   const symbols = [...checked.value]
-  const _key = (s) => (s || '').split('.')[0]
   const _existing = (pool.symbols || []).filter(Boolean)
-  const _seen = new Set(_existing.map(_key))
-  const merged = [..._existing, ...symbols.filter(s => !_seen.has(_key(s)))]
+  const _seen = new Set(_existing)          // 批175f：池与选股行同为 vt，直接精确去重（不再剥后缀）
+  const merged = [..._existing, ...symbols.filter(s => !_seen.has(s))]
   try {
     await api.post('/pool', { id: pool.id, name: pool.name, category: pool.category || CAT,
                               symbolsStr: merged.join('\n'), description: pool.description || '' })
