@@ -756,8 +756,8 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        # 0184（批 177 补漏：position_snapshot 切 MIC）
-        assert heads == {"0184"}, f"head 不是唯一 0184：{sorted(heads)}"   # 批 177：0184 新链头——链头钉随批交棒
+        # 0185（批 177 收尾：迁移窗口期旧后缀行幂等清扫）
+        assert heads == {"0185"}, f"head 不是唯一 0185：{sorted(heads)}"   # 批 177：0185 新链头——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""
