@@ -332,6 +332,11 @@
 
 **保留**：SM 对账（security_master vs static_symbols 两张表互对，不涉行情同源）+ validate_bar_quality（批 71 单源内部一致性：跳空/断点，不依赖备源）+ lineage 血缘。
 
+## 2026-11-14 · 挂账复核（批177 后）
+
+- **已销**：① `order_log` 终态回写——`write_order_status` 已按 `ORDER_FINAL_STATES` 闭包逐事件回写（P1b 起），"在途清零"不再依赖人工勾选；② `data_license` 行情授权门已随 P3 上产（`subscription.py` + hub 355）。
+- **仍开**：L2 真连连通预检（`test_connection` 仍只校验凭证）、G-4 crypto 元数据近似（`1/0.01`）、OKX 实时路线、crypto 8 族派生。处置顺序见 `flow/方案/未完成工作重估-20261114.md`。
+
 ## 2026-09-26 · A04 §九实施语义 Web 域诚实化（批 61 M6）
 
 1. **两条立法降级实施**（立法意图保留，A04 §九注记为实施真相）：①「提名时刻连通预检」Web 域不可达（`Broker.test_connection`=纯凭证检查零网络；Web 进程无 TD 会话）→落地 **L1=凭证完整性+行校验**，L2 真连+资金挂账 worker/hub 会话探测批；②「在途清零」两源（order_log 无终态回写——成交/撤单不落 status）→DB 近似+确认者人工核实勾选，order_log 终态回写根治挂账。
