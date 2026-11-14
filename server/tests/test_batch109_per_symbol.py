@@ -81,7 +81,7 @@ class _FakeCrypto:
     """crypto adapter 桩：三地板三源各由入参控制（对齐 `_window_floors` 的契约）。"""
 
     provider = "binance"
-    venue = "BINANCE"
+    venue = "XBIN"
 
     def __init__(self, src_lo="2019-12-31", inception=None, lag=1):
         self._src_lo, self._inc, self._lag = src_lo, inception, lag

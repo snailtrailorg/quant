@@ -39,7 +39,7 @@ class _StubAdapter:
     """per-symbol 桩：`fail` 恒失败、`once_fail` 只首轮失败（二轮自愈）。"""
 
     provider = "stub"
-    venue = "BINANCE"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
+    venue = "XBIN"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
 
     def __init__(self, symbols=("AAA", "BBB", "CCC"), fail=(), once_fail=()):
         self.symbols = list(symbols)

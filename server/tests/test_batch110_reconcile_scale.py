@@ -96,7 +96,7 @@ def _now():
 
 class _FakeCrypto:
     provider = "binance"
-    venue = "BINANCE"
+    venue = "XBIN"
 
     def available_range(self, kind):
         return ("2019-12-31", None)

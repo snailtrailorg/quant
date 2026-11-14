@@ -234,7 +234,7 @@ class TestCryptoClamp:
 
         class _Adapter:
             provider = "binance"
-            venue = "BINANCE"
+            venue = "XBIN"
 
             def account_window(self):
                 return _Win()

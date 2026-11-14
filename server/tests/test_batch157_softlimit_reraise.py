@@ -27,7 +27,7 @@ class _Biz(Exception):
 
 class _Ad:
     provider = "binance"
-    venue = "BINANCE"
+    venue = "XBIN"
 
     def __init__(self, plan=None):
         self.plan = plan or {}
@@ -155,7 +155,7 @@ def test_budget_break_cursor_capped_to_scanned(monkeypatch):
         pass
 
     class _Ad4:
-        provider = "binance"; venue = "BINANCE"
+        provider = "binance"; venue = "XBIN"
         available_range = staticmethod(lambda kind: ("2019-12-31", None))
         publish_lag = staticmethod(lambda kind: 1)
         list_symbols = staticmethod(lambda: ["AAAUSDT", "ZZZUSDT"])

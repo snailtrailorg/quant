@@ -192,7 +192,7 @@ class TestCryptoWindow:
 class _FakeBinance:
     """最小供给面替身：记录调用 + 按给定日造行。"""
 
-    venue = "BINANCE"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
+    venue = "XBIN"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
 
     def __init__(self, symbols=("BTCUSDT",), day: date | None = None, empty=False, boom=False):
         self._symbols = list(symbols)

@@ -74,7 +74,7 @@ class TestCapabilityAndRegistry:
 
 
 class _FakeOkx:
-    venue = "OKX"
+    venue = "XOKX"
 
     def __init__(self, symbols=("BTC-USDT-SWAP",), day=None, empty=False):
         self._symbols = list(symbols)

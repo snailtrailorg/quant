@@ -92,7 +92,7 @@ class _FakeCrypto:
     inception 已收编为 SM 读口，见 `sm_inception`）。"""
 
     provider = "binance"
-    venue = "BINANCE"
+    venue = "XBIN"
 
     def __init__(self, src_lo="2019-12-31", lag=0):
         self._src_lo, self._lag = src_lo, lag

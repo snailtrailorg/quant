@@ -122,11 +122,11 @@ def test_crypto_row_shape(monkeypatch):
 
 def test_crypto_row_inception_passthrough(monkeypatch):
     """OKX：真上币日透传到 list_date 位。"""
-    adapter = SimpleNamespace(provider="okx", venue="OKX",
+    adapter = SimpleNamespace(provider="okx", venue="XOKX",
                               symbol_inception=lambda s: "2019-11-12")
     rows = _capture(monkeypatch, adapter, ["BTC-USDT-SWAP"])
     assert rows[0][10] == "2019-11-12"
-    assert rows[0][2] == "OKX" and rows[0][12] == "crypto_247"
+    assert rows[0][2] == "XOKX" and rows[0][12] == "crypto_247"
 
 
 def test_crypto_row_requires_venue(monkeypatch):

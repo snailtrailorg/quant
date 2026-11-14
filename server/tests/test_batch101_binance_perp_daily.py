@@ -501,7 +501,7 @@ class TestCryptoWindow:
 
 class _FakeAdapter:
     provider = "binance"
-    venue = "BINANCE"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
+    venue = "XBIN"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
 
     def __init__(self, symbols=("BTCUSDT", "ETHUSDT"), rows_per_symbol=1, empty=False):
         self._symbols = list(symbols)
