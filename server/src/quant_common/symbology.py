@@ -6,8 +6,7 @@
 
 设计要点（见 `flow/方案/标的主标识体系-讨论-20261113.md` §七）：
 - `canonical` 幂等；**裸码/未知后缀一律 ValueError（禁猜）**——猜错=拉错标的的数据，比失败更糟。
-- `aliases` **双向**（SHSE↔SSE）：过渡期 `position_symbol_candidates` 仍需要（否则现网
-  `position_snapshot` 还是 `.SSE` 时 SELL 被截 0，重演 171n）。
+- `aliases` **双向**（SHSE↔SSE）：`order_log` 历史行仍含 `.SSE`，查询侧需要双写候选。
 - crypto（`.BINANCE/.OKX`）直通、`to_mic` 返回 None（ISO 10383 不覆盖加密交易所）。
 """
 from __future__ import annotations
@@ -29,8 +28,8 @@ _BIDIRECTIONAL: dict[str, tuple[str, ...]] = {
     "SHSE": ("SHSE", "SSE"), "SSE": ("SHSE", "SSE"),
 }
 
-# tushare 的 `SZE`（SZSE 变体）——对齐 schema.TS_EXCHANGE_MAP 历史键
-_VENDOR_ALIASES.setdefault("SZE", "SZSE")
+# 注意：tushare trade_cal 的交易所名 `SZE` **不是 vt 后缀**（批131 契约：`600000.SZE` 必须硬拒），
+# 故不入本表——它只作 trade_cal 的 exchange 参数值使用，不参与 symbol 归一。
 
 # 公开**只读**视图（供 schema 等派生；写者会在运行时 TypeError，而非污染 L0 唯一表）
 from types import MappingProxyType as _MPT
@@ -49,14 +48,25 @@ def split_raw(symbol: str) -> tuple[str, str]:
     return raw, ex.upper()
 
 
+def vt_suffix(alias: str) -> str:
+    """**交易所维度**别名/后缀 → vt（`SSE/SH/XSHG → SHSE`；`BINANCE` 直通）。
+
+    与 `canonical` 的分工：本函数只吃后缀（无标的代码），供"后缀→vnpy 枚举/hub 键"
+    这类只需交易所的调用方使用——避免它们各自再写一份 SSE 映射。
+    """
+    if not isinstance(alias, str) or not alias.strip():
+        raise ValueError(f"交易所后缀为空: {alias!r}")
+    ex = alias.strip().upper()
+    vt = _VENDOR_ALIASES.get(ex)
+    if vt is None:
+        raise ValueError(f"未知交易所后缀 {ex!r}；新映射须加 symbology._VENDOR_ALIASES")
+    return vt
+
+
 def canonical(symbol: str) -> str:
     """任意已知形态 → vt（幂等）。未知后缀/裸码 → ValueError。"""
     raw, ex = split_raw(symbol)
-    vt = _VENDOR_ALIASES.get(ex)
-    if vt is None:
-        raise ValueError(
-            f"未知交易所后缀 {ex!r}（symbol={symbol!r}）；新映射须加 symbology._VENDOR_ALIASES")
-    return f"{raw}.{vt}"
+    return f"{raw}.{vt_suffix(ex)}"
 
 
 def to_mic(symbol: str) -> str | None:

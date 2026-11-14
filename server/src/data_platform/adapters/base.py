@@ -249,10 +249,14 @@ class TushareAdapter(BaseDataAdapter):
                 f"tushare 源格式转换失败：{symbol!r} 无交易所后缀（合法 vt 后缀 "
                 "SHSE/SZSE/BSE/SSE 或源格式 SH/SZ/BJ，如 600000.SHSE）")
         ex = ex.upper()
-        if ex not in {"SHSE", "SZSE", "BSE", "SSE", "SH", "SZ", "BJ"}:
+        # 批175e：白名单统一由 symbology 判定（唯一别名表；未知后缀即 ValueError）
+        from src.quant_common.symbology import vt_suffix
+        try:
+            vt_suffix(ex)
+        except ValueError:
             raise ValueError(
                 f"tushare 源格式转换失败：{symbol!r} 后缀 {ex} 不在白名单 "
-                "(SHSE/SZSE/BSE/SSE/SH/SZ/BJ)")
+                "(SHSE/SZSE/BSE/SSE/SH/SZ/BJ)") from None
         from src.data_platform.schema import to_ts_code, to_vt_symbol
         # 先归一到 vt（`.SSE`→`.SHSE` 等别名由 schema 单表负责），再 vt→ts
         return to_ts_code(to_vt_symbol(f"{head}.{ex}"))

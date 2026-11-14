@@ -39,6 +39,12 @@ def events() -> dict[str, str]:
 
 
 def exchange_of(suffix: str) -> Any:
+    """项目 vt 后缀/别名 → vnpy Exchange 枚举（批175e：别名归一见 symbology，本处只保留
+    "vt → vnpy 枚举"出口层——vnpy 沪市枚举名恰为 SSE，属出口语义而非入站别名）。"""
+    from src.quant_common.symbology import vt_suffix
     c = constants()
-    mapping = {"SHSE": c.Exchange.SSE, "SSE": c.Exchange.SSE, "SZSE": c.Exchange.SZSE}
-    return mapping.get((suffix or "").upper(), c.Exchange.SSE)
+    mapping = {"SHSE": c.Exchange.SSE, "SZSE": c.Exchange.SZSE, "BSE": c.Exchange.BSE}
+    try:
+        return mapping.get(vt_suffix(suffix or ""), c.Exchange.SSE)
+    except ValueError:
+        return c.Exchange.SSE

@@ -203,6 +203,21 @@ def _flush_positions(adapter, account_id, task_id) -> None:
     try:
         from src.data_platform.db import get_conn
         positions = adapter.query_position() or []
+        # 批175e：持仓表唯一写入口兜底归一——provider 各异（插件已归一；legacy 可能给裸码 /
+        # vnpy 枚举值），此处再收一次，防 0182 的 CHECK 之外（裸码不算 .SSE）静默写坏 join。
+        from src.quant_common.symbology import canonical
+        rows: list[tuple] = []
+        for p in positions:
+            sym = getattr(p, "symbol", "") or ""
+            try:
+                sym = canonical(sym)
+            except ValueError as e:
+                logger.error("持仓 symbol 不可归一，跳过该行（防写坏快照）: %s (%s)", sym, e)
+                continue
+            rows.append((account_id, sym, getattr(p, "direction", "direction_long"), int(p.volume),
+                         int(getattr(p, "frozen", 0) or 0), float(p.avg_price or 0),
+                         float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
+                         str(task_id) if task_id is not None else None))
         with get_conn() as conn:
             conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (account_id,))
             if positions:
@@ -215,15 +230,12 @@ def _flush_positions(adapter, account_id, task_id) -> None:
                         "ON CONFLICT (account_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
                         "frozen=EXCLUDED.frozen, cost_price=EXCLUDED.cost_price, pnl=EXCLUDED.pnl, "
                         "yd_volume=EXCLUDED.yd_volume, task_id=EXCLUDED.task_id",
-                        [(account_id, p.symbol, getattr(p, "direction", "direction_long"), int(p.volume),
-                          int(getattr(p, "frozen", 0) or 0), float(p.avg_price or 0),
-                          float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
-                          str(task_id) if task_id is not None else None) for p in positions])
+                        rows)
             conn.execute(
                 "INSERT INTO position_refresh (account_id, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
                 "ON CONFLICT (account_id) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
-                (account_id, len(positions), str(task_id) if task_id is not None else None,
-                 len(positions), str(task_id) if task_id is not None else None))
+                (account_id, len(rows), str(task_id) if task_id is not None else None,
+                 len(rows), str(task_id) if task_id is not None else None))
             conn.commit()
     except Exception as e:
         # 批175d：CHECK 违例（.SSE 未归一）是"快照冻结"级事故——必须 error 可见，

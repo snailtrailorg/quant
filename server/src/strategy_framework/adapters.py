@@ -235,10 +235,18 @@ class ExecutionAdapter(ABC):
 # --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/场内基金/A 股股票） ---
 
 def _vnpy_exchange(ex: str):
-    """项目交易所后缀 -> vnpy Exchange 枚举（延迟 import）。"""
+    """项目交易所后缀/别名 -> vnpy Exchange 枚举（延迟 import）。
+
+    批175e：别名归一交给 `symbology.vt_suffix`（唯一别名表）——本函数只保留
+    "vt → vnpy 枚举"这一层（vnpy 的沪市枚举名是 `SSE`，故此处出现 SSE 属**出口**语义）。
+    """
     from vnpy.trader.constant import Exchange
-    mapping = {"SHSE": Exchange.SSE, "SSE": Exchange.SSE, "SZSE": Exchange.SZSE}
-    return mapping.get(ex.upper(), Exchange.SSE)
+    from src.quant_common.symbology import vt_suffix
+    mapping = {"SHSE": Exchange.SSE, "SZSE": Exchange.SZSE, "BSE": Exchange.BSE}
+    try:
+        return mapping.get(vt_suffix(ex), Exchange.SSE)
+    except ValueError:      # 未知 → 保持历史缺省（原 mapping.get 缺省即 Exchange.SSE）
+        return Exchange.SSE
 
 
 class XTPAdapter(ExecutionAdapter):

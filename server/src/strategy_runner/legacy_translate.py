@@ -18,6 +18,7 @@ from src.quant_common.domain import (
     Position,
     Trade,
 )
+from src.quant_common.symbology import canonical
 
 # vnpy Status.name → 领域状态（不 import vnpy.constant）
 _STATUS_MAP = {
@@ -105,10 +106,31 @@ def to_domain_trade(d: Any, client_id: str = "") -> Trade:
     )
 
 
+def _canon_symbol(p: Any) -> str:
+    """批175e：symbol 归一到项目 vt。
+
+    两种入参：`adapters.Position`（已是 vt）/ vnpy `PositionData`（`symbol` 是**裸码**、
+    `exchange` 才是 vnpy 枚举值 `SSE`）——后者此前直接透传，裸码会静默写坏
+    `position_snapshot` 的 join。不可归一（真裸码无 exchange）返回原值，由写侧守门可见。
+    """
+    s = getattr(p, "symbol", "") or ""
+    if "." in s:
+        cand = s
+    else:
+        ex = getattr(getattr(p, "exchange", None), "value", "") or ""
+        cand = f"{s}.{ex}" if s and ex else (getattr(p, "vt_symbol", "") or s)
+    if not cand:
+        return ""
+    try:
+        return canonical(cand)
+    except ValueError:
+        return cand
+
+
 def to_domain_position(p: Any) -> Position:
     """legacy adapters.Position / vnpy PositionData → 领域 Position。"""
     return Position(
-        symbol=getattr(p, "symbol", "") or "",
+        symbol=_canon_symbol(p),
         volume=int(getattr(p, "volume", 0) or 0),
         avg_price=float(getattr(p, "avg_price", getattr(p, "price", 0)) or 0),
         pnl=float(getattr(p, "pnl", 0) or 0),

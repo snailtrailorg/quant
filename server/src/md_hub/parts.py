@@ -31,9 +31,17 @@ def _key(base: str, account_id) -> str:
 
 
 def _project_symbol(tick) -> str:
-    """vnpy vt 后缀 → 项目后缀（SSE→SHSE），bar 表/流命名统一项目口径。"""
+    """vnpy vt 后缀 → 项目 vt（`.SSE→.SHSE`），bar 表/流命名统一项目口径。
+
+    批175e：别名归一交 `symbology.vt_suffix`（唯一别名表）；未知后缀保留原样（加密直通）。
+    """
+    from src.quant_common.symbology import vt_suffix
     ex = tick.exchange.value if tick.exchange else ""
-    return f"{tick.symbol}.{'SHSE' if ex == 'SSE' else ex}"
+    try:
+        ex = vt_suffix(ex) if ex else ex
+    except ValueError:
+        pass
+    return f"{tick.symbol}.{ex}"
 
 
 def _in_bar_session(t: datetime, market: str = "astock") -> bool:

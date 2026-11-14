@@ -97,6 +97,7 @@ class InstrumentSpec:
     position_side: str
     order_range: dict | None
     venue_flags: dict
+    mic_code: str | None = None     # 批175e：ISO 10383 venue 标识（crypto NULL；MPID 语义非证券主键）
 
     @classmethod
     def of(cls, symbol: str) -> "InstrumentSpec":
@@ -174,11 +175,11 @@ def _load_instrument(symbol: str) -> InstrumentSpec:
         row = c.execute(
             "SELECT vt_symbol, market, exchange, category, board, multiplier, tick_size, "
             "trade_phase, sellable_rule, order_types, position_side, venue_flags, "
-            "order_range_override FROM security_master WHERE vt_symbol=%s", (symbol,)).fetchone()
+            "order_range_override, mic_code FROM security_master WHERE vt_symbol=%s", (symbol,)).fetchone()
         if not row:
             raise KeyError(f"InstrumentSpec: security_master 无行 {symbol}")
         (_sym, _market, exch, cat, board, mult, tick, phase, sellable,
-         order_types, pos_side, flags, override) = row
+         order_types, pos_side, flags, override, mic) = row
         band = None
         if board:
             band = c.execute(
@@ -218,6 +219,7 @@ def _load_instrument(symbol: str) -> InstrumentSpec:
         position_side=pos_side or "long_only",
         order_range=order_range,
         venue_flags=(flags if isinstance(flags, dict) else json.loads(flags or "{}")),
+        mic_code=mic,
     )
 
 
