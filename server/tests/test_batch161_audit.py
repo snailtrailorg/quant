@@ -263,13 +263,13 @@ def test_refill_budget_caps_network(monkeypatch):
 
     monkeypatch.setattr("src.quant_common.redis_client.business_redis", lambda **kw: _BR())
     monkeypatch.setattr(OP, "pip_installed", lambda: [
-        {"name": f"p{i}", "cur": "1.0", "local": False} for i in range(100)])
+        {"name": f"p{i}", "cur": "1.0", "local": False} for i in range(300)])
     calls = []
     monkeypatch.setattr(OP, "pypi_versions_cached", lambda name, timeout=10: (
         calls.append(name) or {"versions": ["1.0"], "yanked": []}))
     r = T.dep_audit.run()
-    assert len(calls) == 60, f"额度应 60，实得 {len(calls)}"
-    assert r["n_remote"] == 60
+    assert len(calls) == 200, f"额度应 200，实得 {len(calls)}"
+    assert r["n_remote"] == 200
 
 
 def test_valkey_client_has_socket_timeout():

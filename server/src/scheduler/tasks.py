@@ -1023,7 +1023,7 @@ def dep_audit():
         errors.append(f"pip-enum: {e}"[:120])
 
     # —— 续跑判据（步4盲审 B-P1：26h 窗替代当日零点——跨零点中断重触发不再自取消）——
-    round_start = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=26)
+    round_start = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)   # 批182c：续跑窗=单轮上限 2h（原 26h 会让 24h 后的新轮被上轮罩住）
 
     _beat_fails = 0
     def _beat(n, total, done=False):
@@ -1087,7 +1087,7 @@ def dep_audit():
 
     # 批182：批量读缓存（1 次往返）得到 miss 集合；miss 包按额度联网（有界工作单元，
     # 避免单包阻塞时整轮被拖死——175 个无缓存包一次全查曾卡在单个包 7 分钟）。
-    _REFILL_MAX = 60
+    _REFILL_MAX = 200
     _miss = set()
     try:
         _keys = [f"sec:pypi:{row['name']}" for row in installed]

@@ -217,8 +217,13 @@ def _upsert_components(conn, scan_date: date,
     now_ts = _dtn.datetime.now(_dtn.timezone.utc)
     _n_ins = _n_upd = _n_err = 0   # 批156 probe
     # 批 155：判定列幂等覆盖 + checked_at GREATEST 单调（§4.4b）
-    J_UPD = ("managed_by=%s, latest_version=%s, latest_source=%s, "
-             "judge_class=%s, judge_why=%s, "
+    # 批182c：COALESCE 保留旧值——契约缺失时 judged 为空（jv 全 None），原直接覆盖会把
+    # 全表 latest/judge 清空（删契约→scan 回写 None 的连锁，实测 354 行 latest 全变 NULL）。
+    J_UPD = ("managed_by=COALESCE(%s, managed_by), "
+             "latest_version=COALESCE(%s, latest_version), "
+             "latest_source=COALESCE(%s, latest_source), "
+             "judge_class=COALESCE(%s, judge_class), "
+             "judge_why=COALESCE(%s, judge_why), "
              "checked_at=GREATEST(COALESCE(checked_at, %s), %s) ")
     for source, name, version, origin in rows:
         try:
