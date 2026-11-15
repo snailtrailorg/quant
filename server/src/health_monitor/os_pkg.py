@@ -184,10 +184,18 @@ def pypi_versions(name: str, base=None, timeout: int = 10) -> dict:
     """
     import urllib.request
     origin = base or os.environ.get(PYPI_SIMPLE_ENV) or PYPI_SIMPLE
-    req = urllib.request.Request(f"{origin}/{name}/",
-                                 headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+    # 批182b：gzip——pyzmq 首页 3.0MB/124s → 506KB/6.6s（19x）。timeout 只限单次
+    # recv，拦不住大响应慢速传输；不压缩时 175 个 miss 包要数小时。
+    req = urllib.request.Request(
+        f"{origin}/{name}/",
+        headers={"Accept": "application/vnd.pypi.simple.v1+json",
+                 "Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        payload = json.load(r)
+        raw = r.read()
+        if (r.headers.get("Content-Encoding") or "").lower() == "gzip":
+            import gzip as _gz
+            raw = _gz.decompress(raw)
+    payload = json.loads(raw)
     ver_yanked = {}
     for f in payload.get("files", []):
         m = re.match(
