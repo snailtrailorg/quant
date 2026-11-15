@@ -58,12 +58,16 @@ class TestSaveBarsRowcount:
 
     @needs_db
     def test_overwrite_counts_updates(self, _scratch):
-        """overwrite：冲突被更新行计入 rowcount（受影响数非净新增）。"""
+        """overwrite：**值变化**才计入 rowcount（批183 WHERE 条件化——值未变不 UPDATE，
+        避免对账/回补重复写产生 dead tuple 与索引膨胀）。"""
         from src.data_platform.db import save_bars_overwrite
         tbl, pfx = _scratch
         a, b = pfx + "D", pfx + "E"
         assert save_bars_overwrite("1min", _rows(a, b)) == 2, "首写"
-        assert save_bars_overwrite("1min", _rows(a, b)) == 2, "全冲突 DO UPDATE ⇒ 2 受影响"
+        assert save_bars_overwrite("1min", _rows(a, b)) == 0, "值未变 ⇒ 0（不产生 dead tuple）"
+        changed = [(s, "1D", _TS, 1.0, 2.0, 0.5, 1.6, 100, 200.0, 1.0, "test171f")
+                   for s in (a, b)]
+        assert save_bars_overwrite("1min", changed) == 2, "close 变化 ⇒ 2 更新"
 
 
 class TestRecalcTriggerGate:

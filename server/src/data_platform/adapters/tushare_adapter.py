@@ -429,27 +429,9 @@ def pull_trade_cal_raw(year: int) -> pd.DataFrame:
 
 # --- 财务指标（daily_basic） ---
 
-DAILY_BASIC_DDL = """
-CREATE TABLE IF NOT EXISTS daily_basic (
-    id BIGSERIAL PRIMARY KEY,
-    ts_code TEXT NOT NULL,
-    vt_symbol TEXT NOT NULL,
-    trade_date DATE NOT NULL,
-    close NUMERIC,
-    turnover_rate NUMERIC,
-    pe NUMERIC,
-    pe_ttm NUMERIC,
-    pb NUMERIC,
-    ps NUMERIC,
-    ps_ttm NUMERIC,
-    dv_ratio NUMERIC,
-    dv_ttm NUMERIC,
-    total_mv NUMERIC,
-    circ_mv NUMERIC,
-    UNIQUE(ts_code, trade_date)
-);
-CREATE INDEX IF NOT EXISTS idx_daily_basic_code_date ON daily_basic (ts_code, trade_date DESC);
-"""
+# 批183：DAILY_BASIC_DDL 死代码删除（无任何调用点）——表/索引由 alembic 迁移独占
+# （0001 建表 + idx_daily_basic_ts_code）。此处曾运行时 CREATE INDEX，与迁移索引
+# 定义完全相同（prod 实测 451M×2），且同键 UNIQUE 已覆盖。
 
 DAILY_BASIC_INSERT = """
 INSERT INTO daily_basic (ts_code, vt_symbol, trade_date, close, turnover_rate, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm, total_mv, circ_mv)

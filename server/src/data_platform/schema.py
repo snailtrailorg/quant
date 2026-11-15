@@ -105,6 +105,14 @@ ON CONFLICT (symbol, ts) DO UPDATE SET
     volume = EXCLUDED.volume, amount = EXCLUDED.amount,
     adj_factor = COALESCE(EXCLUDED.adj_factor, bar_{freq}.adj_factor),   -- F-F2：回补覆盖不得把已回填因子清回 NULL
     source = EXCLUDED.source
+-- 批183：值未变则不 UPDATE——原无条件 DO UPDATE 让对账/回补每次重拉都产生 dead tuple
+-- （prod bar_1d 5270 万次 UPDATE），索引随之膨胀。回补语义不变（变了才覆盖）。
+WHERE (bar_{freq}.open, bar_{freq}.high, bar_{freq}.low, bar_{freq}.close,
+       bar_{freq}.volume, bar_{freq}.amount, bar_{freq}.adj_factor, bar_{freq}.source)
+      IS DISTINCT FROM
+      (EXCLUDED.open, EXCLUDED.high, EXCLUDED.low, EXCLUDED.close,
+       EXCLUDED.volume, EXCLUDED.amount,
+       COALESCE(EXCLUDED.adj_factor, bar_{freq}.adj_factor), EXCLUDED.source)
 """
 
 BAR_TABLE_SELECT = """
