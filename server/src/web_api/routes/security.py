@@ -303,6 +303,54 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         degraded_zones.append({"zone": "vulns", "reason": "grype 分区 degraded（历史快照：状态未单列）"})
     _findings = _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger,
                                  snap_created_at=snap["created_at"])
+    # 批181：漏洞包读侧综合——fix（grype）与 latest（PyPI）分属两个真相源，禁止互写。
+    # 只聚合 active（!fixed）行；fix_versions 取逗号拆分去重；constraints 从 audit 契约读。
+    from src.quant_common.depjudge import vuln_advice as _va
+    _vuln_by_pkg: dict[str, dict] = {}
+    for _f in _findings:
+        if _f.get("fixed"):
+            continue
+        _p = _nm(_f.get("pkg") or "")
+        if not _p:
+            continue
+        _e = _vuln_by_pkg.setdefault(_p, {"n": 0, "fix": set()})
+        _e["n"] += 1
+        for _x in str(_f.get("fix_version") or "").split(","):
+            if _x.strip():
+                _e["fix"].add(_x.strip())
+    _constraints: dict = {}
+    try:
+        import json as _js
+        from src.quant_common.redis_client import business_redis as _br
+        _raw = _br().get("sec:dep_audit")
+        if _raw:
+            _constraints = (_js.loads(_raw) or {}).get("constraints") or {}
+    except Exception as _e2:
+        logging.getLogger("web_api.security").debug(
+            "vuln constraints 读取失败（fail-open）: %s", _e2)
+
+    def _vuln_fields(r):
+        _v = _vuln_by_pkg.get(_nm(r.get("name") or ""))
+        if not _v:
+            return {"vuln_count": 0, "fix_versions": [], "vuln_advice": None}
+        _fixes = sorted(_v["fix"])
+        _code, _target, _why = _va(r.get("version"), r.get("latest_version"),
+                                   _fixes, _constraints.get(_nm(r.get("name") or "")))
+        return {"vuln_count": _v["n"], "fix_versions": _fixes,
+                "vuln_advice": {"code": _code, "target": _target, "why": _why}}
+
+    _ledger_out = []
+    for _r in ledger_rows:
+        _o = {"source": _r["source"], "name": _r["name"], "version": _r["version"],
+              "origin": _r["origin"] or "", "last_changed": _r["last_changed"].isoformat(),
+              "latest_version": _r.get("latest_version"),
+              "managed_by": _r.get("managed_by"),
+              "judge_class": _r.get("judge_class"),
+              "judge_why": _r.get("judge_why") or "",
+              "has_update": _hu(_r.get("judge_class")),
+              "stale_days": _stale_days(_r)}
+        _o.update(_vuln_fields(_r))
+        _ledger_out.append(_o)
     # 批170：数据截至日 = 现存 finding 的最新 last_seen（无额外查询）；旧于今日或 vulns 降级即 stale
     # 批170 补丁（2026-11-05）：stale 语义改为「**产出这份数据的扫描**不新鲜」——
     # 全修复场景（grype 0 匹配 ⇒ 无人滚 last_seen ⇒ max 冻结在最后修复日）曾被误报
@@ -349,16 +397,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "created_at": snap["created_at"].isoformat() if snap["created_at"] else None,
         "findings": _findings,
         "components": snap["components"],
-        "components_ledger": [
-            {"source": r["source"], "name": r["name"], "version": r["version"],
-             "origin": r["origin"] or "", "last_changed": r["last_changed"].isoformat(),
-             "latest_version": r.get("latest_version"),
-             "managed_by": r.get("managed_by"),
-             "judge_class": r.get("judge_class"),
-             "judge_why": r.get("judge_why") or "",
-             "has_update": _hu(r.get("judge_class")),
-             "stale_days": _stale_days(r)}
-            for r in ledger_rows],
+        "components_ledger": _ledger_out,
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],
         "dnf": snap["dnf"],

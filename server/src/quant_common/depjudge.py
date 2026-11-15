@@ -249,3 +249,66 @@ def _seg(buf: str, is_digit: bool) -> tuple:
     if is_digit:
         return (1, int(buf))
     return (0, buf.lower())
+
+def vuln_advice(cur: str | None, latest: str | None, fix_versions,
+                constraint: str | None = None) -> tuple[str, str | None, str]:
+    """CVE 修复建议（批181）：读侧综合判定，纯函数零 IO。
+
+    -> (code, target, advice)；code ∈
+      already_fixed | fixable | blocked_by_constraint |
+      not_in_index_yet | no_fix | unknown
+
+    真相源分工：fix 只来自 grype（本函数输入），latest 只来自 PyPI——互不冒充。
+    多值 fix 取「满足约束的最低版本」为 target；全不满足 => blocked。
+    latest 缺失时不判「索引未见」（无法证明），按 fixable 保守给出修复目标。
+    """
+    cur_v = _v(cur)
+    if cur_v is None:
+        return "unknown", None, f"当前版本不可解析: {cur!r}"
+    fixes = [(raw, _v(raw)) for raw in (fix_versions or [])]
+    fixes = [(raw, v) for raw, v in fixes if v is not None]
+    if not fixes:
+        return "no_fix", None, "无已知修复版本，需手工处置"
+    min_raw, min_v = min(fixes, key=lambda x: x[1])
+    if cur_v >= min_v:
+        return "already_fixed", None, f"当前 {cur} 已含修复（>={min_raw}）"
+    if constraint:
+        allowed = [(raw, v) for raw, v in fixes if _in(v, constraint)]
+        if not allowed:
+            return ("blocked_by_constraint", min_raw,
+                    f"修复版 {min_raw} 超出约束 {constraint}，需调整 requirements")
+        target_raw, target_v = min(allowed, key=lambda x: x[1])
+    else:
+        target_raw, target_v = min_raw, min_v
+    latest_v = _v(latest)
+    if latest_v is not None and target_v > latest_v:
+        return ("not_in_index_yet", target_raw,
+                f"官方修复版 {target_raw} 尚未出现在上游索引（可能缓存滞后），稍后重试或手工确认")
+    return "fixable", target_raw, f"升级到 {target_raw} 修复"
+
+
+def priority_refresh_names(findings, pip_versions, latest_by_pkg) -> list[str]:
+    """批181：算「需优先刷新上游版本」的包（scan 只产出清单，不联网）。
+
+    入选：有 fix 且 cur < min(fix) 且（latest 缺失 or latest < min(fix)）——
+    有漏洞、当前未修复、上游索引还看不到修复版。已修复/索引已见的不必优先刷。
+    """
+    out = set()
+    for f in findings or []:
+        pkg = _norm(f.get("pkg") or "")
+        if not pkg or pkg not in pip_versions:
+            continue
+        fixes = [_v(str(x).strip()) for x in str(f.get("fix_version") or "").split(",")
+                 if str(x).strip()]
+        fixes = [x for x in fixes if x is not None]
+        if not fixes:
+            continue
+        minfix = min(fixes)
+        cur = _v(pip_versions.get(pkg))
+        if cur is None or cur >= minfix:
+            continue
+        latest = _v(latest_by_pkg.get(pkg))
+        if latest is None or latest < minfix:
+            out.add(pkg)
+    return sorted(out)
+

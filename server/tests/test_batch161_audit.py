@@ -159,6 +159,28 @@ def test_full_chain_running_mutex(monkeypatch):
     assert r["status"] == "skipped", r
 
 
+def test_priority_pkg_uses_refresh(monkeypatch):
+    """批181：优先集合内的包走 pypi_versions_refresh，其余走 cached。"""
+    import json
+    import src.health_monitor.os_pkg as OP
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+    monkeypatch.setattr(OP, "pip_installed", lambda: [
+        {"name": "a", "cur": "1.0", "local": False},
+        {"name": "b", "cur": "1.0", "local": False}])
+    calls = []
+    monkeypatch.setattr(OP, "pypi_versions_cached", lambda name, timeout=10: (
+        calls.append(("cached", name)) or {"versions": ["1.0"], "yanked": []}))
+    monkeypatch.setattr(OP, "pypi_versions_refresh", lambda name, timeout=10, ttl_d=1: (
+        calls.append(("refresh", name)) or {"versions": ["1.0"], "yanked": []}))
+    store["sec:dep_refresh:priority"] = json.dumps(["a"])
+    T.dep_audit.run()
+    assert ("refresh", "a") in calls and ("cached", "b") in calls, calls
+    assert ("cached", "a") not in calls and ("refresh", "b") not in calls, calls
+
+
+
 # ---------------------------------------------------------------------------
 # 批 180：续跑判据按「轮次」（非 26h 时间窗）+ 调试信息契约
 # ---------------------------------------------------------------------------

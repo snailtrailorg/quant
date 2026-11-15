@@ -1051,6 +1051,20 @@ def run_security_scan(today: date | None = None) -> dict:
                 if _norm_key(_pn) not in _have:
                     _ledger.append(("pip", _pn, _pv, "pip 安装"))
             _upsert_components(conn, today, _ledger, _gm)
+            # 批181：优先刷新清单（只写清单、不联网；dep_audit 下轮先刷这些包的 latest）
+            try:
+                from src.quant_common.depjudge import priority_refresh_names as _prn
+                from src.quant_common.redis_client import business_redis as _br2
+                _pipv = (parts.get("components") or {}).get("pip") or {}
+                _latm = {_norm_key(r["name"]): r.get("latest") for r in _dh_rows}
+                _prio = _prn(vulns.get("findings") or [], _pipv, _latm)
+                _pk = "sec:dep_refresh:priority"
+                if _prio:
+                    _br2().set(_pk, json.dumps(_prio), ex=7 * 86400)
+                else:
+                    _br2().delete(_pk)
+            except Exception as _e:
+                logger.warning("优先刷新清单写入失败（不影响扫描）: %s", _e)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）

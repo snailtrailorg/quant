@@ -222,7 +222,8 @@
         <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
                          :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
           <template #default="{ row }">
-            <span v-if="row.vuln_count" class="sev-critical">{{ row.vuln_count }}</span>
+            <span v-if="row.vuln_count" class="sev-critical"
+                  :title="row.vuln_advice?.why || ''">{{ row.vuln_count }}</span>
             <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
@@ -419,14 +420,10 @@ const compRowFilter = ref({ vuln: ['yes'] })   // 初始=行动导向；「全�
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
   const led = snap.value?.components_ledger || []
-  // 漏洞数=**active** 聚合（批 125 修：与 A/C 区同口径——此前含 fixed 导致
-  // 「漏洞表空、组件表还有漏洞」的不一致；已修复历史不进组件当前风险计数）
-  const vc = {}
-  for (const f of (snap.value?.findings || [])) {
-    if (!f.fixed) vc[f.pkg] = (vc[f.pkg] || 0) + 1
-  }
+  // 批181：漏洞数与修复建议改为**后端单源**（selects active findings + vuln_advice），
+  // 前端不再重复聚合——此前前端 vc 与后端各算一次，易口径漂移。
   return led.map(r => ({
-    ...r, vuln_count: vc[r.name] || 0,
+    ...r, vuln_count: r.vuln_count ?? 0,
     dep_chain: (r.origin && r.origin.includes('→')) ? r.origin : '',   // 依赖链子集（途径语义由 managed_by 列接管）
   }))
 })

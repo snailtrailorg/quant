@@ -1074,6 +1074,17 @@ def dep_audit():
                 cur.executemany(SQL, batch_rows)
             conn.commit()
 
+    # 批181：scan 落的漏洞包优先刷新清单（只影响刷新频率，不改变判定）
+    _priority = set()
+    try:
+        _praw = br.get("sec:dep_refresh:priority")
+        if isinstance(_praw, bytes):
+            _praw = _praw.decode()
+        if _praw:
+            _priority = set(_json.loads(_praw) or [])
+    except Exception:
+        _priority = set()
+
     pip_rows, n_fail, n_remote, n_reuse = [], 0, 0, 0
     batch = []
     _reuse_judge = None
@@ -1099,7 +1110,10 @@ def dep_audit():
         else:
             managed = "pypi"
             try:
-                pv = os_pkg.pypi_versions_cached(name)   # 批 161：refresh 参数已删——恒读缓存，7d TTL 自然轮转
+                if name in _priority:
+                    pv = os_pkg.pypi_versions_refresh(name)   # 批181：漏洞包当天刷新
+                else:
+                    pv = os_pkg.pypi_versions_cached(name)
                 vers = pv["versions"] if pv else None
                 n_remote += 1
                 if vers:

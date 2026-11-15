@@ -22,6 +22,7 @@ logger = logging.getLogger("health_monitor")
 PYPI_SIMPLE = "https://pypi.org/simple"
 PYPI_SIMPLE_FALLBACK = "https://pypi.tuna.tsinghua.edu.cn/simple"
 PYPI_SIMPLE_ENV = "PYPI_SIMPLE"
+PYPI_CACHE_TTL_D = 3          # 上游版本缓存天数（批181：7d→3d；漏洞包由 dep_audit 传更短 TTL）
 
 
 @dataclass(frozen=True)
@@ -132,9 +133,10 @@ def pip_installed() -> list:
     return out
 
 
-def pypi_versions_cached(name: str, timeout: int = 10) -> dict:
-    """缓存层：Valkey sec:pypi:<name>（TTL 7d——批 161：恒读缓存，到期自然重查=天然轮转；
-    原 refresh 参数与 1/7 抽签退役——续跑判据在表侧（last_seen），缓存仅跨轮加速）。
+def pypi_versions_cached(name: str, timeout: int = 10,
+                         ttl_d: int = PYPI_CACHE_TTL_D) -> dict:
+    """缓存层：Valkey sec:pypi:<name>（TTL=PYPI_CACHE_TTL_D，批181 由 7d 缩为 3d；
+    批 161：恒读缓存，到期自然重查=天然轮转；续跑判据在表侧（last_seen），缓存仅跨轮加速）。
     Valkey 不可达时静默回退直查（缓存是加速器非依赖）。
 
     批 179b：上游刷新只在 dep_audit 慢路径（异步 + 心跳续跑），本函数恒读缓存；
@@ -150,12 +152,27 @@ def pypi_versions_cached(name: str, timeout: int = 10) -> dict:
             return _json.loads(hit)
         result = pypi_versions(name, timeout=timeout)
         try:
-            br.set(key, _json.dumps(result), ex=7 * 86400)
+            br.set(key, _json.dumps(result), ex=ttl_d * 86400)
         except Exception:
             pass
         return result
     except Exception:
         return pypi_versions(name, timeout=timeout)
+
+
+def pypi_versions_refresh(name: str, timeout: int = 10, ttl_d: int = 1) -> dict:
+    """慢路径主动刷新（批181）：仅 dep_audit 的优先集合调用——直查上游并按短 TTL 回写。
+    与 pypi_versions_cached 的分工：后者恒读缓存（读侧/普通包），本函数是「写侧刷新」，
+    不得在 security_scan 等读路径调用。
+    """
+    result = pypi_versions(name, timeout=timeout)
+    try:
+        import json as _json
+        from src.quant_common.redis_client import business_redis
+        business_redis().set(f"sec:pypi:{name}", _json.dumps(result), ex=ttl_d * 86400)
+    except Exception:
+        pass
+    return result
 
 
 def pypi_versions(name: str, base=None, timeout: int = 10) -> dict:
