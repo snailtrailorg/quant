@@ -25,6 +25,15 @@ def test_no_runtime_create_index_in_src():
     assert not bad, "运行时 DDL 残留（索引/表只由迁移建）:\n" + "\n".join(bad)
 
 
+def test_retention_sweep_notes_bulk_delete_without_alert():
+    """大批删除只记日志（季度人工评审），不新增告警码/runbook 条目。"""
+    import inspect
+    from src.scheduler import tasks
+    s = inspect.getsource(tasks.bar_retention_sweep)
+    assert "100_000" in s
+    assert "reindex_hint" not in s
+
+
 def test_daily_basic_has_single_ts_code_index():
     """真库：daily_basic 在 (ts_code, trade_date) 上至多一个索引（迁移 0187 后）。"""
     from src.data_platform.db import get_conn

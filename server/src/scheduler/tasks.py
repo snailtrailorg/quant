@@ -2370,6 +2370,11 @@ def bar_retention_sweep(self):
             ("bar_retention_sweep", "sweep", 0, "pruned",
              "; ".join(_log_lines)[:500] or "无可裁项"))
         conn.commit()
+    # 批183：大批删除后索引不自动缩——只记日志（删除量已进 sync_log note），季度人工
+    # 评审时核对；不告警（低频索引本就 0 扫描，告警=噪音；D18 §2.6）。
+    if total_deleted >= 100_000:
+        logger.info("bar_retention_sweep: 本轮删除 %d 行，相关索引可能膨胀（季度评审核对）",
+                    total_deleted)
     return {"status": "pruned", "deleted": total_deleted, "notes": _log_lines[:20]}
 
 
