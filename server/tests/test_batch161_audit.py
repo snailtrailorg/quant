@@ -180,6 +180,108 @@ def test_priority_pkg_uses_refresh(monkeypatch):
     assert ("cached", "a") not in calls and ("refresh", "b") not in calls, calls
 
 
+# ---------------------------------------------------------------------------
+# 批182：续跑 judge 每轮重置 + 有界刷新额度 + Valkey 单次 IO 上限
+# ---------------------------------------------------------------------------
+
+def test_reuse_judge_reset_per_package(monkeypatch):
+    """续跑复用的 judge 不得污染下一个包（原 _reuse_judge 漏每轮重置）。"""
+    import contextlib
+    import src.data_platform.db as DB
+    import src.health_monitor.os_pkg as OP
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+    monkeypatch.setattr(OP, "pip_installed", lambda: [
+        {"name": "a", "cur": "1.0", "local": False},
+        {"name": "b", "cur": "1.0", "local": False}])
+    monkeypatch.setattr(OP, "pypi_versions_cached",
+                        lambda name, timeout=10: {"versions": ["2.0"], "yanked": []})
+
+    batches = []
+
+    class _R:
+        def __init__(self, row=None, rows=None):
+            self._row, self._rows = row, rows or []
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return self._rows
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def commit(self):
+            pass
+
+        def executemany(self, sql, rows):
+            batches.append(list(rows))
+
+        def cursor(self):
+            return self
+
+        def execute(self, sql, params=None):
+            if "SELECT name FROM security_component" in sql:
+                return _R(rows=[("a",)])
+            if "SELECT latest_version" in sql:
+                return _R(row=("1.0", "current", ""))
+            return _R()
+
+    @contextlib.contextmanager
+    def _gc():
+        yield _C()
+
+    monkeypatch.setattr(DB, "get_conn", _gc)
+    store.pop("sec:dep_audit:beat", None)   # 无 beat => interrupted => 续跑
+    T.dep_audit.run()
+    by_name = {r[0]: r[3] for b in batches for r in b}
+    assert by_name.get("b") == "actionable", by_name   # 被 a 的 current 污染则失败
+
+
+def test_refill_budget_caps_network(monkeypatch):
+    """每轮最多查 _REFILL_MAX 个缓存 miss 包（有界工作单元）。"""
+    import src.health_monitor.os_pkg as OP
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+
+    class _BR:
+        def get(self, k):
+            return store.get(k)
+
+        def set(self, k, v, ex=None):
+            store[k] = v
+
+        def mget(self, keys):
+            return [None] * len(keys)          # 全 miss => 触发额度
+
+    monkeypatch.setattr("src.quant_common.redis_client.business_redis", lambda **kw: _BR())
+    monkeypatch.setattr(OP, "pip_installed", lambda: [
+        {"name": f"p{i}", "cur": "1.0", "local": False} for i in range(100)])
+    calls = []
+    monkeypatch.setattr(OP, "pypi_versions_cached", lambda name, timeout=10: (
+        calls.append(name) or {"versions": ["1.0"], "yanked": []}))
+    r = T.dep_audit.run()
+    assert len(calls) == 60, f"额度应 60，实得 {len(calls)}"
+    assert r["n_remote"] == 60
+
+
+def test_valkey_client_has_socket_timeout():
+    """Valkey 客户端必须带单次 IO 上限（防 get/set 永久阻塞）。"""
+    import inspect
+    from src.health_monitor import os_pkg
+    from src.scheduler import tasks
+    assert "socket_timeout=3" in inspect.getsource(os_pkg.pypi_versions_cached)
+    assert "socket_timeout=3" in inspect.getsource(tasks.dep_audit)
+
+
+
 
 # ---------------------------------------------------------------------------
 # 批 180：续跑判据按「轮次」（非 26h 时间窗）+ 调试信息契约

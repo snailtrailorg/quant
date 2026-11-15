@@ -971,7 +971,7 @@ def dep_audit():
     BEAT_KEY = "sec:dep_audit:beat"
     BATCH = 25
     run_id = _dt.datetime.now(_dt.timezone.utc).isoformat() + "-" + _uuid.uuid4().hex[:8]
-    br = business_redis()
+    br = business_redis(socket_timeout=3, socket_connect_timeout=2)   # 批182：单次 IO 上限（非任务级超时）
 
     # —— 入口三态判定（批 161 纯函数语义，僵死才杀的眼睛）——
     prev_state = "none"
@@ -1085,6 +1085,18 @@ def dep_audit():
     except Exception:
         _priority = set()
 
+    # 批182：批量读缓存（1 次往返）得到 miss 集合；miss 包按额度联网（有界工作单元，
+    # 避免单包阻塞时整轮被拖死——175 个无缓存包一次全查曾卡在单个包 7 分钟）。
+    _REFILL_MAX = 60
+    _miss = set()
+    try:
+        _keys = [f"sec:pypi:{row['name']}" for row in installed]
+        if _keys:
+            _vals = br.mget(_keys)
+            _miss = {row["name"] for row, v in zip(installed, _vals) if not v}
+    except Exception:
+        _miss = {row["name"] for row in installed}
+
     pip_rows, n_fail, n_remote, n_reuse = [], 0, 0, 0
     batch = []
     _reuse_judge = None
@@ -1094,6 +1106,7 @@ def dep_audit():
         grp = "dev" if name in dev_names else "runtime"
         constraint = constraints.get(name)   # 步4修复：提前（icm 计算依赖——原序 UnboundLocalError）
         latest, icm = None, None
+        _reuse_judge = None   # 批182：每轮重置（原漏重置 → 上包 judged 污染本包）
         if local:
             managed = "local"
         elif name in done_names:
@@ -1109,25 +1122,31 @@ def dep_audit():
                 _reuse_judge = (prev[1], prev[2]) if prev and prev[1] else None
         else:
             managed = "pypi"
-            try:
-                if name in _priority:
-                    pv = os_pkg.pypi_versions_refresh(name)   # 批181：漏洞包当天刷新
-                else:
-                    pv = os_pkg.pypi_versions_cached(name)
-                vers = pv["versions"] if pv else None
-                n_remote += 1
-                if vers:
-                    best, best_v = None, None
-                    for v in vers:
-                        pvv = _pep440(v)
-                        if pvv is not None and (best_v is None or pvv > best_v):
-                            best, best_v = v, pvv
-                    latest = best
-                    icm = _icm_fn(vers, constraint, cur)   # 步4盲审 B-P0-2：in_constraint 分支输入断供修复（v2 重构迁移遗漏）
-            except Exception as ex:
-                n_fail += 1
-                if n_fail <= 3:
-                    errors.append(f"pypi {name}: {str(ex)[:100]}")
+            _budget_out = (name in _miss and name not in _priority
+                           and n_remote >= _REFILL_MAX)
+            if _budget_out:
+                # 批182：本轮联网额度用尽——不查上游（下轮补；latest=None → unknown）
+                _reuse_judge = ("unknown", "本轮上游刷新额度用尽，下轮补")
+            else:
+                try:
+                    if name in _priority:
+                        pv = os_pkg.pypi_versions_refresh(name)   # 批181：漏洞包当天刷新
+                    else:
+                        pv = os_pkg.pypi_versions_cached(name)
+                    vers = pv["versions"] if pv else None
+                    n_remote += 1
+                    if vers:
+                        best, best_v = None, None
+                        for v in vers:
+                            pvv = _pep440(v)
+                            if pvv is not None and (best_v is None or pvv > best_v):
+                                best, best_v = v, pvv
+                        latest = best
+                        icm = _icm_fn(vers, constraint, cur)   # 步4盲审 B-P0-2：in_constraint 分支输入断供修复（v2 重构迁移遗漏）
+                except Exception as ex:
+                    n_fail += 1
+                    if n_fail <= 3:
+                        errors.append(f"pypi {name}: {str(ex)[:100]}")
         if _reuse_judge is not None:
             jc, jw = _reuse_judge            # 续跑沿用（不重算）
         else:

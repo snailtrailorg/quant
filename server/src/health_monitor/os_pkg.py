@@ -146,7 +146,7 @@ def pypi_versions_cached(name: str, timeout: int = 10,
         import json as _json
         from src.quant_common.redis_client import business_redis
         key = f"sec:pypi:{name}"
-        br = business_redis()
+        br = business_redis(socket_timeout=3, socket_connect_timeout=2)   # 批182：单次 IO 上限
         hit = br.get(key)
         if hit:
             return _json.loads(hit)
@@ -169,7 +169,8 @@ def pypi_versions_refresh(name: str, timeout: int = 10, ttl_d: int = 1) -> dict:
     try:
         import json as _json
         from src.quant_common.redis_client import business_redis
-        business_redis().set(f"sec:pypi:{name}", _json.dumps(result), ex=ttl_d * 86400)
+        business_redis(socket_timeout=3, socket_connect_timeout=2).set(
+            f"sec:pypi:{name}", _json.dumps(result), ex=ttl_d * 86400)
     except Exception:
         pass
     return result
