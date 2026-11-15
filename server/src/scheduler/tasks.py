@@ -1042,15 +1042,21 @@ def dep_audit():
                 errors.append(f"beat-write-failed: {str(_be)[:80]}")
 
     from src.data_platform.db import get_conn
+    # 批 180：续跑判据按「轮次」而非固定时间窗——契约是「本轮已刷的包跳网」（docstring）。
+    # 原实现 last_seen >= now-26h + beat 每日 05:00（间隔 24h < 26h）⇒ 新轮 done_names
+    # 命中上一轮全部行 ⇒ n_remote=0、上游版本永不刷新（批155 §4.4 的实现偏离）。
+    # prev_state 是现成轮次标识：仅续跑（zombie/interrupted/unknown）复用已刷包；
+    # 新轮（done/none）全量走 pypi_versions_cached（7d 缓存兜住网络，miss 才联网）。
     done_names = set()
-    try:
-        with get_conn() as conn:
-            rows_prev = conn.execute(
-                "SELECT name FROM security_component WHERE source='pip' "
-                "AND last_seen >= %s", (round_start,)).fetchall()
-            done_names = {r[0] for r in rows_prev}
-    except Exception:
-        done_names = set()
+    if prev_state in ("zombie", "interrupted", "unknown"):
+        try:
+            with get_conn() as conn:
+                rows_prev = conn.execute(
+                    "SELECT name FROM security_component WHERE source='pip' "
+                    "AND last_seen >= %s", (round_start,)).fetchall()
+                done_names = {r[0] for r in rows_prev}
+        except Exception:
+            done_names = set()
 
     def _flush_batch(batch_rows):
         """25 包一批 executemany upsert（judge 随行落列；批=断点粒度，幂等覆盖写）。"""
@@ -1068,7 +1074,7 @@ def dep_audit():
                 cur.executemany(SQL, batch_rows)
             conn.commit()
 
-    pip_rows, n_fail, n_remote = [], 0, 0
+    pip_rows, n_fail, n_remote, n_reuse = [], 0, 0, 0
     batch = []
     _reuse_judge = None
     total = len(installed)
@@ -1083,6 +1089,7 @@ def dep_audit():
             # 续跑（步4盲审 A-P1-2 修复）：读回已落 jc/jw 直接沿用——重算 icm=None 会把
             # in_constraint 降级覆盖成 pinned（judge_class 漂移）
             managed = "pypi"
+            n_reuse += 1
             with get_conn() as conn:
                 prev = conn.execute(
                     "SELECT latest_version, judge_class, judge_why FROM security_component "
@@ -1162,13 +1169,22 @@ def dep_audit():
 
     undeclared = [r["name"] for r in pip_rows
                   if r["group"] == "runtime" and r["name"] not in constraints]
+    n_null_latest = sum(1 for r in pip_rows if not r["latest"])
     ok = bool(pip_rows or os_installed) and (not errors or n_fail < max(1, len(installed) // 5))   # 步4盲审 A-P1-5：枚举全挂不再 ok=True
+
+    # 批 180：调试自证——本轮查了多少上游（n_remote）/ 续跑复用多少（n_reuse）/
+    # 多少包上游不可得（n_null_latest）。日志与 /dep-audit-debug 两条消费面共用。
+    logger.info("dep_audit done run_id=%s prev_state=%s total=%d n_remote=%d "
+                "n_reuse=%d n_fail=%d n_null_latest=%d ok=%s",
+                run_id, prev_state, total, n_remote, n_reuse, n_fail,
+                n_null_latest, ok)
 
     # —— 契约瘦身（B-P1 屏草+映射+A-P0 兼容窗：pip rows 惰性写一个发布周期，批 162+ 删）——
     payload = {
         "schema_version": 2, "run_id": run_id, "ts": run_id.split("+")[0] + "+00:00",
-        "n": total, "prev_state": prev_state,
+        "n": total, "prev_state": prev_state, "ok": ok,
         "counts": {"n_pip": len(pip_rows), "n_fail": n_fail, "n_remote": n_remote,
+                   "n_reuse": n_reuse, "n_null_latest": n_null_latest,
                    "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
                    "n_undeclared": len(undeclared)},
         "last_complete": {"run_id": run_id, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
@@ -1183,7 +1199,8 @@ def dep_audit():
 
     return {"status": "ok" if ok else "partial",
             "n_pip": len(pip_rows), "n_local": len([r for r in pip_rows if r["local"]]),
-            "n_remote": n_remote, "n_fail": n_fail,
+            "n_remote": n_remote, "n_reuse": n_reuse, "n_fail": n_fail,
+            "n_null_latest": n_null_latest,
             "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
             "n_undeclared": len(undeclared), "prev_state": prev_state, "errors": errors[:5]}
 

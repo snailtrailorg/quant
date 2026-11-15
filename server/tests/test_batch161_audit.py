@@ -157,3 +157,167 @@ def test_full_chain_running_mutex(monkeypatch):
     store["sec:dep_audit:beat"] = json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(), "n": 5})
     r = T.dep_audit.run()
     assert r["status"] == "skipped", r
+
+
+# ---------------------------------------------------------------------------
+# 批 180：续跑判据按「轮次」（非 26h 时间窗）+ 调试信息契约
+# ---------------------------------------------------------------------------
+
+def test_new_round_queries_all_installed(monkeypatch):
+    """新轮（上轮 done）必须全量查上游——钉死「26h 窗 > 24h 调度 ⇒ 整轮跳过网络」回归。"""
+    import datetime as dt
+    import json
+    import src.health_monitor.os_pkg as OP
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+    monkeypatch.setattr(OP, "pip_installed", lambda: [
+        {"name": "a", "cur": "1.0", "local": False},
+        {"name": "b", "cur": "1.0", "local": False},
+        {"name": "c", "cur": "1.0", "local": False}])
+    calls = []
+    monkeypatch.setattr(OP, "pypi_versions_cached", lambda name, timeout=10: (
+        calls.append(name) or {"versions": ["1.0"], "yanked": []}))
+    store["sec:dep_audit:beat"] = json.dumps({
+        "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "n": 3, "status": "done"})
+
+    # 正向控制：DB 桩模拟「上轮已完成、last_seen 在 26h 窗内」——若代码仍按时间窗
+    # 复用（改动前形态），这里会返回 a/b/c 使 calls=[]，本测试必须失败。
+    import contextlib
+    import src.data_platform.db as DB
+
+    class _R:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return None
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def commit(self):
+            pass
+
+        def executemany(self, sql, rows):
+            pass
+
+        def execute(self, sql, params=None):
+            if "SELECT name FROM security_component" in sql:
+                return _R([("a",), ("b",), ("c",)])
+            return _R([])
+
+        def cursor(self):
+            return self
+
+    @contextlib.contextmanager
+    def _gc():
+        yield _C()
+
+    monkeypatch.setattr(DB, "get_conn", _gc)
+
+    r = T.dep_audit.run()
+    assert sorted(calls) == ["a", "b", "c"], calls
+    assert r["n_remote"] == 3 and r["n_reuse"] == 0, r
+
+
+def test_resuming_reuses_already_done(monkeypatch):
+    """续跑（无 beat 键=interrupted）复用 last_seen 窗内已刷包，只查未完成包。"""
+    import contextlib
+    import src.data_platform.db as DB
+    import src.health_monitor.os_pkg as OP
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+    monkeypatch.setattr(OP, "pip_installed", lambda: [
+        {"name": "a", "cur": "1.0", "local": False},
+        {"name": "b", "cur": "1.0", "local": False}])
+    calls = []
+    monkeypatch.setattr(OP, "pypi_versions_cached", lambda name, timeout=10: (
+        calls.append(name) or {"versions": ["1.0"], "yanked": []}))
+
+    class _R:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return None
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def commit(self):
+            pass
+
+        def executemany(self, sql, rows):
+            pass
+
+        def execute(self, sql, params=None):
+            if "SELECT name FROM security_component" in sql:
+                return _R([("a",)])
+            return _R([])
+
+        def cursor(self):
+            return self
+
+    @contextlib.contextmanager
+    def _gc():
+        yield _C()
+
+    monkeypatch.setattr(DB, "get_conn", _gc)
+    store.pop("sec:dep_audit:beat", None)     # 无 beat 键 => prev_state=interrupted
+    r = T.dep_audit.run()
+    assert calls == ["b"], calls              # a 复用不查，b 查
+    assert r["n_reuse"] == 1 and r["n_remote"] == 1, r
+
+
+def test_contract_exposes_ok_and_counts(monkeypatch):
+    """契约补顶层 ok + counts 调试字段（/dep-audit-debug 自证刷新量的前提）。"""
+    import json
+    import src.scheduler.tasks as T
+
+    sql_calls, store = _mock_env(monkeypatch)
+    r = T.dep_audit.run()
+    c = json.loads(store["sec:dep_audit"])
+    assert c["ok"] is True
+    assert c["counts"]["n_remote"] == 1        # 2 包中 vnpy=local，只 pandas 查
+    assert c["counts"]["n_reuse"] == 0
+    assert "n_null_latest" in c["counts"]
+    assert r["n_reuse"] == 0 and "n_null_latest" in r
+
+
+def test_debug_endpoint_reads_nested_counts(monkeypatch):
+    """n_pip 必须读 counts（契约 v2 顶层已无该键）——钉契约消费者路径回归。"""
+    import json
+    from src.web_api.routes import security as S
+
+    contract = {"schema_version": 2, "ts": "2026-11-15T00:00:00+00:00",
+                "ok": True, "prev_state": "done",
+                "counts": {"n_pip": 171, "n_remote": 171, "n_reuse": 0,
+                           "n_fail": 2, "n_null_latest": 12, "n_os": 690},
+                "os": {"pkg_mgr": "dnf"}, "errors": []}
+
+    class _R:
+        def get(self, key):
+            return json.dumps(contract)
+
+    monkeypatch.setattr("src.quant_common.redis_client.business_redis", lambda **kw: _R())
+    out = S.dep_audit_debug(_u={})
+    assert out["n_pip"] == 171 and out["ok"] is True
+    assert out["n_remote"] == 171 and out["n_reuse"] == 0
+    assert out["prev_state"] == "done" and out["n_fail"] == 2
+

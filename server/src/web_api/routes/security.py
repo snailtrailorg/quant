@@ -192,10 +192,19 @@ def dep_audit_debug(_u: dict = Depends(require_perm("data_sync"))):
         _ts_raw = _ts_raw.split("+00:00-")[0] + "+00:00"
     ts = _dt.datetime.fromisoformat(_ts_raw)
     age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
+    counts = c.get("counts") or {}
     return {"exists": True, "schema_version": c.get("schema_version"),
             "ts": c.get("ts"), "age_h": round(age_h, 2),
             "fresh": age_h <= DEP_AUDIT_FRESH_H, "ok": c.get("ok"),
-            "n_pip": len(c.get("pip") or []),
+            "prev_state": c.get("prev_state"),
+            # 批 180：n_pip 原读顶层（契约 v2 在 counts 下）恒 0；统一读 counts 并暴露
+            # n_remote/n_reuse 让该端点能自证「本轮到底查了多少上游」。
+            "n_pip": counts.get("n_pip", 0),
+            "n_remote": counts.get("n_remote"),
+            "n_reuse": counts.get("n_reuse"),
+            "n_fail": counts.get("n_fail"),
+            "n_null_latest": counts.get("n_null_latest"),
+            "n_os": counts.get("n_os"),
             "pkg_mgr": (c.get("os") or {}).get("pkg_mgr"),
             "errors": (c.get("errors") or [])[:5]}
 
