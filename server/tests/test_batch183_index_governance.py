@@ -34,6 +34,17 @@ def test_retention_sweep_notes_bulk_delete_without_alert():
     assert "reindex_hint" not in s
 
 
+def test_unused_indexes_dropped():
+    """迁移 0188：三个零使用/重复索引已删。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT indexname FROM pg_indexes WHERE schemaname='public' "
+            "AND indexname IN ('idx_user_tokens_token','idx_margin_code',"
+            "'idx_system_log_level')").fetchall()
+    assert rows == [], rows
+
+
 def test_daily_basic_has_single_ts_code_index():
     """真库：daily_basic 在 (ts_code, trade_date) 上至多一个索引（迁移 0187 后）。"""
     from src.data_platform.db import get_conn
