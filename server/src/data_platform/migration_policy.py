@@ -123,6 +123,10 @@ ROLLBACK_UNSAFE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 EXPLICIT_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     (r"DROP\s+CONSTRAINT", "放宽约束（删 CHECK/UNIQUE 不删数据）；不破坏旧代码读新 schema"),
     (r"op\.drop_constraint\s*\(", "同上（pythonic 形态；0116/0062 upgrade 段实例）"),
+    # 批181b：删**索引**不删数据，且同键唯一索引仍在 ⇒ 旧代码读同表功能等价（只可能慢），
+    # 与 DROP CONSTRAINT 同属「放宽类」。0186 删 9 张 bar 表的冗余 (symbol,ts) 普通索引。
+    (r"DROP\s+INDEX\b", "删索引（不删数据；唯一/其它索引仍在，旧代码读同表功能等价）"),
+    (r"op\.drop_index\s*\(", "同上（pythonic 形态；0186 冗余索引实例）"),
     # ⚠ 豁免的是 **SET DEFAULT 这个 action 本身**（连同其默认值表达式，至分隔符为止），
     #   而**不摘除** `ALTER COLUMN <列名>` 锚点——理由（复审轮四 P1-F/P1-G，均有实测）：
     #   ① 写成 `ALTER COLUMN <列名> SET DEFAULT` 并要求列名匹配 `\w+`/`[^\s,;]+` ⇒ 引号或

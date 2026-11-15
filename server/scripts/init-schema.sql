@@ -98,9 +98,7 @@ CREATE TABLE IF NOT EXISTS bar_1D (
     source    TEXT NOT NULL DEFAULT 'tushare',
     UNIQUE(symbol, ts)
 );
-CREATE INDEX IF NOT EXISTS idx_bar_1d_symbol_ts ON bar_1D (symbol, ts DESC);
 ALTER TABLE bar_1D OWNER TO quant;
-ALTER INDEX idx_bar_1d_symbol_ts OWNER TO quant;
 
 -- ============================================================
 -- 6. daily_basic（A股基本面：PE/PB/市值/换手率）

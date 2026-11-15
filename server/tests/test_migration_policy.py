@@ -49,11 +49,9 @@ def _mig(decl: str = "", upgrade: str = 'op.execute("SELECT 1")') -> str:
     [
         'op.execute("DROP TABLE old_t")',
         'op.execute("DROP COLUMN c")',
-        'op.execute("DROP INDEX idx")',
         'op.execute("ALTER TABLE t ALTER COLUMN c TYPE varchar(8)")',
         "op.drop_table('t')",
         "op.drop_column('t', 'c')",
-        "op.drop_index('ix')",
         "op.alter_column('t', 'c', type_=sa.String(8))",
         "op.alter_column('t', 'c', existing_type=sa.Integer(), new_column_name='c2')",
         'op.execute("ALTER TABLE t RENAME COLUMN a TO b")',
@@ -88,6 +86,8 @@ def test_renames_hit_not_silent() -> None:
         "op.drop_constraint('ck_x', 't', type_='check')",  # 0116/0062 upgrade 段实例
         'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x")',
         'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")',  # 0095 实例
+        'op.execute("DROP INDEX idx")',                            # 批181b：删索引不删数据
+        "op.drop_index('ix')",                                      # 批181b：同上（pythonic）
     ],
 )
 def test_explicit_exclusions_whitelist(body: str) -> None:
@@ -321,6 +321,8 @@ def test_exclusion_patterns_live_and_reasoned(idx: int) -> None:
         "ALTER TABLE t DROP CONSTRAINT ck",
         "op.drop_constraint('ck', 't', type_='check')",
         "ALTER TABLE t ALTER COLUMN c SET DEFAULT 0",
+        'op.execute("DROP INDEX idx")',
+        "op.drop_index('ix')",
     ]
     assert any(re.search(rx, c) for c in corpus), f"排除表第 {idx} 条零命中（陈旧）: {rx}"
     assert len(why) >= 8, f"排除表第 {idx} 条缺理由: {rx}"
