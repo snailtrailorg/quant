@@ -219,20 +219,18 @@ def _upsert_components(conn, scan_date: date,
     # 批 155：判定列幂等覆盖 + checked_at GREATEST 单调（§4.4b）
     # 批182c：COALESCE 保留旧值——契约缺失时 judged 为空（jv 全 None），原直接覆盖会把
     # 全表 latest/judge 清空（删契约→scan 回写 None 的连锁，实测 354 行 latest 全变 NULL）。
+    # 批182d：scan 不再写判定列（latest/judge 归 dep_audit 独占）——此前 scan 从表读
+    # **旧** judge 再回写，会把 audit 刚写的 actionable 覆盖成 unknown（实测 akshare
+    # 1.20.63 有新版却 unknown）。写侧只保留 version/origin/managed_by/checked_at。
     J_UPD = ("managed_by=COALESCE(%s, managed_by), "
-             "latest_version=COALESCE(%s, latest_version), "
-             "latest_source=COALESCE(%s, latest_source), "
-             "judge_class=COALESCE(%s, judge_class), "
-             "judge_why=COALESCE(%s, judge_why), "
              "checked_at=GREATEST(COALESCE(checked_at, %s), %s) ")
     for source, name, version, origin in rows:
         try:
             j = (judged or {}).get(_norm_key(name))
             if j:
-                jv = (j[1], j[0], "pypi" if j[1] == "pypi" else None,
-                      j[2], j[3], now_ts, now_ts)
+                jv = (j[1], now_ts, now_ts)      # managed_by + 双 now_ts（判定列归 audit）
             else:
-                jv = (None, None, None, None, None, now_ts, now_ts)
+                jv = (None, now_ts, now_ts)
             cur = conn.execute(
                 "SELECT version FROM security_component WHERE source=%s AND name=%s",
                 (source, name))
@@ -241,10 +239,10 @@ def _upsert_components(conn, scan_date: date,
                 conn.execute(
                     "INSERT INTO security_component "
                     "(source, name, version, origin, first_seen, last_changed, last_seen, "
-                    "managed_by, latest_version, latest_source, judge_class, judge_why, checked_at) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "managed_by, checked_at) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (source, name, version, origin, scan_date, scan_date, scan_date)
-                    + (jv[0], jv[1], jv[2], jv[3], jv[4], now_ts))   # 批156 根修：INSERT 单 checked_at（jv 双 now_ts 仅供 UPDATE 的 GREATEST 双占位）
+                    + (jv[0], now_ts))   # 判定列默认 NULL，由 dep_audit 随后补
                 _n_ins += 1
             elif row[0] != version:
                 conn.execute(
