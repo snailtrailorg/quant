@@ -757,7 +757,7 @@ class TestMigration0137Shape:
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
         # 0185（批 177 收尾：迁移窗口期旧后缀行幂等清扫）
-        assert heads == {"0188"}, f"head 不是唯一 0188：{sorted(heads)}"   # 批 183c：0188 新链头——链头钉随批交棒
+        assert heads == {"0189"}, f"head 不是唯一 0189：{sorted(heads)}"   # 批 184a：0189 新链头——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

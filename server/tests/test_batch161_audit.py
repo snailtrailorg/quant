@@ -128,7 +128,7 @@ def test_full_chain_os_rows_reach_db(monkeypatch):
     sql_calls, store = _mock_env(monkeypatch)
     r = T.dep_audit.run()
     assert r["status"] == "ok" and r["n_os"] == 1, r
-    os_writes = [c for c in sql_calls if "'system'" in c[0]]
+    os_writes = [c for c in sql_calls if "VALUES ('os'" in c[0]]   # 批184a：域=os（实现走 pkg_mgr）
     assert os_writes and os_writes[0][1][0][0] == "openssl", sql_calls
     pip_writes = [c for c in sql_calls if "'pip'" in c[0]]
     assert pip_writes and len(pip_writes[0][1]) == 2

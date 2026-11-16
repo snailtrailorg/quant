@@ -4,17 +4,24 @@ import inspect
 from src.health_monitor import security_collector as sc
 
 
-def test_sys_rows_str_only():
-    """sys_rows 白名单式 isinstance(v, str)——list/int/dict 元键不入台账。"""
-    src = inspect.getsource(sc.run_security_scan)
-    assert "isinstance(v, str)" in src
+def _code_only(src: str) -> str:
+    """剥注释行再断言——否则「注释里提到旧机制」会造成假失败（守门禁自失效纪律）。"""
+    return "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
 
 
-def test_meta_keys_purge():
-    """存量伪组件自愈 DELETE（outdated/n_outdated/dep_audit_at/vulns_db）。"""
+def test_no_sys_rows_passthrough():
+    """批184a：`sys_rows`（components 字典直通台账）已删——它是 8 别名探针的入口，
+    也是伪组件（outdated 串/时间戳）的唯一来源。OS 行改由 dep_health.rows 统一供。"""
+    src = _code_only(inspect.getsource(sc.run_security_scan))
+    assert "sys_rows" not in src
+    assert "isinstance(v, str)" not in src
+
+
+def test_ledger_rows_only_from_two_authorities():
+    """台账入账只有两个权威源：grype ledger + dep_health.rows（不得再有第三处拼装）。"""
     src = inspect.getsource(sc.run_security_scan)
-    for k in ("outdated", "outdated_error", "n_outdated", "dep_audit_at", "vulns_db"):
-        assert k in src, k
+    assert "_upsert_components(conn, today, _ledger" in src
+    assert "_upsert_components(conn, today, _os_up" in src
 
 
 def test_meta_keys_never_rows():

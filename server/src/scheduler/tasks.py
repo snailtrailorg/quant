@@ -1166,8 +1166,10 @@ def dep_audit():
     # —— OS 域随行落表（步4盲审 P0 同撞修复：原 os_installed/os_upgrades 为不存在的 API——
     # hasattr 假完工；真源=provider.list_installed()/upgrade_candidates()）——
     os_installed, os_upgrades = [], []
+    _pm = "unknown"          # 批184a：实现标识（dnf/apt）——域恒 'os'，实现可变
     try:
         provider = os_pkg.detect_provider()
+        _pm = getattr(provider, "id", "unknown") or "unknown"
         os_installed = [{"name": p.name, "version": p.version} for p in provider.list_installed()]
         _upg = provider.upgrade_candidates() or {}
         os_upgrades = _upg if isinstance(_upg, dict) else {}
@@ -1184,15 +1186,21 @@ def dep_audit():
                     _lat = _c.get("version") or _c.get("latest") or None
                 elif isinstance(_c, str):
                     _lat = _c
-            jc, jw = _judge(ver, None, _lat, None, True, "rpm" if _lat is None else "repo")
-            os_batch.append((nm, ver, _lat, jc, jw))
+            # managed_by 由域派生（os→repo），不再按「有无 latest」猜
+            jc, jw = _judge(ver, None, _lat, None, True, "repo")
+            os_batch.append((nm, ver, "OS " + _pm, _lat, _pm, jc, jw, _pm))
         try:
+            # 批184a：source='os'（域）而非 'system'（判定来源）；origin/latest_source/pkg_mgr
+            # 由 provider.id 派生 —— apt 环境同一域、只换实现。顺带补 latest 两列到 DO UPDATE
+            #（原遗漏 ⇒ OS 行的 latest 永远停在首插值）。
             SQL_OS = ("INSERT INTO security_component (source, name, version, origin, "
-                      "first_seen, last_changed, last_seen, checked_at, latest_version, latest_source, judge_class, judge_why) "
-                      "VALUES ('system', %s, %s, 'OS rpm', now(), now(), now(), now(), %s, 'dnf', %s, %s) "
+                      "first_seen, last_changed, last_seen, checked_at, latest_version, latest_source, judge_class, judge_why, managed_by, pkg_mgr) "
+                      "VALUES ('os', %s, %s, %s, now(), now(), now(), now(), %s, %s, %s, %s, 'repo', %s) "
                       "ON CONFLICT (source, name) DO UPDATE SET version=EXCLUDED.version, "
                       "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
-                      "last_seen=now(), judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
+                      "last_seen=now(), latest_version=EXCLUDED.latest_version, "
+                      "latest_source=EXCLUDED.latest_source, judge_class=EXCLUDED.judge_class, "
+                      "judge_why=EXCLUDED.judge_why, managed_by='repo', pkg_mgr=EXCLUDED.pkg_mgr")
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.executemany(SQL_OS, os_batch)

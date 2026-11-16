@@ -92,17 +92,14 @@ class TestParsers:
             part = _collect_components()
         assert part["status"] == "degraded"
 
-    def test_rpm_probe_targets_valkey_not_redis(self):
-        """批 162 漏网守门（2026-11-06）：KV 换轨后探测目标必须是 valkey（键名 redis 延续）——
-        探测 redis-server 在 prod 恒 not installed ⇒ components.redis=None（面板失明）。"""
-        import re as _re
-        import inspect as _ins
+    def test_no_hardcoded_rpm_probe(self):
+        """批184a：8 个点名探针（`rpm -q` 硬编码）已删——apt 机器上 rpm 不存在必崩，
+        OS 版本一律来自 provider（os_pkg）与 dep_audit 契约。回退禁。"""
+        import inspect
         from src.health_monitor import security_collector as sc
-        src = _ins.getsource(sc._collect_components)
-        m = _re.search(r'for key, pkg in \((.*?)\):', src, _re.S)
-        assert m, "探测清单元组未找到（结构变更？）"
-        assert '("redis", "valkey")' in m.group(1), "redis 键必须探 valkey"
-        assert 'redis-server' not in m.group(1), "探测 redis-server 是批 162 前旧目标（回退禁）"
+        src = inspect.getsource(sc._collect_components)
+        assert '"rpm", "-q"' not in src
+        assert '"%{VERSION}"' not in src
 
     def test_dnf_missing_file_degrades(self, tmp_path):
         from src.health_monitor.security_collector import _collect_dnf
@@ -642,13 +639,14 @@ class TestBatch120FirstScanFixes:
 class TestSysdepComponents:
     """系统组件纳管（dnf 层直接依赖）：pango/cairo/wqy 字体版本入快照。"""
 
-    def test_sysdep_keys_collected(self):
-        """三键在 _collect_components 命令清单（rpm -q 形态）；未装=None 不算失败。"""
+    def test_sysdep_keys_not_probed_inline(self):
+        """批184a：pango/cairo/wqy-microhei-fonts 不再由本模块内联探测——它们由 OS 全量行
+        （provider.list_installed）覆盖；内联探测会把发行版差异写死（apt 下包名不同）。"""
         import inspect
         import src.health_monitor.security_collector as sc
         src_text = inspect.getsource(sc._collect_components)
         for pkg in ("pango", "cairo", "wqy-microhei-fonts"):
-            assert pkg in src_text, f"组件命令清单缺 {pkg}"
+            assert pkg not in src_text, f"{pkg} 仍被内联探测（应走 provider）"
 
     def test_bootstrap_asserts_sysdeps(self):
         """bootstrap.yml 须有系统依赖在位断言（缺位 fail 明示装法——新机重建清单）。"""
@@ -718,8 +716,9 @@ class TestComponentLedger:
              patch("src.health_monitor.security_collector._update_db",
                    return_value="updated"):
             part = _collect_vulns()
+        # 批184a：SBOM type→**域**（rpm→os）；实现（dnf/apt）走 pkg_mgr，不体现在 source
         assert part["ledger"] == [("pip", "requests", "2.31.0", "pip 安装"),
-                                  ("rpm", "openssl", "1.1.1k", "系统 rpm（dnf）")]
+                                  ("os", "openssl", "1.1.1k", "系统 rpm（dnf）")]
 
 
 class TestDbUpdateGate:

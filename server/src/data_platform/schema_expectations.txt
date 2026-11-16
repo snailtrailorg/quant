@@ -71,7 +71,7 @@ risk_log :: id,ts,action,symbol,rule,detail,severity,username
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
 routing_decision :: id,ts,fingerprint,req_summary,chain,epoch,cause
 routing_policy :: consumer_tag,weights,bulkhead_defaults
-security_component :: id,source,name,version,first_seen,last_changed,last_seen,origin
+security_component :: id,source,name,version,first_seen,last_changed,last_seen,origin,pkg_mgr
 security_finding :: id,source,pkg,vuln_id,fix_version,first_seen,last_seen,severity,last_seen_at,description,description_en
 security_master :: vt_symbol,market,exchange,category,name,industry,list_date,delist_date,multiplier,tick_size,fee_model_ref,margin_model_ref,session_id,trade_phase,routing_hints,updated_at,board
 security_snapshot :: id,scan_date,status,components,ports,ssh_cfg,dnf,headers,ai_summary,created_at

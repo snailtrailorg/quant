@@ -207,28 +207,25 @@ def _norm_key(name: str) -> str:
 def judged_map_of(rows: list[dict]) -> dict:
     """dep_health 行 → 判定表，**键带 source**（批183d：同名跨源不互覆盖）。
 
-    源词表与台账一致：ledger 用 pip/rpm/binary；OS 行另以 source='system' 入库
-    ⇒ group='os' 的行同时挂 ("system",k) 与 ("rpm",k) 两键。
-    背景：Python `tzdata`（PyPI 2026.6）与 rpm `tzdata` 同名，原按名建表让后追加的
-    OS 行覆盖 pip 行 → pip 行 managed_by 变 repo、latest 仍留 PyPI 版本 ⇒ 页面「有新版
-    但 dnf 无更新」的误报。
+    键 = (域, 规范化名)，域即 `security_component.source`（pip/os/binary）；
+    同名不同域是**两个实体**（PyPI `tzdata` vs 系统 `tzdata`），互不覆盖。
+    值 = (latest, judge_class, judge_why)——`managed_by` 已由域派生（见 _upsert_components），
+    不再经判定契约传递（它是 ecosystem 的纯函数，传它只会制造写侧回环）。
     """
     out: dict = {}
     for r in rows:
         k = _norm_key(r["name"])
-        v = (r.get("latest"), r.get("managed_by"),
-             r.get("judge_class"), r.get("judge_why"))
-        if r.get("group") == "os":
-            out[("system", k)] = v
-            out[("rpm", k)] = v
-        else:
-            out[("pip", k)] = v
+        src = r.get("source") or ("os" if r.get("group") == "os" else "pip")
+        out[(src, k)] = (r.get("latest"), r.get("judge_class"), r.get("judge_why"))
     return out
+
+
+_MANAGED_BY = {"pip": "pypi", "os": "repo", "binary": "none"}   # 域→纳管方（派生常量）
 
 
 def _upsert_components(conn, scan_date: date,
                        rows: list[tuple[str, str, str, str]],
-                       judged: dict | None = None) -> None:
+                       pkg_mgr: str | None = None) -> None:
     """组件台账 UPSERT（批 123/124·security_component——版本变更史一等表）。
 
     rows=[(source, name, version, origin)]；语义（任务文件 §二.3）：
@@ -238,21 +235,16 @@ def _upsert_components(conn, scan_date: date,
     import datetime as _dtn
     now_ts = _dtn.datetime.now(_dtn.timezone.utc)
     _n_ins = _n_upd = _n_err = 0   # 批156 probe
-    # 批 155：判定列幂等覆盖 + checked_at GREATEST 单调（§4.4b）
-    # 批182c：COALESCE 保留旧值——契约缺失时 judged 为空（jv 全 None），原直接覆盖会把
-    # 全表 latest/judge 清空（删契约→scan 回写 None 的连锁，实测 354 行 latest 全变 NULL）。
-    # 批182d：scan 不再写判定列（latest/judge 归 dep_audit 独占）——此前 scan 从表读
-    # **旧** judge 再回写，会把 audit 刚写的 actionable 覆盖成 unknown（实测 akshare
-    # 1.20.63 有新版却 unknown）。写侧只保留 version/origin/managed_by/checked_at。
-    J_UPD = ("managed_by=COALESCE(%s, managed_by), "
+    # 批184a：managed_by 由**域**派生（不再是契约入参）、pkg_mgr 由调用方给（仅 os 行）；
+    # 二列 COALESCE 只补空不覆盖，避免「scan 读旧值回写」的写侧回环（182d 同类）。
+    # 判定列（latest/judge）自 182d 起归 dep_audit 独占，scan 一律不写。
+    J_UPD = ("managed_by=COALESCE(managed_by, %s), pkg_mgr=COALESCE(pkg_mgr, %s), "
              "checked_at=GREATEST(COALESCE(checked_at, %s), %s) ")
     for source, name, version, origin in rows:
         try:
-            j = (judged or {}).get((source, _norm_key(name)))   # 批183d：带 source 防同名跨源覆盖
-            if j:
-                jv = (j[1], now_ts, now_ts)      # managed_by + 双 now_ts（判定列归 audit）
-            else:
-                jv = (None, now_ts, now_ts)
+            mb = _MANAGED_BY.get(source)
+            pm = pkg_mgr if source == "os" else None
+            jv = (mb, pm, now_ts, now_ts)
             cur = conn.execute(
                 "SELECT version FROM security_component WHERE source=%s AND name=%s",
                 (source, name))
@@ -261,10 +253,10 @@ def _upsert_components(conn, scan_date: date,
                 conn.execute(
                     "INSERT INTO security_component "
                     "(source, name, version, origin, first_seen, last_changed, last_seen, "
-                    "managed_by, checked_at) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "managed_by, pkg_mgr, checked_at) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (source, name, version, origin, scan_date, scan_date, scan_date)
-                    + (jv[0], now_ts))   # 判定列默认 NULL，由 dep_audit 随后补
+                    + (mb, pm, now_ts))   # 判定列默认 NULL，由 dep_audit 随后补
                 _n_ins += 1
             elif row[0] != version:
                 conn.execute(
@@ -392,7 +384,6 @@ def _collect_components() -> dict:
                                 "judge_why": "仓库无坐标", "has_update": "no"})
                 judged.append(_row)
 
-        part["_os_upgrades"] = dict(os_c.get("upgrades") or {})
         part["dep_health"] = {
             "rows": judged, "pkg_mgr": os_c.get("pkg_mgr"),
             "os_installed_n": os_c.get("installed_n"),
@@ -407,46 +398,10 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("dep_audit 契约读取失败: %s", e)
         _degraded(part, f"依赖审计数据不可用: {str(e)[:120]}")
-    # 未装/非 rpm 系=None（环境差异不算失败）；latest/judge 走 dep_health（契约驱动）
-    # 批 162 漏网（2026-11-06 修）：KV 换轨后探测目标仍是 redis-server（not installed ⇒ None）
-    # ——改探 valkey，键名 redis 延续（前端/快照键不断裂）。
-    for key, pkg in (("python", "python3.11"), ("nginx", "nginx"),
-                     ("openssl", "openssl"), ("postgres", "postgresql-server"),
-                     ("redis", "valkey"), ("pango", "pango"),
-                     ("cairo", "cairo"), ("wqy-microhei", "wqy-microhei-fonts")):
-        try:
-            ver = _run(["rpm", "-q", "--qf", "%{VERSION}", pkg]).strip()
-            part[key] = ver or None
-        except Exception:
-            part[key] = None
-    # 批 155 v2.5 专家#8：OS 可达性判定（upgrades 集为准）
-    _upg = part.pop("_os_upgrades", None) or {}
-    # 批 156：schema 2 时旧 8 行过渡采集退役（全量行已接管；schema 1 中间态仍走此路径）
-    if _sv == 2:
-        _rpm_map = {}
-    else:
-        _rpm_map = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
-                "postgresql-server": "postgres", "redis-server": "redis",
-                "valkey": "redis",   # 批 162：KV 引擎换轨（redis→valkey）后组件键延续（_rpm_map 跟改）
-                "pango": "pango", "cairo": "cairo", "wqy-microhei-fonts": "wqy-microhei"}
-    _os_rows = []
-    for _pkg, _key in _rpm_map.items():
-        _cur = part.get(_key)
-        if not _cur:
-            continue
-        _row = {"name": _key, "cur": _cur, "managed_by": "repo", "group": "os"}
-        if _pkg in _upg:
-            _row.update({"latest": _upg[_pkg], "judge_class": "actionable",
-                        "judge_why": "仓库可升 " + str(_upg[_pkg]),
-                        "has_update": "yes"})
-        else:
-            _row.update({"latest": None, "judge_class": "current", "judge_why": "",
-                        "has_update": "no"})
-        _os_rows.append(_row)
-    if _os_rows:
-        _dh = part.setdefault("dep_health", {})
-        _dh["rows"] = (_dh.get("rows") or []) + _os_rows
-    # 批 155：系统组件结构化（rpm -q --qf——§4.2 禁人类文本；B4 根除）
+    # 批184a：8 个点名探针（rpm -q 硬编码）已删——apt 机器上 rpm 不存在必崩，且
+    # grype/syft 为必装件（不再需要「未装机期照常滚动」的兜底）；schema2 全量 OS 行
+    # 已覆盖真实包名（python3.11/postgresql-server 等），别名（python/postgres）不是包名。
+    # 同理删 schema1 的 _rpm_map/_os_rows 过渡分支（prod 已 schema2，等于空转）。
 
     return part
 
@@ -699,7 +654,7 @@ def _collect_vulns() -> dict:
             ver = str(art.get("version") or "")
             if ver.upper() == "UNKNOWN":   # syft 噪声（setuptools 内部 launcher 等）
                 continue
-            src = {"python": "pip", "rpm": "rpm", "binary": "binary"}[a_type]
+            src = {"python": "pip", "rpm": "os", "binary": "binary"}[a_type]   # 批184a：SBOM type→域
             ledger.append((
                 src, (art.get("name") or "").lower(), ver,
                 _component_origin(a_type, art.get("locations"), _sp),
@@ -1056,26 +1011,24 @@ def run_security_scan(today: date | None = None) -> dict:
                 if prev_row else None)
         diff_items = _baseline_diff(prev, parts)
 
+        # 台账判定入参（**if 外**：OS 行写库不依赖 grype 是否 ok——原放在 ok 分支内会在
+        # vulns 降级时 NameError，实测 3 条降级路径测试炸）
+        _dhpart = ((parts.get("components") or {}).get("dep_health") or {})
+        _dh_rows = _dhpart.get("rows") or []
+        _pkg_mgr = _dhpart.get("pkg_mgr") or None   # 契约给（dnf/apt）——域不变、实现可变
+        _gm = judged_map_of(_dh_rows)      # 批184a：键=(域, 名)，同名跨域不互覆盖
+        _ledger: list = []                 # if 外初始化：GC 守卫读它（降级时保持空 ⇒ 不清表）
+
         if vulns.get("status") == "ok":
             fresh = _upsert_findings(conn, today, vulns.get("findings") or [])
-            # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
-            # 批 155：pip 域行经 grype ledger 入账（同传 judged）
-            _dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-            # 批 156 修：键 norm 化——rpm 名下划线/大小写（libcom_err/perl-Net-SSLeay）经
-            # _norm_key 转连字符小写后才能命中（昨日 69 行差集的根因=原名键 vs norm 查表失配）
-            _gm = judged_map_of(_dh_rows)      # 批183d：键带 source（同名跨源不互覆盖）
-            for _lr in (vulns.get("ledger") or []):
-                _nm = _norm_key(_lr[1]) if len(_lr) > 1 and _lr[1] else None
-                if _nm and _nm not in _gm:
-                    _gm[_nm] = (None, "none", "unknown", "SBOM 识别、非包管理器纳管")
 
             # 批179：组件列表真源=实际安装集 ∪ SBOM 台账（SBOM 只做漏洞关联，不再决定谁上榜）
-            _ledger = list(vulns.get("ledger") or [])
+            _ledger = list(vulns.get("ledger") or [])   # noqa: F811（复用上面声明，保持同对象语义）
             _have = {_norm_key(r[1]) for r in _ledger if len(r) > 1}
             for _pn, _pv in (parts.get("components", {}).get("pip") or {}).items():
                 if _norm_key(_pn) not in _have:
                     _ledger.append(("pip", _pn, _pv, "pip 安装"))
-            _upsert_components(conn, today, _ledger, _gm)
+            _upsert_components(conn, today, _ledger, pkg_mgr=_pkg_mgr)
             # 批181：优先刷新清单（只写清单、不联网；dep_audit 下轮先刷这些包的 latest）
             try:
                 from src.quant_common.depjudge import priority_refresh_names as _prn
@@ -1103,38 +1056,21 @@ def run_security_scan(today: date | None = None) -> dict:
         # 入库过滤防新增；此处 DELETE 治旧——规则变更自动收敛存量）
         conn.execute(
             "DELETE FROM security_component WHERE source='binary' AND version='UNKNOWN'")
-        # 批 154 补②：存量伪组件清偿（outdated/n_outdated/dep_audit_at/vulns_db 元键——
-        # 历史轮已入库的脏行，规则收敛自动清除）
-        conn.execute(
-            "DELETE FROM security_component WHERE source='system' AND name IN "
-            "('outdated', 'outdated_error', 'n_outdated', 'dep_audit_at', 'vulns_db')")
-
-
-        # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
-        # 只入**值=纯版本串**的键（白名单式 isinstance(v, str)——批 154 补②新增的
-        # outdated 清单/n_outdated 计数/dep_audit_at 时间戳/vulns_db 字典等元数据键
-        # 不再伪组件化——用户页面 outdated 行渲染全串实证此病）
-        sys_rows = [
-            ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
-            if k not in ("pip", "status", "dep_audit_at", "outdated_error") and isinstance(v, str) and v
-        ]
-        dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-        # 批183d：key 带 source——同名跨源（Python tzdata vs rpm tzdata）不得互相覆盖
-        # （实测 pip tzdata 的 managed_by 被 OS 行写成 repo，dnf 却无更新=误报）。
-        judged_map = judged_map_of(dh_rows)   # 批183d：键带 source（同名跨源不互覆盖）
+        # 批184a：台账域归位——source=生态（pip/os/binary），实现=pkg_mgr（dnf/apt）。
+        # · sys_rows / 8 别名探针已删（schema2 全量 OS 行覆盖真实包名；apt 下 rpm 命令不存在）；
+        # · OS 行写 source='os'，origin/latest_source 由契约 pkg_mgr 派生（换 apt 不改域）；
+        # · GC 三域统一（原仅 system/pip，rpm·binary 从不清理 ⇒ 永久累积）。
         import datetime as _dt3
-        _os_all = [r for r in dh_rows if r.get("group") == "os"]
+        _os_all = [r for r in _dh_rows if r.get("group") == "os"]
         if _os_all:
-            _LEGACY8 = ("python", "nginx", "openssl", "postgres", "redis", "pango", "cairo", "wqy-microhei")
-            conn.execute("DELETE FROM security_component WHERE source=%s AND name IN (%s,%s,%s,%s,%s,%s,%s,%s)", ("system",) + _LEGACY8)
-            _os_up = [("system", r["name"], str(r.get("cur") or ""), "OS rpm") for r in _os_all]
-            _upsert_components(conn, today, _os_up, judged_map)
-            conn.execute("DELETE FROM security_component WHERE source=%s AND last_seen < %s", ("system", today - _dt3.timedelta(days=3)))
-            # 批 160·B：pip 源同规则退役——venv 已卸载的包（如 akshare 根治删除）契约 rows
-            # 不再含它 ⇒ upsert 不刷 last_seen ⇒ 3 日后孤儿行自动退役（不再僵尸 actionable）
-            conn.execute("DELETE FROM security_component WHERE source='pip' AND last_seen < %s",
-                         (today - _dt3.timedelta(days=3),))
-        _upsert_components(conn, today, sys_rows, judged_map)
+            _os_up = [("os", r["name"], str(r.get("cur") or ""),
+                       "OS " + (_pkg_mgr or "unknown")) for r in _os_all]
+            _upsert_components(conn, today, _os_up, pkg_mgr=_pkg_mgr)
+        # 孤儿 GC：**仅本轮 ledger 非空**时执行（grype 失败 ⇒ ledger 空，否则会清空全表）。
+        # 首轮 7 天（存量 rpm/binary 从未清理过），稳定后回 3 天。
+        if _ledger:
+            conn.execute("DELETE FROM security_component WHERE last_seen < %s",
+                         (today - _dt3.timedelta(days=7),))
         # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:
@@ -1149,7 +1085,8 @@ def run_security_scan(today: date | None = None) -> dict:
                 ("unknown", "未在本轮审计（数据源差集——下轮对齐或 3 天 GC 收口）"))
         except Exception as _e156:
             logger.warning("null-judge backfill failed: %s", _e156)
-        logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))
+        logger.info("upsert os rows=%s judged=%s pkg_mgr=%s",
+                    len(_os_all), len(_gm), _pkg_mgr)
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
         conn.execute(

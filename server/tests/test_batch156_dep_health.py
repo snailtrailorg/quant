@@ -23,22 +23,23 @@ def test_os_full_rows_schema_branch(monkeypatch):
     assert '仓库无坐标' in src
 
 
-def test_legacy8_delete_and_gc(monkeypatch):
-    """T2：8 行显式 DELETE+消失包 3 轮 GC。"""
+def test_alias_purge_and_global_gc(monkeypatch):
+    """T2（批184a 改写）：别名清理由迁移 0189 一次性完成；运行期只做**全域** GC——
+    原实现只清 system/pip，rpm·binary 从不清理（永久累积）。"""
     import inspect
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc.run_security_scan)
-    assert '_LEGACY8' in src and 'DELETE FROM security_component WHERE source=%s AND name IN' in src
-    assert 'last_seen < %s' in src and 'timedelta(days=3)' in src
+    assert '_LEGACY8' not in src, "运行期别名清理应已迁移到 0189"
+    assert "DELETE FROM security_component WHERE last_seen < %s" in src
+    assert "timedelta(days=7)" in src        # 首轮 7 天（存量从未清过），稳定后回 3 天
 
 
-def test_sbom_only_none_rows(monkeypatch):
-    """T3：ledger 名不在判定域→managed_by=none+why 非空（显式 unknown）。"""
-    import inspect
+def test_managed_by_derived_covers_sbom_only():
+    """T3（批184a 改写）：SBOM 独有行不再注入「none 判定」——managed_by 由域派生，
+    binary→none 已覆盖同一语义（判据从「有没有判定行」改为「域是什么」）。"""
     from src.health_monitor import security_collector as sc
-    src = inspect.getsource(sc.run_security_scan)
-    assert 'SBOM 识别、非包管理器纳管' in src
-    assert '_nm not in _gm' in src           # 纳管跳过（A4：已纳管不建 none 行）
+    assert sc._MANAGED_BY["binary"] == "none"
+    assert sc._MANAGED_BY["os"] == "repo"
 
 
 def test_alert_cold_start(monkeypatch):

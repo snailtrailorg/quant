@@ -22,7 +22,8 @@ class TestLedgerLatest:
         assert '"python", "nginx", "openssl", "postgres", "redis"' in src
 
     def test_outdated_error_keyword_purged(self):
-        """存量脏行（outdated_error 超时文案）自愈清单须包含该名。"""
+        """批184a：脏行源头（sys_rows 直通）已删——元键不可能再入台账，无需运行期自愈清单。"""
         from src.health_monitor import security_collector as sc
-        src = inspect.getsource(sc.run_security_scan)
-        assert "'outdated_error'" in src
+        src = "\n".join(ln for ln in inspect.getsource(sc.run_security_scan).splitlines()
+                         if not ln.strip().startswith("#"))
+        assert "sys_rows" not in src
