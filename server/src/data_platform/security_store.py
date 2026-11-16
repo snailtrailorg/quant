@@ -79,11 +79,11 @@ def get_component_ledger() -> list[dict]:
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT source, name, version, origin, last_changed, managed_by, "
-            "latest_version, latest_source, judge_class, judge_why, checked_at "
+            "latest_version, latest_source, judge_class, judge_why, checked_at, pkg_mgr "
             "FROM security_component")
         cols = ("source", "name", "version", "origin", "last_changed",
                 "managed_by", "latest_version", "latest_source",
-                "judge_class", "judge_why", "checked_at")
+                "judge_class", "judge_why", "checked_at", "pkg_mgr")
         return _rows_to_dicts(cur, cols)
 
 

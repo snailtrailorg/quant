@@ -204,8 +204,12 @@
       </template>
       <TableShell :data="compRowsPaged" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
-        <el-table-column prop="managed_by" :label="t('secpage.installVia')" min-width="96">
-          <template #default="{ row }">{{ managedByText(row.managed_by) }}</template>
+        <el-table-column prop="source" :label="t('secpage.domain')" min-width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="ecoTagType(row.source)" effect="plain">
+              {{ ecoText(row) }}
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="dep_chain" :label="t('secpage.depRel')" min-width="150">
           <template #default="{ row }">
@@ -429,6 +433,21 @@ const componentRows = computed(() => {
 })
 // 安装途径中文映射（managed_by 值域：repo/pypi/local/none；空=未判定）
 const managedByText = v => ({ repo: 'dnf 仓库', pypi: 'PyPI', local: '本地 wheel', none: '非包管理器' }[v] || '—')
+// 批184b：生态列 = 域(source) + 实现(pkg_mgr)——同名跨域（PyPI tzdata / 系统 tzdata）
+// 在同一张表里必须一眼可辨；managed_by 是域的派生值，不再单列。
+const ecoText = row => {
+  const s = row.source
+  if (s === 'pip') return t('secpage.ecoPypi')
+  if (s === 'binary') return t('secpage.ecoBundle')
+  if (s === 'os') {
+    const pm = (row.pkg_mgr || '').toLowerCase()
+    if (pm === 'dnf') return t('secpage.ecoOsDnf')
+    if (pm === 'apt') return t('secpage.ecoOsApt')
+    return t('secpage.ecoOs')
+  }
+  return managedByText(row.managed_by)
+}
+const ecoTagType = s => ({ pip: 'success', os: 'warning', binary: 'info' }[s] || 'info')
 // 行筛选组（Audit 范式）：来源类型（distinct 预取）× 漏洞状态（固定枚举）
 const compFilterGroups = computed(() => {
   const srcs = [...new Set(componentRows.value.map(r => r.managed_by).filter(Boolean))].sort()

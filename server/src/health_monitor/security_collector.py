@@ -350,6 +350,7 @@ def _collect_components() -> dict:
         part["dep_mixed_round"] = _mixed
         for _r in _tbl_rows:
             judged.append({"name": _r[0], "cur": _r[1], "latest": _r[2],
+                           "source": "pip",          # 批184b：行带域（前端按域渲染生态标签）
                            "managed_by": "pypi",
                            "group": "dev" if _r[0] in dev_names else "runtime",
                            "judge_class": _r[3], "judge_why": _r[4],
@@ -373,7 +374,8 @@ def _collect_components() -> dict:
                 _seen_best[_n] = _ip
             for _n, _ip in _seen_best.items():
                 _cur = _ip.get("version")
-                _row = {"name": _n, "cur": _cur, "managed_by": "repo", "group": "os"}
+                _row = {"name": _n, "cur": _cur, "managed_by": "repo",
+                        "source": "os", "pkg_mgr": os_c.get("pkg_mgr"), "group": "os"}
                 if _n in _upg_all:
                     _row.update({"latest": _upg_all[_n], "judge_class": "actionable",
                                 "judge_why": "仓库可升 " + str(_upg_all[_n]), "has_update": "yes"})
