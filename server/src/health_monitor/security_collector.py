@@ -708,13 +708,52 @@ def _collect_headers(host: str = _HEADER_PROBE_HOST) -> dict:
 
 # ── 落库 / 基线 diff / 告警 ────────────────────────────────────────────────
 
-def _alert(code: str, title: str, body: str) -> None:
-    """告警统一出口（同 engine._alert_generic 范式；新 code 已进 runbook.py）。"""
+def _alert(code: str, title: str, body: str, level: str = "warn") -> None:
+    """告警统一出口（同 engine._alert_generic 范式；新 code 已进 runbook.py）。
+
+    level ∈ info/warn/critical（notify.Level 值域）；恢复类用 info。
+    """
     try:
         from src.alert_notify.notify import notify
-        notify("warn", "system", title, body, code=code)
+        notify(level, "system", title, body, code=code)   # type: ignore[arg-type]
     except Exception as e:
         logger.warning("告警发送失败（code=%s，不阻断扫描）: %s", code, e)
+
+
+def stale_decision(prev: int, degraded: bool, alerted: bool) -> tuple[int, str]:
+    """安全采集连续失败判定（纯函数，批185）。返回 (new_streak, action)。
+
+    轮 = 执行次数（beat 每日 06:00 + 手动重扫都算一轮）。
+    - 正常：streak 归 0；上一轮已累计 ≥2 轮才发 recovered（单轮抖动不发恢复）
+    - 连续第 2 轮：alert（避免单轮抖动打扰）
+    - 第 3 轮起且 24h 内未提醒（alerted=False）：remind（防"报一次后永久静默"）
+    """
+    if not degraded:
+        return 0, ("recovered" if prev >= 2 else "none")
+    n = prev + 1
+    if n == 2:
+        return n, "alert"
+    if n > 2 and not alerted:
+        return n, "remind"
+    return n, "none"
+
+
+def _streak_read(br, key: str) -> int:
+    """读连续计数；脏值按 0 重置并**重写键**。
+
+    不重写=脏值每轮都抛 ValueError，被外层 except 吞成 warning ⇒ streak 永不推进、
+    告警永久静默（171b 同款"日志一条、功能死亡"）。
+    """
+    raw = br.get(key)
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        logger.warning("streak 键脏值 %r → 按 0 重置（key=%s）", raw, key)
+        try:
+            br.set(key, 0, ex=7 * 86400)
+        except Exception:
+            pass
+        return 0
 
 
 def _load_lock_packages(path: Path | None = None) -> dict[str, str] | None:
@@ -1130,23 +1169,34 @@ def run_security_scan(today: date | None = None) -> dict:
         {"zone": z, "reason": (p.get("degraded_reason") or "采集失败")}
         for z, p in (*parts.items(), ("vulns", vulns)) if p.get("status") == "degraded"
     ]
-    # 批185：**安全采集停摆告警**（属安全域，不进 health_monitor 的 R 系列——
-    # R 系列响应是「重启服务」，本条的响应是「装扫描器/查 grype DB/重扫」）。
-    # 判定单源=本轮 vulns 分区状态（与页面 degraded 同源，不另造真源）；
-    # 连续 2 轮才报（单轮抖动不打扰），沿触发（streak==2 发一次，持续态不重复）。
+    # 批185：**安全采集连续失败告警**（属安全域；health R 系列管服务/资源，不混——
+    # 那条链响应是「重启服务」，本条响应是「装扫描器/查 grype DB/重扫」）。
+    # 边界：本条只管「跑了但 vulns 分区 degraded」。**根本没跑**（beat/worker 停）由
+    # health 的 unit_down/task_blind 覆盖——不得拿本条当"停摆 SLA"证据。
+    # 轮=执行次数（beat 每日 06:00 + 手动重扫）；streak TTL 7 天 ⇒ 中间漏跑几天仍算连续。
     try:
         from src.quant_common.redis_client import business_redis as _brs
-        _brs_c = _brs()
-        _k_streak = "sec:vulns_degraded_streak"
-        _prev_n = int(_brs_c.get(_k_streak) or 0)
-        _cur_n = _prev_n + 1 if vulns.get("status") == "degraded" else 0
-        _brs_c.set(_k_streak, _cur_n, ex=7 * 86400)
-        if _cur_n == 2:
-            _alert("security.stale", "安全扫描停摆",
-                   f"连续 2 轮 vulns 分区 degraded：{vulns.get('degraded_reason') or '采集失败'}——"
-                   f"装扫描器见 bootstrap.yml 在位断言；查 grype DB 与 worker 日志后手动重扫")
+        _br_s = _brs()
+        _K_STREAK, _K_ALERTED = "sec:vulns_degraded_streak", "sec:stale_alerted"
+        _prev_n = _streak_read(_br_s, _K_STREAK)
+        _alerted = bool(_br_s.get(_K_ALERTED))
+        _cur_n, _act = stale_decision(_prev_n, vulns.get("status") == "degraded", _alerted)
+        _br_s.set(_K_STREAK, _cur_n, ex=7 * 86400)
+        if _act in ("alert", "remind"):
+            _lvl = "critical" if _cur_n >= 7 else "warn"     # 连续 7 轮（≈7 天）升级
+            _alert("security.stale", "安全采集连续失败",
+                   f"vulns 分区连续 {_cur_n} 轮 degraded："
+                   f"{vulns.get('degraded_reason') or '采集失败'}——"
+                   f"装扫描器见 bootstrap.yml 在位断言；查 grype DB 与 worker 日志后手动重扫。"
+                   f"（轮=执行次数：beat 每日 06:00 + 手动重扫；beat/worker 本身停摆不归本条，"
+                   f"由 health 的 unit/task 规则覆盖）", level=_lvl)
+            _br_s.set(_K_ALERTED, 1, ex=86400)               # 24h 内不重复提醒
+        elif _act == "recovered":
+            _br_s.delete(_K_ALERTED)
+            _alert("security.recovered", "安全采集已恢复",
+                   f"vulns 分区恢复正常（此前连续 {_prev_n} 轮 degraded）", level="info")
     except Exception as e:
-        logger.warning("停摆告警判定失败（不影响扫描）: %s", e)
+        logger.warning("连续失败告警判定失败（不影响扫描）: %s", e)
 
     if status == "degraded" or fresh or diff_items:
         ai_summary = _ai_summary(today, fresh, diff_items, degraded_zones)

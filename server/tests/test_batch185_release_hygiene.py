@@ -59,15 +59,48 @@ def test_scanner_not_in_health_rule_chain():
     assert 'snap["scanner"]' not in inspect.getsource(collector.collect)
 
 
+def test_stale_decision_paths():
+    """停摆判定六条路径（纯函数）：首发/提醒/恢复/抖动/闸门/脏值。"""
+    from src.health_monitor.security_collector import stale_decision as d
+    assert d(0, True, False) == (1, "none")        # 第 1 轮不打扰
+    assert d(1, True, False) == (2, "alert")       # 第 2 轮告警
+    assert d(2, True, True) == (3, "none")         # 24h 内已提醒过
+    assert d(2, True, False) == (3, "remind")      # 过了闸再提醒（防永久静默）
+    assert d(5, False, True) == (0, "recovered")   # 恢复通知
+    assert d(1, False, False) == (0, "none")       # 未达 2 轮不发恢复（单轮抖动）
+
+
+class _FakeBr:
+    def __init__(self, v):
+        self.v = v
+        self.sets = []
+
+    def get(self, k):
+        return self.v
+
+    def set(self, k, v, ex=None):
+        self.v = v
+        self.sets.append((k, v))
+
+
+def test_streak_read_resets_dirty_value():
+    """脏值必须**重写键**——否则每轮抛错被吞，streak 永不推进、告警永久静默。"""
+    from src.health_monitor.security_collector import _streak_read
+    br = _FakeBr(b"not-a-number")
+    assert _streak_read(br, "k") == 0
+    assert br.v == 0 and br.sets, "脏值未回写（下一轮仍会抛）"
+
+
 def test_security_stale_alert_declared():
-    """安全采集停摆告警：安全域、连续 2 轮 degraded、沿触发。"""
+    """告警接线与 runbook：stale + recovered 两个 code 都要有处置说明。"""
     import inspect
     from src.health_monitor import security_collector as sc
     from src.alert_notify.runbook import RUNBOOK
     s = inspect.getsource(sc.run_security_scan)
-    assert 'security.stale' in s
-    assert "sec:vulns_degraded_streak" in s and "_cur_n == 2" in s
-    assert "security.stale" in RUNBOOK
+    assert "stale_decision(" in s and "_streak_read(" in s
+    assert '"security.stale"' in s and '"security.recovered"' in s
+    assert "sec:stale_alerted" in s and ">= 7" in s        # 7 轮升级 critical
+    assert "security.stale" in RUNBOOK and "security.recovered" in RUNBOOK
 
 
 def test_collector_uses_registry_not_raw_which():

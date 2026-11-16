@@ -67,6 +67,7 @@ RUNBOOK: dict[str, dict] = {
     # ——— 安全态势（批 120） ———
     "security.baseline_change": {"label": "安全基线变更", "guide": "安全扫描基线 diff 检出变化（新增监听端口/lock 外新增包/ssh 配置翻转）——/observe 安全 Tab 看当日 diff 项；非预期变更须归因（部署引入 or 环境漂移），ssh 翻转优先处置。"},
     "security.stale":      {"label": "安全扫描停摆", "guide": "vulns 分区连续 2 轮 degraded（缺 grype/syft、grype DB 拉取失败或 worker 异常）——装位见 bootstrap.yml 扫描器断言；查 quant-celery-worker 日志与 shared/grype-db，处理后手动重扫（安全 Tab 刷新按钮）。"},
+    "security.recovered":  {"label": "安全采集已恢复", "guide": "vulns 分区恢复正常（此前连续 ≥2 轮 degraded）——无需行动；若反复出现，查 grype DB 更新与 data 队列稳定性。"},
     "security.vuln_new":   {"label": "新漏洞", "guide": "grype 检出当日新漏洞（first_seen=当日，只告一次）——/observe 安全 Tab 漏洞列表看详情与修复版本；升级走正常发布管道。"},
     # ——— 平台杂项 ———
     "task.failed":      {"label": "后台任务失败", "guide": "任务管理器登记失败——任务列表看错误详情，重试或修配置。"},
