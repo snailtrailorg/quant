@@ -73,7 +73,7 @@
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
-          <div class="card-value"><span class="pct small">{{ dbBuiltDate || '—' }}</span></div>
+          <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
           <div class="kpi-sub">{{ dbStateHint }}</div>
         </el-card>
       </div>
@@ -497,11 +497,12 @@ const compHint = computed(() =>
   t('secpage.compMatch', { n: compRowsPaged.value.length, total: componentRows.value.length }))
 
 // A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
-// DB 构建日（import.json URL 时间戳——采集器提取）；>3 天黄（上游日更 1 次，
-// 超龄=anchore 断更或 update 通道故障——值得人看一眼）
+// 批185：主值=**完整升级（构建）时间**，与「上次扫描」同款 toLocaleString（本地时区）；
+// 原只给日期 YYYY-MM-DD，看不出时效细粒度。>3 天由副文案标黄（上游日更 1 次，
+// 超龄=anchore 断更或 update 通道故障）。
 const dbBuiltDate = computed(() => {
   const s = (snap.value?.vulns_db || {}).built_at
-  return s ? s.slice(0, 10) : ''
+  return s ? new Date(s).toLocaleString() : '—'
 })
 const dbStateHint = computed(() => {
   const vd = snap.value?.vulns_db || {}
