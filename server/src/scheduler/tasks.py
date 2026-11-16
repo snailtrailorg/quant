@@ -1166,6 +1166,7 @@ def dep_audit():
     # —— OS 域随行落表（步4盲审 P0 同撞修复：原 os_installed/os_upgrades 为不存在的 API——
     # hasattr 假完工；真源=provider.list_installed()/upgrade_candidates()）——
     os_installed, os_upgrades = [], []
+    _repo: set = set()       # 批185：仓库中存在的包名（判断 current vs unknown 的分界）
     _pm = "unknown"          # 批184a：实现标识（dnf/apt）——域恒 'os'，实现可变
     try:
         provider = os_pkg.detect_provider()
@@ -1173,6 +1174,12 @@ def dep_audit():
         os_installed = [{"name": p.name, "version": p.version} for p in provider.list_installed()]
         _upg = provider.upgrade_candidates() or {}
         os_upgrades = _upg if isinstance(_upg, dict) else {}
+        try:
+            # 全量 repoquery 较慢（秒级~十几秒）：失败只告警，不影响本轮判定（落 unknown）
+            # getattr 兜底：老 provider 实现/测试桩没有该接口 ⇒ 空集（判定回落 unknown）
+            _repo = (getattr(provider, "repo_packages", lambda: set())() or set())
+        except Exception as e2:
+            errors.append(f"os-repo: {e2}"[:120])
     except Exception as e:
         errors.append(f"os-enum: {e}"[:120])
     if os_installed:
@@ -1231,8 +1238,12 @@ def dep_audit():
         "last_complete": {"run_id": run_id, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
         # 批184a：pkg_mgr/installed_n 随契约下发——此前缺这两个键 ⇒ 台账 pkg_mgr 永远 NULL
         # （生态列只能显示「系统包」）、且 `pkg_mgr == "unsupported"` 降级分支永不触发（fail-open）
+        # all_repos 只收「已装且在仓库里」的名字（≤ installed，不膨胀契约）：
+        # 判定用它区分「已最新 current」与「仓库无坐标 unknown」
         "os": {"installed": os_installed, "upgrades": os_upgrades,
-               "pkg_mgr": _pm, "installed_n": len(os_installed)},
+               "pkg_mgr": _pm, "installed_n": len(os_installed),
+               "all_repos": {r["name"]: True for r in os_installed
+                             if r["name"] in _repo}},
         "constraints": constraints, "dev_names": dev_names,
         "errors": errors[:5],
     }

@@ -63,11 +63,11 @@ def get_findings_active(day: date) -> list[dict]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
+            "SELECT scanner, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
             "last_seen_at, description, description_en, published_date "
             "FROM security_finding WHERE first_seen <= %s",
             (day,))
-        cols = ("source", "pkg", "vuln_id", "fix_version", "severity",
+        cols = ("scanner", "pkg", "vuln_id", "fix_version", "severity",
                 "first_seen", "last_seen", "last_seen_at", "description", "description_en",
                 "published_date")
         return _rows_to_dicts(cur, cols)
@@ -131,7 +131,7 @@ def delete_fixed_finding(pkg: str, vuln_id: str, today: date) -> str:
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT last_seen FROM security_finding "
-            "WHERE source='grype' AND pkg=%s AND vuln_id=%s", (pkg, vuln_id))
+            "WHERE scanner='grype' AND pkg=%s AND vuln_id=%s", (pkg, vuln_id))
         row = cur.fetchone()
         if row is None:
             conn.commit()
@@ -140,7 +140,7 @@ def delete_fixed_finding(pkg: str, vuln_id: str, today: date) -> str:
             conn.commit()
             return "active"
         conn.execute(
-            "DELETE FROM security_finding WHERE source='grype' AND pkg=%s AND vuln_id=%s",
+            "DELETE FROM security_finding WHERE scanner='grype' AND pkg=%s AND vuln_id=%s",
             (pkg, vuln_id))
         conn.commit()
     return "ok"

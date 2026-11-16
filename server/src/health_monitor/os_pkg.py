@@ -3,6 +3,14 @@
 
 detect_provider() 命令存在性优先；Unsupported 显式降级（B8 根除）。
 全部结构化输出（rpm -q --qf / dpkg-query -W -f），禁人类文本解析。
+
+**provider 契约（三个方法，实现可缺席但接口必须在）**：
+- `id: str`                       —— 实现标识（dnf / apt / unsupported）
+- `list_installed() -> [InstalledPkg]`
+- `upgrade_candidates() -> {name: evr}`  —— 空 dict = 无结构化通道 ⇒ 判 unknown（不猜）
+- `repo_packages() -> set[str]`         —— 仓库中存在的包名（区分 current / unknown）
+apt 的 upgrade/repo 两项**按 2026-11-16 用户裁定只保留接口**（返回空集，判定诚实降级）；
+换发行版=新增 provider 实现，域（source='os'）与判定契约都不动。
 上游源决策（2026-10-28 实测定谳）：pip 上游=pypi.org simple（PEP 691，
 0.4s/包、权威、files[].yanked 原生）；tuna 作降级。tuna 镜像 JSON API
 严重陈旧（certifi 停在 2024.7）禁用；tuna simple 同步延迟约一季。
@@ -67,6 +75,12 @@ class RpmDnf:
                 out[p[0]] = p[2] + "-" + p[3]
         return out
 
+    def repo_packages(self) -> set:
+        """仓库中存在（任一 enabled repo）的包名全集——批185：判定「已最新 current」
+        与「仓库无坐标 unknown」的分界（缺它则所有无升级包都落 unknown）。"""
+        raw = _run(["dnf", "-q", "repoquery", "--qf", "%{NAME}\n"], timeout=240)
+        return {ln.strip() for ln in raw.splitlines() if ln.strip()}
+
 
 class DpkgApt:
     """Debian 系——dpkg-query 结构化（apt-get -s 文本禁解析，审A-H6）。"""
@@ -83,7 +97,13 @@ class DpkgApt:
         return pkgs
 
     def upgrade_candidates(self):
-        return {}      # 无结构化通道：latest 缺 -> unknown（不猜）
+        # 无结构化通道：latest 缺 -> unknown（不猜）。用户裁定（2026-11-16）：
+        # **apt 只保留接口**，不实现——接口在、判定诚实降级即可。
+        return {}
+
+    def repo_packages(self) -> set:
+        """同 upgrade_candidates：接口保留、不实现 ⇒ 空集 ⇒ 判定落 unknown（诚实）。"""
+        return set()
 
 
 class Unsupported:
@@ -97,6 +117,9 @@ class Unsupported:
 
     def upgrade_candidates(self):
         return {}
+
+    def repo_packages(self) -> set:
+        return set()
 
 
 def detect_provider():

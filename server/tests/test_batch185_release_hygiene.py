@@ -1,0 +1,79 @@
+"""批185 守门：apt 只留接口 / 扫描器注册 / 契约 all_repos / finding 列改名。
+
+对应 184 审核登记的 5 项挂账（apt 一项按用户裁定只保留接口）。
+"""
+import inspect
+
+import pytest
+
+
+def _db_up() -> bool:
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1 FROM security_finding LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+needs_db = pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
+
+
+def test_apt_keeps_interface_only():
+    """apt 只保留接口（用户裁定 2026-11-16）：方法在、返回诚实空集。"""
+    from src.health_monitor.os_pkg import DpkgApt
+    p = DpkgApt()
+    assert p.id == "apt"
+    assert p.upgrade_candidates() == {}
+    assert p.repo_packages() == set()
+
+
+def test_dnf_provider_exposes_repo_packages():
+    from src.health_monitor.os_pkg import RpmDnf
+    assert hasattr(RpmDnf, "repo_packages")
+
+
+def test_scanner_reports_missing_binaries(monkeypatch):
+    import src.health_monitor.scanners as s
+    monkeypatch.setattr(s.shutil, "which", lambda b: None)
+    st = s.detect_scanner().status()
+    assert st["available"] is False
+    assert "grype" in st["reason"] and "syft" in st["reason"]
+
+
+def test_scanner_available_when_present(monkeypatch):
+    import src.health_monitor.scanners as s
+    monkeypatch.setattr(s.shutil, "which", lambda b: "/usr/local/bin/" + b)
+    st = s.detect_scanner().status()
+    assert st["available"] is True and st["reason"] == ""
+
+
+def test_collector_uses_registry_not_raw_which():
+    """扫描器探测只经注册入口——散落 which 会漏掉新增二进制/原因文案。"""
+    from src.health_monitor import security_collector as sc
+    src = inspect.getsource(sc._collect_vulns)
+    assert "detect_scanner()" in src
+    assert 'shutil.which("grype")' not in src
+
+
+@needs_db
+def test_finding_scanner_expanded_and_backfilled():
+    """expand 步：scanner 列在且已回填；source 仍保留（双写期，contract 删列另批）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cols = {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='security_finding'").fetchall()}
+        n_null = conn.execute(
+            "SELECT count(*) FROM security_finding WHERE scanner IS NULL").fetchone()[0]
+    assert "scanner" in cols and "source" in cols, cols
+    assert n_null == 0, f"{n_null} 行 scanner 未回填"
+
+
+@needs_db
+def test_ledger_gc_uses_three_days():
+    from src.health_monitor import security_collector as sc
+    src = inspect.getsource(sc.run_security_scan)
+    assert "timedelta(days=3)" in src
+    assert "timedelta(days=7)" not in src

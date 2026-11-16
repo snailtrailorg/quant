@@ -70,6 +70,27 @@
               （gcc-toolset-13 为 EMQ 编译依赖，仅生产/彩排需要——沙箱跳过）
           when: sysdep_pdf.rc != 0 and (bootstrap_check_sysdeps | default(true) | bool)
 
+        # ---------- 漏洞扫描器（grype/syft）在位断言（批185）----------
+        # 口径同 sysdep：**不自动装**（系统级 infra 属 michael 分工），缺位 fail 明示装法。
+        # 这是「必装」的唯一产物层保证——release 不随附这两个二进制，部署断言管不到新机。
+        - name: 【3b】漏洞扫描器在位断言（grype + syft——安全态势页 C 区数据源）
+          ansible.builtin.shell: |
+            command -v grype >/dev/null && command -v syft >/dev/null && echo OK || echo MISSING
+          changed_when: false
+          failed_when: false
+          register: scanner_bin
+        - name: 【3b】扫描器断言结果（缺位即 fail——新机重建清单在此）
+          ansible.builtin.fail:
+            msg: |
+              ✗ 漏洞扫描器缺失（grype / syft）：{{ scanner_bin.stdout | default('') }}
+              装法: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+                    | sudo sh -s -- -b /usr/local/bin
+                    curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+                    | sudo sh -s -- -b /usr/local/bin
+              （RHEL8/阿里云 Linux 3 无官方 dnf 包；官方 install.sh 装 /usr/local/bin）
+              影响: 缺位时安全态势页 vulns 分区 degraded（不是误报，是能力缺席）
+          when: scanner_bin.stdout is not defined or 'MISSING' in scanner_bin.stdout
+
         # ---------- SSH 密钥（设计稿 §2：禁 command=；加 no-forwarding 族；from= 待出口 IP 确认） ----------
         - name: 【3b】deploy authorized_keys（禁 command=——与 Ansible 多命令冲突，写明禁防后人好心加）
           ansible.posix.authorized_key:

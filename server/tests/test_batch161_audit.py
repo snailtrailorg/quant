@@ -149,6 +149,8 @@ def test_full_chain_beat_done_and_contract(monkeypatch):
     # 且 Unsupported 的降级分支（os.pkg_mgr == "unsupported"）永不触发
     assert "pkg_mgr" in contract["os"] and contract["os"]["pkg_mgr"]
     assert contract["os"]["installed_n"] == 1
+    # 批185：仓库坐标集（区分「已最新 current」与「仓库无坐标 unknown」）
+    assert "all_repos" in contract["os"]
 
 
 def test_full_chain_running_mutex(monkeypatch):

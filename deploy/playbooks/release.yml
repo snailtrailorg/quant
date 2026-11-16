@@ -117,6 +117,21 @@
         that: df_free.stdout_lines[-1] | regex_replace('[^0-9]', '') | int >= deploy_min_disk_mb
         msg: "磁盘余量不足: {{ df_free.stdout_lines[-1] }}（要求 ≥ {{ deploy_min_disk_mb }}M）"
 
+    # 批185：扫描器在位**探测**（fail-open）。grype/syft 不随 release 工件走，
+    # 「必装」由 bootstrap.yml 的在位断言保证；此处只留痕，防止「机器缺件」无声无息。
+    - name: preflight —— 漏洞扫描器在位探测（只读）
+      ansible.builtin.shell: |
+        command -v grype >/dev/null && command -v syft >/dev/null && echo OK || echo MISSING
+      register: scanner_probe
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: preflight —— 扫描器缺失告警（留痕不阻断；装法见 bootstrap.yml）
+      ansible.builtin.debug:
+        msg: "⚠ 目标机缺 grype/syft——安全态势页 vulns 分区将 degraded（装法见 bootstrap.yml）"
+      when: "'MISSING' in (scanner_probe.stdout | default('MISSING'))"
+
     - name: preflight —— 前端构建（控制机 npm run build；web 工件化批 2026-08-30）
       ansible.builtin.command: npm run build
       args:

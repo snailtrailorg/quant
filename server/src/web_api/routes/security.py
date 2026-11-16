@@ -62,7 +62,7 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
         first, last = f["first_seen"], f["last_seen"]
         base = ledger.get(f["pkg"]) or first          # 暴露起点：版本变更日；缺行回退发现日
         out.append({
-            "source": f["source"], "pkg": f["pkg"], "vuln_id": f["vuln_id"],
+            "scanner": f["scanner"], "pkg": f["pkg"], "vuln_id": f["vuln_id"],   # 批185：扫描器（非域）
             "fix_version": f["fix_version"], "severity": f["severity"],
             "description": f.get("description") or "",
             "description_en": f.get("description_en") or "",

@@ -553,9 +553,13 @@ def _collect_vulns() -> dict:
     """
     part: dict = {"status": "ok"}
     try:
-        import shutil
-        if not (shutil.which("grype") and shutil.which("syft")):
-            raise RuntimeError("grype/syft 未装机（批 123 装机通道见任务文件 §二.1）")
+        # 批185：走扫描器注册（唯一探测入口）——不再散落 which；缺失原因进 status
+        from src.health_monitor.scanners import detect_scanner
+        _sc = detect_scanner()
+        part["scanner"] = _sc.status()
+        if not part["scanner"]["available"]:
+            raise RuntimeError(f"扫描器不可用：{part['scanner']['reason']}"
+                               "（装位见 bootstrap.yml 的在位断言）")
 
         # DB 缓存显式注入（GRYPE_DB_CACHE_DIR=grype 官方 env）：不再依赖 HOME
         # 推导——systemd worker 无 HOME=/手动身份各异，两路径各找各缓存的漂移
@@ -811,7 +815,7 @@ def _upsert_findings(conn, scan_date: date, findings: list[dict]) -> list[dict]:
     for f in findings:
         cur = conn.execute(
             "SELECT first_seen, last_seen, description FROM security_finding "
-            "WHERE source='grype' AND pkg=%s AND vuln_id=%s", (f["pkg"], f["vuln_id"]))
+            "WHERE scanner='grype' AND pkg=%s AND vuln_id=%s", (f["pkg"], f["vuln_id"]))
         row = cur.fetchone()
         # last_seen_at=clock_timestamp()（真实时刻，晚于事务开始）——同日复跑重判
         # 的判据锚（快照 created_at=now()=事务开始，早于它 ⇒ last_seen_at 较新=本轮
@@ -820,18 +824,20 @@ def _upsert_findings(conn, scan_date: date, findings: list[dict]) -> list[dict]:
             # 批 154：published 顺带回填（存量行 NULL 补新值；grype 每轮全量带）
             conn.execute(
                 "UPDATE security_finding SET last_seen=%s, last_seen_at=clock_timestamp(), "
-                "fix_version=%s, severity=%s, "
+                "fix_version=%s, severity=%s, scanner='grype', "
                 "published_date=COALESCE(published_date, %s) "
-                "WHERE source='grype' AND pkg=%s AND vuln_id=%s",
+                "WHERE scanner='grype' AND pkg=%s AND vuln_id=%s",
                 (scan_date, f.get("fix_version"), f.get("severity"),
                  _parse_iso_date(f.get("published")), f["pkg"], f["vuln_id"]))
         else:
             zh, en = _describe(f)
             conn.execute(
+                # 批185 expand：**双写** scanner + source（旧代码仍读 source，可回滚）；
+                # 下一发布 contract 删 source 后只写 scanner
                 "INSERT INTO security_finding "
-                "(source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
+                "(scanner, source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
                 "last_seen_at, description, description_en, published_date) "
-                "VALUES ('grype', %s, %s, %s, %s, %s, %s, clock_timestamp(), %s, %s, %s)",
+                "VALUES ('grype', 'grype', %s, %s, %s, %s, %s, %s, clock_timestamp(), %s, %s, %s)",
                 (f["pkg"], f["vuln_id"], f.get("fix_version"), f.get("severity"),
                  scan_date, scan_date, zh or None, en or None,
                  _parse_iso_date(f.get("published"))))
@@ -997,6 +1003,7 @@ def run_security_scan(today: date | None = None) -> dict:
     vulns = _collect_vulns()
     # vulns 分区元数据入 components（A 区 DB 卡消费——快照表无 vulns 独立列，
     # components.python 键同款先例：分区外挂元数据走相邻 jsonb）
+    parts["components"]["scanner"] = vulns.get("scanner")   # 批185：能力状态随快照可见
     parts["components"]["vulns_db"] = {
         "state": vulns.get("db"), "built_at": vulns.get("db_built_at")}
     # 批170 根因修③：vulns 分区状态显式落库（此前只由「整体 degraded 且无其他分区」反推，
@@ -1076,10 +1083,10 @@ def run_security_scan(today: date | None = None) -> dict:
             _os_up = [("os", r["name"], str(r.get("cur") or ""), "") for r in _os_all]
             _upsert_components(conn, today, _os_up, pkg_mgr=_pkg_mgr)
         # 孤儿 GC：**仅本轮 ledger 非空**时执行（grype 失败 ⇒ ledger 空，否则会清空全表）。
-        # 首轮 7 天（存量 rpm/binary 从未清理过），稳定后回 3 天。
+        # 3 天未再见即退役（184 首轮已把 rpm/binary 的历史存量清完，不再需要 7 天宽限）。
         if _ledger:
             conn.execute("DELETE FROM security_component WHERE last_seen < %s",
-                         (today - _dt3.timedelta(days=7),))
+                         (today - _dt3.timedelta(days=3),))
         # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:

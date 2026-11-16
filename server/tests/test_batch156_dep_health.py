@@ -31,7 +31,7 @@ def test_alias_purge_and_global_gc(monkeypatch):
     src = inspect.getsource(sc.run_security_scan)
     assert '_LEGACY8' not in src, "运行期别名清理应已迁移到 0189"
     assert "DELETE FROM security_component WHERE last_seen < %s" in src
-    assert "timedelta(days=7)" in src        # 首轮 7 天（存量从未清过），稳定后回 3 天
+    assert "timedelta(days=3)" in src        # 3 天退役（184 首轮已清完存量）
 
 
 def test_managed_by_derived_covers_sbom_only():
