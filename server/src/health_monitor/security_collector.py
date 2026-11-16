@@ -532,6 +532,16 @@ def _update_db(env: dict) -> str:
         r = subprocess.run(["grype", "db", "update"], capture_output=True, text=True,
                            timeout=_DB_UPDATE_TIMEOUT, env=env, cwd="/tmp")
         if r.returncode == 0:
+            # 批185：记录**本地**拉取成功时刻（与上游 built_at 区分——前者答"我们多久没去拉"，
+            # 后者答"库本身多新"）。失败不影响扫描。
+            try:
+                import datetime as _dtb
+                from src.quant_common.redis_client import business_redis as _brb
+                _brb().set("sec:grype_db_updated_at",
+                           _dtb.datetime.now(_dtb.timezone.utc).isoformat(),
+                           ex=365 * 86400)
+            except Exception as _eb:
+                logger.warning("本地更新时间记录失败（不影响扫描）: %s", _eb)
             return "updated"
         logger.warning("grype DB 更新失败（用旧 DB 继续）: rc=%s %s",
                        r.returncode, r.stderr.strip()[:150])
@@ -585,6 +595,14 @@ def _collect_vulns() -> dict:
         # ④ cwd=/tmp + --source-name/version：syft 要逐级 stat 祖先目录推断 chroot
         #    上下文，worker cwd=shared/ 有权限断点（prod 实证）；source 参数消 WARN。
         db_state = _update_db(_env)   # 每次先 update（批 124 用户裁定——误报最小）
+        # 批185：本地拉取时刻（供 A 区「漏洞库」卡与上游构建时间并列展示）
+        try:
+            from src.quant_common.redis_client import business_redis as _brl
+            _rawl = _brl().get("sec:grype_db_updated_at")
+            part["db_local_updated_at"] = (_rawl.decode() if isinstance(_rawl, bytes)
+                                          else _rawl) or None
+        except Exception:
+            part["db_local_updated_at"] = None
         _sp = _site_packages()   # ledger 追链用（与 syft 同源）
         sbom_file = _SBOM_FILE   # 覆盖写，留最新一份供诊断（模块常量——测试可注）
         sbom = subprocess.run(
@@ -1044,7 +1062,8 @@ def run_security_scan(today: date | None = None) -> dict:
     # components.python 键同款先例：分区外挂元数据走相邻 jsonb）
     parts["components"]["scanner"] = vulns.get("scanner")   # 批185：能力状态随快照可见
     parts["components"]["vulns_db"] = {
-        "state": vulns.get("db"), "built_at": vulns.get("db_built_at")}
+        "state": vulns.get("db"), "built_at": vulns.get("db_built_at"),
+        "local_updated_at": vulns.get("db_local_updated_at")}
     # 批170 根因修③：vulns 分区状态显式落库（此前只由「整体 degraded 且无其他分区」反推，
     # 导致 vulns 降级被 components 降级掩盖、前端无从标注「这批漏洞是历史值」）
     parts["components"]["vulns_status"] = vulns.get("status") or "unknown"

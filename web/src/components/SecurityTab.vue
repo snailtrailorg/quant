@@ -73,8 +73,9 @@
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
-          <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
-          <div class="kpi-sub">{{ dbStateHint }}</div>
+          <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbLocalAt }}</span></div>
+          <div class="kpi-sub">{{ dbUpstreamAt }}</div>
+          <div v-if="dbStateHint" class="kpi-sub warn">{{ dbStateHint }}</div>
         </el-card>
       </div>
     </el-card>
@@ -497,20 +498,26 @@ const compHint = computed(() =>
   t('secpage.compMatch', { n: compRowsPaged.value.length, total: componentRows.value.length }))
 
 // A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
-// 批185：主值=**完整升级（构建）时间**，与「上次扫描」同款 toLocaleString（本地时区）；
-// 原只给日期 YYYY-MM-DD，看不出时效细粒度。>3 天由副文案标黄（上游日更 1 次，
-// 超龄=anchore 断更或 update 通道故障）。
-const dbBuiltDate = computed(() => {
-  const s = (snap.value?.vulns_db || {}).built_at
+// 批185：两个时间并列（用户裁定）——
+//   主值 = **本地拉取时刻**（最后一次 grype db update 成功；答「我们多久没去拉」）
+//   副行 = **上游构建时刻**（anchore DB 的 built time；答「库本身多新」）
+// 格式与「上次扫描」同款 toLocaleString（本地时区）。
+const dbLocalAt = computed(() => {
+  const s = (snap.value?.vulns_db || {}).local_updated_at
   return s ? new Date(s).toLocaleString() : '—'
 })
+const dbUpstreamAt = computed(() => {
+  const vd = snap.value?.vulns_db || {}
+  if (!vd.built_at) return ''
+  const days = Math.floor((Date.now() - new Date(vd.built_at).getTime()) / 86400000)
+  return t('secpage.dbUpstream', { t: new Date(vd.built_at).toLocaleString(), n: days })
+})
+// 只留异常态（正常不占行，避免与上面两行重复）
 const dbStateHint = computed(() => {
   const vd = snap.value?.vulns_db || {}
-  const days = vd.built_at
-    ? Math.floor((Date.now() - new Date(vd.built_at).getTime()) / 86400000) : null
   if (vd.state === 'update-failed') return t('secpage.dbUpdateFailed')
-  if (days === null) return t('secpage.dbUnknown')
-  return days > 3 ? t('secpage.dbStale', { n: days }) : t('secpage.dbFresh', { n: days })
+  if (!vd.built_at) return t('secpage.dbUnknown')
+  return ''
 })
 
 // 已修复行显式删除（批 126 用户裁定：弃隐藏 GC，行内操作可见可审——后端守卫

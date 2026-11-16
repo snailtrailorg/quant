@@ -91,6 +91,14 @@ def test_streak_read_resets_dirty_value():
     assert br.v == 0 and br.sets, "脏值未回写（下一轮仍会抛）"
 
 
+def test_local_db_update_time_recorded():
+    """漏洞库卡双时间：本地拉取时刻必须落键并随快照下发（上游 built_at 另存）。"""
+    import inspect
+    from src.health_monitor import security_collector as sc
+    assert "sec:grype_db_updated_at" in inspect.getsource(sc._update_db)
+    assert '"local_updated_at"' in inspect.getsource(sc.run_security_scan)
+
+
 def test_security_stale_alert_declared():
     """告警接线与 runbook：stale + recovered 两个 code 都要有处置说明。"""
     import inspect
