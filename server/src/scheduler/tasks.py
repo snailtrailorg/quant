@@ -1194,7 +1194,12 @@ def dep_audit():
                 elif isinstance(_c, str):
                     _lat = _c
             # managed_by 由域派生（os→repo），不再按「有无 latest」猜
-            jc, jw = _judge(ver, None, _lat, None, True, "repo")
+            # 批185：仓库里有此包但无升级候选 = **已最新**（current）——否则全部落
+            # 「unknown（上游不可达）」，这正是 prod unknown 的主要噪声源。
+            if _lat is None and nm in _repo:
+                jc, jw = "current", ""
+            else:
+                jc, jw = _judge(ver, None, _lat, None, True, "repo")
             os_batch.append((nm, ver, "OS " + _pm, _lat, _pm, jc, jw, _pm))
         try:
             # 批184a：source='os'（域）而非 'system'（判定来源）；origin/latest_source/pkg_mgr

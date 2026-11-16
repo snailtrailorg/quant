@@ -57,6 +57,18 @@ def test_collector_uses_registry_not_raw_which():
     assert 'shutil.which("grype")' not in src
 
 
+def test_audit_marks_current_when_repo_has_package():
+    """all_repos 必须进**写表**判定（不只展示）：仓库有包+无升级候选 ⇒ current。
+
+    只接展示侧会出现「页面 current / 表里 unknown」两套口径（184 审核抓过的同类病）。
+    """
+    import inspect
+    from src.scheduler import tasks
+    s = inspect.getsource(tasks.dep_audit)
+    assert "_lat is None and nm in _repo" in s
+    assert '"current", ""' in s
+
+
 @needs_db
 def test_finding_scanner_expanded_and_backfilled():
     """expand 步：scanner 列在且已回填；source 仍保留（双写期，contract 删列另批）。"""
