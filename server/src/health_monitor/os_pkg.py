@@ -235,3 +235,40 @@ def pypi_versions(name: str, base=None, timeout: int = 10) -> dict:
             ver_yanked[v] = False
     return {"versions": sorted(v for v, y in ver_yanked.items() if not y),
             "yanked": sorted(v for v, y in ver_yanked.items() if y)}
+
+# ── 外部工具探测（批185：从 scanners.py 并入——同属「外部能力是否在位」）─────────────
+# 说明：**这不是注册表**。注册表在本仓指 `src/registry/`（D32 的 (domain, provider)
+# 插件注册，带 manifest/port_caps）。此处只做「命令存在性探测」，消费者仅安全采集
+# （security_collector），不进 health_monitor 的规则链（那条链管服务/资源，响应是重启；
+# 扫描器缺失的响应是装二进制/查 DB/重扫，属安全域，告警走 security.stale）。
+import shutil as _shutil
+
+_TOOL_REQUIRED = ("grype", "syft")
+
+
+class Scanner:
+    """扫描器能力接口：id / missing() / status()。"""
+
+    id = "none"
+
+    def missing(self) -> list[str]:
+        return list(_TOOL_REQUIRED)
+
+    def status(self) -> dict:
+        miss = self.missing()
+        return {"id": self.id, "available": not miss,
+                "reason": "" if not miss else "缺少二进制: " + ", ".join(miss)}
+
+
+class GrypeScanner(Scanner):
+    """grype + syft 组合（SBOM 生成 + CVE 匹配），批 123 单源终裁。"""
+
+    id = "grype"
+
+    def missing(self) -> list[str]:
+        return [b for b in _TOOL_REQUIRED if not _shutil.which(b)]
+
+
+def detect_scanner() -> Scanner:
+    """唯一探测入口（命令存在性优先）。返回实例不代表可用——读 status()。"""
+    return GrypeScanner()

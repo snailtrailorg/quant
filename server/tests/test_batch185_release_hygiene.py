@@ -35,18 +35,39 @@ def test_dnf_provider_exposes_repo_packages():
 
 
 def test_scanner_reports_missing_binaries(monkeypatch):
-    import src.health_monitor.scanners as s
-    monkeypatch.setattr(s.shutil, "which", lambda b: None)
-    st = s.detect_scanner().status()
+    """工具探测原语（os_pkg.detect_scanner）——**不是注册表**，只做 which 单入口。"""
+    import src.health_monitor.os_pkg as o
+    monkeypatch.setattr(o._shutil, "which", lambda b: None)
+    st = o.detect_scanner().status()
     assert st["available"] is False
     assert "grype" in st["reason"] and "syft" in st["reason"]
 
 
 def test_scanner_available_when_present(monkeypatch):
-    import src.health_monitor.scanners as s
-    monkeypatch.setattr(s.shutil, "which", lambda b: "/usr/local/bin/" + b)
-    st = s.detect_scanner().status()
+    import src.health_monitor.os_pkg as o
+    monkeypatch.setattr(o._shutil, "which", lambda b: "/usr/local/bin/" + b)
+    st = o.detect_scanner().status()
     assert st["available"] is True and st["reason"] == ""
+
+
+def test_scanner_not_in_health_rule_chain():
+    """扫描器缺失**不进** health_monitor 的 R 系列（那条链响应是重启服务；
+    工具缺失响应是装二进制/查 DB/重扫 ⇒ 归安全域 security.stale）。"""
+    import inspect
+    from src.health_monitor import monitor, collector
+    assert "scanner_unavailable" not in inspect.getsource(monitor)
+    assert 'snap["scanner"]' not in inspect.getsource(collector.collect)
+
+
+def test_security_stale_alert_declared():
+    """安全采集停摆告警：安全域、连续 2 轮 degraded、沿触发。"""
+    import inspect
+    from src.health_monitor import security_collector as sc
+    from src.alert_notify.runbook import RUNBOOK
+    s = inspect.getsource(sc.run_security_scan)
+    assert 'security.stale' in s
+    assert "sec:vulns_degraded_streak" in s and "_cur_n == 2" in s
+    assert "security.stale" in RUNBOOK
 
 
 def test_collector_uses_registry_not_raw_which():

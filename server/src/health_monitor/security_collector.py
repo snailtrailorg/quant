@@ -553,8 +553,8 @@ def _collect_vulns() -> dict:
     """
     part: dict = {"status": "ok"}
     try:
-        # 批185：走扫描器注册（唯一探测入口）——不再散落 which；缺失原因进 status
-        from src.health_monitor.scanners import detect_scanner
+        # 批185：走工具探测单入口（os_pkg.detect_scanner）——不再散落 which；缺失原因进 status
+        from src.health_monitor.os_pkg import detect_scanner
         _sc = detect_scanner()
         part["scanner"] = _sc.status()
         if not part["scanner"]["available"]:
@@ -1130,6 +1130,24 @@ def run_security_scan(today: date | None = None) -> dict:
         {"zone": z, "reason": (p.get("degraded_reason") or "采集失败")}
         for z, p in (*parts.items(), ("vulns", vulns)) if p.get("status") == "degraded"
     ]
+    # 批185：**安全采集停摆告警**（属安全域，不进 health_monitor 的 R 系列——
+    # R 系列响应是「重启服务」，本条的响应是「装扫描器/查 grype DB/重扫」）。
+    # 判定单源=本轮 vulns 分区状态（与页面 degraded 同源，不另造真源）；
+    # 连续 2 轮才报（单轮抖动不打扰），沿触发（streak==2 发一次，持续态不重复）。
+    try:
+        from src.quant_common.redis_client import business_redis as _brs
+        _brs_c = _brs()
+        _k_streak = "sec:vulns_degraded_streak"
+        _prev_n = int(_brs_c.get(_k_streak) or 0)
+        _cur_n = _prev_n + 1 if vulns.get("status") == "degraded" else 0
+        _brs_c.set(_k_streak, _cur_n, ex=7 * 86400)
+        if _cur_n == 2:
+            _alert("security.stale", "安全扫描停摆",
+                   f"连续 2 轮 vulns 分区 degraded：{vulns.get('degraded_reason') or '采集失败'}——"
+                   f"装扫描器见 bootstrap.yml 在位断言；查 grype DB 与 worker 日志后手动重扫")
+    except Exception as e:
+        logger.warning("停摆告警判定失败（不影响扫描）: %s", e)
+
     if status == "degraded" or fresh or diff_items:
         ai_summary = _ai_summary(today, fresh, diff_items, degraded_zones)
     if ai_summary:
