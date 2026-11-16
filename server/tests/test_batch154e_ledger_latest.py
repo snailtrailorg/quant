@@ -17,9 +17,13 @@ class TestLedgerLatest:
         assert "_dep_health_summary" in src and "has_update" in src
         assert "stale_days" in src and "latest_version" in src
 
-    def test_rpm_known_domain(self):
+    def test_os_latest_comes_from_judged_only(self):
+        """批184b：os 域 latest 只认 judged（8 别名常量随 184a 删除）——
+        不得用 version 冒充「已最新」，否则 unknown 的包会被显示成无更新。"""
         src = inspect.getsource(sec.security_snapshot)
-        assert '"python", "nginx", "openssl", "postgres", "redis"' in src
+        code = "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
+        assert 'elif _r["source"] == "pip"' in code
+        assert "_RPM_KNOWN" not in code
 
     def test_outdated_error_keyword_purged(self):
         """批184a：脏行源头（sys_rows 直通）已删——元键不可能再入台账，无需运行期自愈清单。"""

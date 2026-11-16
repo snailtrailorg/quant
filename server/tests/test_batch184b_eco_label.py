@@ -55,6 +55,16 @@ def test_eco_i18n_keys_in_three_locales():
         assert n == 3, f"{key} 词条 {n} 处（应 3：zh/en/zh-TW）"
 
 
+def test_snapshot_projects_pkg_mgr():
+    """snapshot 端点的台账投影必须带 pkg_mgr —— 白名单漏字段会让前端恒显「系统包」。"""
+    import inspect
+    from src.web_api.routes import security as sec
+    s = inspect.getsource(sec.security_snapshot)
+    code = "\n".join(ln for ln in s.splitlines() if not ln.strip().startswith("#"))
+    assert '"pkg_mgr": _r.get("pkg_mgr")' in code
+    assert "_RPM_KNOWN" not in code, "8 别名常量已随 184a 退役（死代码）"
+
+
 def test_ui_renders_eco_column():
     """D 区生态列必须用 source+pkg_mgr（不得回落到 managed_by 单值）。"""
     p = pathlib.Path(__file__).resolve().parents[2] / "web" / "src" / "components" / "SecurityTab.vue"

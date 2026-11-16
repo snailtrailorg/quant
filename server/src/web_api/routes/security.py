@@ -278,12 +278,14 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         return str(x).lower().replace("_", "-")
 
     _out_map = {_nm(o["name"]): o["latest"] for o in (snap.get("components") or {}).get("outdated") or []}
-    _RPM_KNOWN = {"python", "nginx", "openssl", "postgres", "redis"}
+    # 批184b：`_RPM_KNOWN`（python/nginx/... 8 别名）随 184a 删除——真实包名是
+    # python3.11/postgresql-server，别名永不命中等于死代码。os 域 latest 只认 judged
+    # （unknown ⇒ None，前端显「—」，不假声称已最新）。
     for _r in ledger_rows:
         _k = _nm(_r["name"])
         if _k in _out_map:
             _r["latest"] = _out_map[_k]
-        elif _r["source"] == "pip" or _k in _RPM_KNOWN:
+        elif _r["source"] == "pip":
             _r["latest"] = _r["version"]
         else:
             _r["latest"] = None
@@ -345,6 +347,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
               "origin": _r["origin"] or "", "last_changed": _r["last_changed"].isoformat(),
               "latest_version": _r.get("latest_version"),
               "managed_by": _r.get("managed_by"),
+              "pkg_mgr": _r.get("pkg_mgr"),      # 批184b：实现（dnf/apt）——生态列靠它区分
               "judge_class": _r.get("judge_class"),
               "judge_why": _r.get("judge_why") or "",
               "has_update": _hu(_r.get("judge_class")),
