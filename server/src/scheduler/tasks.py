@@ -1229,7 +1229,10 @@ def dep_audit():
                    "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
                    "n_undeclared": len(undeclared)},
         "last_complete": {"run_id": run_id, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
-        "os": {"installed": os_installed, "upgrades": os_upgrades},
+        # 批184a：pkg_mgr/installed_n 随契约下发——此前缺这两个键 ⇒ 台账 pkg_mgr 永远 NULL
+        # （生态列只能显示「系统包」）、且 `pkg_mgr == "unsupported"` 降级分支永不触发（fail-open）
+        "os": {"installed": os_installed, "upgrades": os_upgrades,
+               "pkg_mgr": _pm, "installed_n": len(os_installed)},
         "constraints": constraints, "dev_names": dev_names,
         "errors": errors[:5],
     }

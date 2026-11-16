@@ -261,13 +261,15 @@ def _upsert_components(conn, scan_date: date,
             elif row[0] != version:
                 conn.execute(
                     "UPDATE security_component "
-                    "SET version=%s, last_changed=%s, last_seen=%s, origin=%s, " + J_UPD +
+                    "SET version=%s, last_changed=%s, last_seen=%s, "
+                    "origin=COALESCE(NULLIF(%s, ''), origin), " + J_UPD +
                     "WHERE source=%s AND name=%s",
                     (version, scan_date, scan_date, origin) + jv + (source, name))
                 _n_upd += 1
             else:
                 conn.execute(
-                    "UPDATE security_component SET last_seen=%s, origin=%s, " + J_UPD +
+                    "UPDATE security_component SET last_seen=%s, "
+                    "origin=COALESCE(NULLIF(%s, ''), origin), " + J_UPD +
                     "WHERE source=%s AND name=%s",
                     (scan_date, origin) + jv + (source, name))
                 _n_upd += 1
@@ -359,6 +361,10 @@ def _collect_components() -> dict:
         # 只读台账/契约、零联网；requirements 仅用于判 pinned，不决定采集范围。
         os_c = contract.get("os") or {}
         # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
+        if _sv != 2:
+            # 契约 schema 1（降级/旧轮）没有全量 OS 行 ⇒ 本页 OS 面为空。fail-open 必须留痕，
+            # 否则「页面上系统包消失」会被误读为「机器上没装」。
+            logger.warning("dep 契约 schema_version=%s（非 2）——OS 全量行不可用，本页无系统包", _sv)
         if _sv == 2:
             _upg_all = dict(os_c.get("upgrades") or {})
             _repos = os_c.get("all_repos") or {}
@@ -1065,8 +1071,9 @@ def run_security_scan(today: date | None = None) -> dict:
         import datetime as _dt3
         _os_all = [r for r in _dh_rows if r.get("group") == "os"]
         if _os_all:
-            _os_up = [("os", r["name"], str(r.get("cur") or ""),
-                       "OS " + (_pkg_mgr or "unknown")) for r in _os_all]
+            # origin 传空 = **不覆盖**：SBOM 行已推导出依赖链（「ffmpeg 哪来的」），
+            # 用「OS dnf」覆盖会让 D 区「依赖关系」列整列变空（批184a 审核发现）
+            _os_up = [("os", r["name"], str(r.get("cur") or ""), "") for r in _os_all]
             _upsert_components(conn, today, _os_up, pkg_mgr=_pkg_mgr)
         # 孤儿 GC：**仅本轮 ledger 非空**时执行（grype 失败 ⇒ ledger 空，否则会清空全表）。
         # 首轮 7 天（存量 rpm/binary 从未清理过），稳定后回 3 天。

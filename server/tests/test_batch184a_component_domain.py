@@ -28,7 +28,10 @@ def test_domain_values_closed():
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         rows = conn.execute("SELECT DISTINCT source FROM security_component").fetchall()
+        n = conn.execute("SELECT count(*) FROM security_component").fetchone()[0]
     assert {r[0] for r in rows} <= {"pip", "os", "binary"}, rows
+    if n:                      # 空表时 ⊆ 自动成立，形同虚设——有行就必须含 os 域
+        assert "os" in {r[0] for r in rows}, rows
 
 
 @needs_db
@@ -85,6 +88,24 @@ def test_upsert_separates_domain_from_impl():
         conn.execute("DELETE FROM security_component WHERE name=%s", (probe,))
         conn.commit()
     assert row == ("os", "apt", "repo"), row
+
+
+@needs_db
+def test_os_upsert_keeps_sbom_origin():
+    """OS 行 upsert 不得覆盖 SBOM 推导出的 origin（否则 D 区「依赖关系」整列变空）。"""
+    from src.data_platform.db import get_conn
+    from src.health_monitor import security_collector as sc
+    probe = "__b184a_origin__"
+    with get_conn() as conn:
+        conn.execute("DELETE FROM security_component WHERE name=%s", (probe,))
+        sc._upsert_components(conn, _dt.date.today(),
+                              [("os", probe, "1.0", "PySide6/lib/libffmpeg.so")], pkg_mgr="dnf")
+        sc._upsert_components(conn, _dt.date.today(), [("os", probe, "1.0", "")], pkg_mgr="dnf")
+        row = conn.execute("SELECT origin FROM security_component WHERE name=%s",
+                           (probe,)).fetchone()
+        conn.execute("DELETE FROM security_component WHERE name=%s", (probe,))
+        conn.commit()
+    assert row[0] == "PySide6/lib/libffmpeg.so", row
 
 
 def test_gc_not_scoped_by_source():

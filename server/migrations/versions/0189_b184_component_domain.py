@@ -85,5 +85,5 @@ def downgrade() -> None:
     op.execute("ALTER TABLE security_component DROP CONSTRAINT IF EXISTS ck_sc_pkg_mgr")
     op.execute("ALTER TABLE security_component DROP CONSTRAINT IF EXISTS ck_sc_domain")
     op.execute("UPDATE security_component SET source = 'rpm' WHERE source = 'os'")
-    op.execute("UPDATE security_component SET managed_by = NULL")
+    # managed_by 保持现值（回滚后旧代码仍用它渲染「安装途径」；清零会造成可见退化）
     op.drop_column("security_component", "pkg_mgr")

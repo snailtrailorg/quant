@@ -428,7 +428,7 @@ const componentRows = computed(() => {
   // 前端不再重复聚合——此前前端 vc 与后端各算一次，易口径漂移。
   return led.map(r => ({
     ...r, vuln_count: r.vuln_count ?? 0,
-    dep_chain: (r.origin && r.origin.includes('→')) ? r.origin : '',   // 依赖链子集（途径语义由 managed_by 列接管）
+    dep_chain: (r.origin && r.origin.includes('→')) ? r.origin : '',   // 依赖链子集（生态语义由 source+pkg_mgr 列接管）
   }))
 })
 // 安装途径中文映射（managed_by 值域：repo/pypi/local/none；空=未判定）
@@ -450,9 +450,11 @@ const ecoText = row => {
 const ecoTagType = s => ({ pip: 'success', os: 'warning', binary: 'info' }[s] || 'info')
 // 行筛选组（Audit 范式）：来源类型（distinct 预取）× 漏洞状态（固定枚举）
 const compFilterGroups = computed(() => {
-  const srcs = [...new Set(componentRows.value.map(r => r.managed_by).filter(Boolean))].sort()
+  const srcs = [...new Set(componentRows.value.map(r => r.source).filter(Boolean))].sort()
   return [
-    { key: 'source', label: t('secpage.installVia'), options: srcs.map(s => ({ value: s, label: managedByText(s) })) },
+    // 批184b：按**域**筛（与生态列同维度）——原按 managed_by 筛会让选项文案与列不一致
+    { key: 'source', label: t('secpage.domain'),
+      options: srcs.map(s => ({ value: s, label: ecoText({ source: s }) })) },
     { key: 'vuln', label: t('secpage.vulnState'), options: [
       { value: 'yes', label: t('secpage.hasVuln') },
       { value: 'no', label: t('secpage.noVulnOpt') },
@@ -483,7 +485,7 @@ const compRowsShown = computed(() => {
   const source = rf.source ?? []
   const upd = rf.upd ?? []
   const rows = all.filter(r =>
-    (!source.length || source.includes(r.managed_by)) &&
+    (!source.length || source.includes(r.source)) &&
     (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)) &&
     (!upd.length || upd.includes(r.has_update)))   // 三态可筛（是/否/未知）
   if (!compFilter.value.trim()) return rows

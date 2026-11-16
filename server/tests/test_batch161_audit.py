@@ -145,6 +145,10 @@ def test_full_chain_beat_done_and_contract(monkeypatch):
     contract = json.loads(store["sec:dep_audit"])
     assert contract["counts"]["n_os"] == 1
     assert contract["os"]["installed"], "os 段非空（P0-1 防复发）"
+    # 批184a：实现标识必须随契约下发——缺它台账 pkg_mgr 永远 NULL、
+    # 且 Unsupported 的降级分支（os.pkg_mgr == "unsupported"）永不触发
+    assert "pkg_mgr" in contract["os"] and contract["os"]["pkg_mgr"]
+    assert contract["os"]["installed_n"] == 1
 
 
 def test_full_chain_running_mutex(monkeypatch):
