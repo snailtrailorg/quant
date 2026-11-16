@@ -204,6 +204,28 @@ def _norm_key(name: str) -> str:
     return _re.sub(r"[-_.]+", "-", str(name)).lower()
 
 
+def judged_map_of(rows: list[dict]) -> dict:
+    """dep_health 行 → 判定表，**键带 source**（批183d：同名跨源不互覆盖）。
+
+    源词表与台账一致：ledger 用 pip/rpm/binary；OS 行另以 source='system' 入库
+    ⇒ group='os' 的行同时挂 ("system",k) 与 ("rpm",k) 两键。
+    背景：Python `tzdata`（PyPI 2026.6）与 rpm `tzdata` 同名，原按名建表让后追加的
+    OS 行覆盖 pip 行 → pip 行 managed_by 变 repo、latest 仍留 PyPI 版本 ⇒ 页面「有新版
+    但 dnf 无更新」的误报。
+    """
+    out: dict = {}
+    for r in rows:
+        k = _norm_key(r["name"])
+        v = (r.get("latest"), r.get("managed_by"),
+             r.get("judge_class"), r.get("judge_why"))
+        if r.get("group") == "os":
+            out[("system", k)] = v
+            out[("rpm", k)] = v
+        else:
+            out[("pip", k)] = v
+    return out
+
+
 def _upsert_components(conn, scan_date: date,
                        rows: list[tuple[str, str, str, str]],
                        judged: dict | None = None) -> None:
@@ -1041,7 +1063,7 @@ def run_security_scan(today: date | None = None) -> dict:
             _dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
             # 批 156 修：键 norm 化——rpm 名下划线/大小写（libcom_err/perl-Net-SSLeay）经
             # _norm_key 转连字符小写后才能命中（昨日 69 行差集的根因=原名键 vs norm 查表失配）
-            _gm = {_norm_key(r["name"]): (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _dh_rows}
+            _gm = judged_map_of(_dh_rows)      # 批183d：键带 source（同名跨源不互覆盖）
             for _lr in (vulns.get("ledger") or []):
                 _nm = _norm_key(_lr[1]) if len(_lr) > 1 and _lr[1] else None
                 if _nm and _nm not in _gm:
@@ -1059,7 +1081,9 @@ def run_security_scan(today: date | None = None) -> dict:
                 from src.quant_common.depjudge import priority_refresh_names as _prn
                 from src.quant_common.redis_client import business_redis as _br2
                 _pipv = (parts.get("components") or {}).get("pip") or {}
-                _latm = {_norm_key(r["name"]): r.get("latest") for r in _dh_rows}
+                # 批183d：只取 pip 生态（原按名建表——同名 OS 行 latest=None 会盖掉 pip 的）
+                _latm = {k[1]: v[0] for k, v in _gm.items()
+                         if k[0] == "pip" and v[0]}
                 _prio = _prn(vulns.get("findings") or [], _pipv, _latm)
                 _pk = "sec:dep_refresh:priority"
                 if _prio:
@@ -1097,11 +1121,7 @@ def run_security_scan(today: date | None = None) -> dict:
         dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
         # 批183d：key 带 source——同名跨源（Python tzdata vs rpm tzdata）不得互相覆盖
         # （实测 pip tzdata 的 managed_by 被 OS 行写成 repo，dnf 却无更新=误报）。
-        judged_map = {
-            (("system" if r.get("group") == "os" else "pip"), _norm_key(r["name"])):
-                (r.get("latest"), r.get("managed_by"),
-                 r.get("judge_class"), r.get("judge_why"))
-            for r in dh_rows}
+        judged_map = judged_map_of(dh_rows)   # 批183d：键带 source（同名跨源不互覆盖）
         import datetime as _dt3
         _os_all = [r for r in dh_rows if r.get("group") == "os"]
         if _os_all:
