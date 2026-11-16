@@ -226,7 +226,7 @@ def _upsert_components(conn, scan_date: date,
              "checked_at=GREATEST(COALESCE(checked_at, %s), %s) ")
     for source, name, version, origin in rows:
         try:
-            j = (judged or {}).get(_norm_key(name))
+            j = (judged or {}).get((source, _norm_key(name)))   # 批183d：带 source 防同名跨源覆盖
             if j:
                 jv = (j[1], now_ts, now_ts)      # managed_by + 双 now_ts（判定列归 audit）
             else:
@@ -1095,9 +1095,13 @@ def run_security_scan(today: date | None = None) -> dict:
             if k not in ("pip", "status", "dep_audit_at", "outdated_error") and isinstance(v, str) and v
         ]
         dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-        judged_map = {_norm_key(r["name"]): (r.get("latest"), r.get("managed_by"),
-                       r.get("judge_class"), r.get("judge_why"))
-                      for r in dh_rows}
+        # 批183d：key 带 source——同名跨源（Python tzdata vs rpm tzdata）不得互相覆盖
+        # （实测 pip tzdata 的 managed_by 被 OS 行写成 repo，dnf 却无更新=误报）。
+        judged_map = {
+            (("system" if r.get("group") == "os" else "pip"), _norm_key(r["name"])):
+                (r.get("latest"), r.get("managed_by"),
+                 r.get("judge_class"), r.get("judge_why"))
+            for r in dh_rows}
         import datetime as _dt3
         _os_all = [r for r in dh_rows if r.get("group") == "os"]
         if _os_all:
