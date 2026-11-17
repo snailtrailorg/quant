@@ -113,7 +113,8 @@ class TdExec:
         self._ee = ee
         boot_epoch = int(time.time())
         # 账号级号段注入：client_id 固定 2（每进程单连接，账号内唯一即可）；order_prefix 带 account+epoch。
-        rt = build_td_runtime(provider, ee, str(self.account_id), self.account_id, boot_epoch,
+        # tid 传 int：session_slot._terminal_for 做 (tid-1)%98+2 算术（str 会 TypeError）
+        rt = build_td_runtime(provider, ee, self.account_id, self.account_id, boot_epoch,
                               client_id=2, order_prefix=f"a{self.account_id}:e{boot_epoch}:")
         if rt is None:
             raise RuntimeError(f"TD builder {provider} 未注册（账号 {self.account_id}）")

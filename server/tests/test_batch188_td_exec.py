@@ -195,6 +195,32 @@ def test_sa4_stops_non_desired_td_exec():
     assert ("stop", "quant-td-exec@9.service") in calls
 
 
+# ——— 建连入参：tid 必须是 int ———
+# 钉反面：session_slot._terminal_for 做 (tid-1)%98+2；传 str 在 prod 直接 TypeError 崩进程
+# （单测全绿也看不见——此处断言实际调用参数类型）。
+
+def test_build_passes_int_tid():
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.account_id = 1
+    ex._row = {"provider": "xtp", "impl": "plugin"}
+    ex._quote_account = 1
+    captured = {}
+    rt = {"adapter": MagicMock(), "td_api": MagicMock(), "gw": MagicMock(),
+          "exec_port": MagicMock()}
+
+    def _fake(provider, ee, tid, account_id, boot_epoch, **kw):
+        captured["tid"] = tid
+        return rt
+
+    with patch("src.strategy_runner.main.make_event_engine", return_value=MagicMock()), \
+         patch("src.strategy_runner.td_registry.build_td_runtime", side_effect=_fake), \
+         patch("src.strategy_runner.trading.reconcile_orders"), \
+         patch("src.strategy_runner.hub_worker.EmergencyWorker", return_value=MagicMock()):
+        ex._build()
+    assert isinstance(captured["tid"], int) and captured["tid"] == 1
+
+
 # ——— 每日连接窗：盘外启动必须窗开沿建连 ———
 # 钉反面：进程在窗关时启动 → _build 的 connect() 跳过；若主循环没有这一腿，
 # 当日开盘零 TD 会话（下单全拒且进程无报错），systemd 凌晨重启即触发。
