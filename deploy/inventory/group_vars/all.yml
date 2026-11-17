@@ -17,6 +17,7 @@ deploy_slices: [src, migrations, scripts/systemd, requirements.txt, requirements
                                      # 注：scripts/ 非 systemd 子树=按需脚本（backup/init 等），新起进程经 run-current 即取新树，
                                      # 故意不入指纹；shared/.env 与 shared/venv 管道外（quant 600 不可读），改它们须 -e force_full=true
 deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显式开；沙箱 web 桩无端点）
+deploy_td_exec_units: []              # 批188：preflight 枚举在跑 td-exec 实例后覆写（无实例=空波跳过）
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
 deploy_sync_whitelist:

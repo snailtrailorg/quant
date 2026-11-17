@@ -286,6 +286,19 @@
       register: hub_units_systemd
       changed_when: false
 
+    # 批188：td-exec 是账号级常驻进程，不属 DB 波次清单；但**必须纳入波次重启**——
+    # 否则旧进程钉旧 release，阶段 8 版本收敛断言（quant-pinned 枚举全部 quant-* 单元）必失败→自动回滚。
+    # 对象=在跑实例（无实例=空波跳过，全新环境/账号禁用态合法）。
+    - name: preflight —— td-exec 在跑实例枚举（波次对象；账号级常驻进程）
+      ansible.builtin.shell: "systemctl list-units 'quant-td-exec@*.service' --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | sort"
+      register: td_exec_units_live
+      changed_when: false
+      failed_when: false
+
+    - name: preflight —— td-exec 波次清单解析
+      ansible.builtin.set_fact:
+        deploy_td_exec_units: "{{ td_exec_units_live.stdout_lines | default([]) }}"
+
   tasks:
     # ================= 阶段 2-5：未切换（rescue=清 staged + fail） =================
     - name: 阶段 2-5（未切换）

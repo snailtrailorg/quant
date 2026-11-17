@@ -46,6 +46,10 @@ deploy_waves:
     units: "{{ deploy_task_units_live }}"     # DB 真相源（live_task active），不收 active 单元（幽灵前科）
   - name: hub
     units: "{{ deploy_hub_units }}"     # 批 66b：preflight DB 驱动期望集（dbro hub→provider 白名单过滤）
+  # 批188：账号级常驻 TD 执行进程。对象=在跑实例（preflight shell 枚举）——不随 DB 波次清单，
+  # 但必须计入波次：否则旧进程钉旧 release → 阶段 8 版本收敛断言必失败 → 每次发布自动回滚。
+  - name: td_exec
+    units: "{{ deploy_td_exec_units | default([]) }}"
 deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
 
 # ---- 验证参数 ----

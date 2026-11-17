@@ -120,6 +120,18 @@
     deploy_hub_units: ['quant-md-hub@quant.service']
   when: rb_legacy_concrete.stat.exists | default(false)
 
+# 批188：td-exec 波清单同样须在回滚前采集——独立入口缺少它则 td-exec 不随波次重启，
+# 仍钉新 release → 回滚复验版本收敛断言失败（与 release 侧 preflight 同源：在跑实例）。
+- name: 回滚 pre —— td-exec 在跑实例枚举
+  ansible.builtin.shell: "systemctl list-units 'quant-td-exec@*.service' --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | sort"
+  register: rb_td_exec_units
+  changed_when: false
+  failed_when: false
+
+- name: 回滚 pre —— td-exec 波清单解析
+  ansible.builtin.set_fact:
+    deploy_td_exec_units: "{{ rb_td_exec_units.stdout_lines | default([]) }}"
+
 - name: 回滚 —— 波次对象解析（名单 → deploy_waves 全对象，供 include_tasks/wave.yml）
   ansible.builtin.set_fact:
     rollback_waves_resolved: "{{ deploy_waves | selectattr('name', 'in', rb_wave_names) | list }}"
