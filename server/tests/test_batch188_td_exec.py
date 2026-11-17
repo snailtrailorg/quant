@@ -195,6 +195,24 @@ def test_sa4_stops_non_desired_td_exec():
     assert ("stop", "quant-td-exec@9.service") in calls
 
 
+# ——— 停机纪律：必须带码硬退出 ———
+# 钉反面：vnpy EventEngine 线程非 daemon → 仅 return 时进程不退出，
+# systemd 等满 TimeoutStopSec(90s) SIGKILL → Result=timeout → OnFailure 误告警。
+
+def test_shutdown_stops_engine_and_exits():
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.account_id = 1
+    ex._r = MagicMock()
+    ex._close_thread = None
+    ex._ee = MagicMock()
+    with patch("src.td_exec.main.os._exit") as _exit:
+        ex._shutdown()
+    ex._ee.stop.assert_called_once()
+    _exit.assert_called_once_with(0)
+    ex._r.delete.assert_called_once()
+
+
 # ——— 建连入参：tid 必须是 int ———
 # 钉反面：session_slot._terminal_for 做 (tid-1)%98+2；传 str 在 prod 直接 TypeError 崩进程
 # （单测全绿也看不见——此处断言实际调用参数类型）。

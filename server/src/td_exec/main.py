@@ -325,6 +325,17 @@ class TdExec:
             self._r.delete(ALIVE_KEY.format(account=self.account_id))
         except Exception:  # noqa: S110
             pass
+        # 硬退出（md_hub 同款）：vnpy EventEngine 线程非 daemon、XTP SDK 自带线程，
+        # 仅 return 不退出 → systemd 等满 TimeoutStopSec(90s) SIGKILL → Result=timeout
+        # → OnFailure 误告警。清理已在上方完成，此处直接带码退出。
+        try:
+            _ee = getattr(self, "_ee", None)
+            if _ee is not None:
+                _ee.stop()
+        except Exception:  # noqa: S110
+            pass
+        logging.shutdown()
+        os._exit(0)
 
 
 def _install_signal(stop: threading.Event) -> None:
