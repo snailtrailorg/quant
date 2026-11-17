@@ -156,12 +156,36 @@ class RiskControl:
         """⚠️ 永远直读 Valkey，禁止 self._halted 内存缓存。"""
         return self._redis.get(self._HALT_KEY) == "1"
 
-    def emergency_halt(self, reason: str = "manual") -> None:
-        """一键熔断：停止所有自动开仓。批 171o：补写 halt_ts（恢复钮 <5min 置灰的时钟源）。"""
+    def emergency_halt(self, reason: str = "manual", *, operator_uid: int | None = None) -> None:
+        """一键熔断：停止所有自动开仓。批 171o：补写 halt_ts（恢复钮 <5min 置灰的时钟源）。
+
+        批187（v11 触发执行解耦）：置 3 键后 LPUSH 持久化事件 `risk:halt:trigger`，
+        由 halt_dispatch 高频任务统一派发撤单+建进度看板——三源（web/飞书/LLM/自动）
+        只负责"触发"，执行走同一套机制，web 统一显示。never-raise（熔断本身不可因事件失败）。
+        `sync_dispatched`：web 路径已同步派 cancel-all 时为 True（消费者跳过）。
+        """
+        import json as _json
         import time as _t
+        _ts = _t.time()
         self._redis.set(self._HALT_KEY, "1")
         self._redis.set(self._HALT_REASON_KEY, reason)
-        self._redis.set(self._HALT_TS_KEY, str(_t.time()))
+        self._redis.set(self._HALT_TS_KEY, str(_ts))
+        # 触发源解析：reason 前缀 Web:/飞书:/close-all:/LLM:，无前缀归 system
+        _source = "system"
+        for _p in ("Web", "飞书", "close-all", "LLM"):
+            if str(reason).startswith(_p + ":"):
+                _source = _p
+                break
+        # web 路径同步派发标记：Web: 前缀=web 端点已即时派 cancel-all
+        _sync = _source == "Web"
+        try:
+            self._redis.lpush("risk:halt:trigger", _json.dumps({
+                "reason": str(reason), "source": _source, "halt_ts": _ts,
+                "operator_uid": operator_uid, "sync_dispatched": _sync,
+            }, ensure_ascii=False))
+            self._redis.expire("risk:halt:trigger", 300)
+        except Exception as e:   # noqa: BLE001 —— 事件写入失败不影响熔断本身
+            logger.warning("熔断触发事件写入失败（熔断仍生效，靠沿兜底止血）: %s", e)
         logger.critical(f"熔断触发: {reason}")
 
     def resume(self) -> None:

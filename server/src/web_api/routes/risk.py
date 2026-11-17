@@ -196,13 +196,17 @@ def risk_halt(payload: dict = Depends(require_perm("halt"))):
     与 runner 侧 halt_edge_cancel 沿撤单双保险——沿判定幂等，已熔断再点=只撤单）。"""
     from src.risk_control import RiskControl
     from src.web_api.errors import ApiError
-    RiskControl.get().emergency_halt(f"Web:{payload['username']}")
+    _uid = _operator_uid(payload)
+    # 批187：web 触发标记 sync_dispatched=True——emergency_halt 发事件后 halt_dispatch 会跳过，
+    # web 在此同步派 cancel-all（有 payload，即时返回 r.cancel 给前端）。
+    RiskControl.get().emergency_halt(f"Web:{payload['username']}", operator_uid=_uid)
     audit_log(payload["username"], "emergency_halt", detail="web button (halt then cancel-all)")
     # 2026-11-09（171n e2e）：halt 是**全局止血**——无活动 runner/撤单下发失败绝不
     # 反过来让 halt 请求失败（原实现 dispatch 抛 409 时 halted 已置位，前端却收到失败=
     # 状态与回执矛盾）。撤单降级为 best-effort，结果随回执带回。
     try:
-        cancel_out = _dispatch_risk_cmd("cancel-all", payload)
+        cancel_out = _dispatch_risk_cmd("cancel-all", payload,
+                                        username=payload["username"], operator_uid=_uid)
     except ApiError as e:
         cancel_out = {"error": e.code, "detail": str(e)}
     except Exception as e:   # noqa: BLE001 —— halt 永不因撤单失败而失败
@@ -309,15 +313,18 @@ def _parse_close_final(req_id: str, raw) -> dict | None:
     return {**doc, "req_id": req_id}
 
 
-def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = None) -> dict:
-    """批 171n：急停命令下发共用体（cancel-all/close-all 两端点同链）。
+def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | None = None,
+                       *, username: str | None = None, operator_uid: int | None = None,
+                       wait_ack: bool = True, skipped: list[int] | None = None) -> dict:
+    """急停命令下发共用体（cancel-all/close-all/异步 halt 派发同链）。
 
-    三态分叉（A-P1-3）：无 runner ⇒ 409；已下发未回执（10s 窗——171o A-P2-1：
-    close-all 串联〔撤单+稳定窗+逐标发单〕5s 不够）⇒ 202 dispatched；
-    回执在窗内 ⇒ 200 汇总。audit_log 三态分别落痕。
-    批 171o：accounts 勾选集过滤+**按 account 去重**（A-P1-4——撤/平是网关全账户
-    动作，同 account 多 runner 双发重复；每 account 取首个活 tid）；过滤后空集
-    （有活 runner 但勾选不含）=400 RISK_NO_MATCH_ACCOUNT 区别于 409。
+    批187（v11 方案A）：payload 与执行参数**解耦**——username/operator_uid 提为显式参数，
+    使非 web 源（飞书/异步 halt_dispatch，无 HTTP payload）也能调用。`payload` 保留兼容
+    web 调用方（传 None 时必给 username）；三态分叉/去重/审计不变。
+
+    三态分叉：无 runner ⇒ 409；有 running 但勾选集不命中 ⇒ 400 RISK_NO_MATCH_ACCOUNT；
+    已下发未回执（5s 窗）⇒ 202 dispatched；回执在窗内 ⇒ 200 汇总。
+    wait_ack=False（异步派发）：下发后立即返回，不空等 5s（回执由 progress/终局端点取）。
     """
     import json as _json
     import time as _t
@@ -325,44 +332,60 @@ def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = No
     from src.web_api.errors import ApiError
     from src.quant_common.redis_client import business_redis
     from src.data_platform.config_store import live_running_tasks
+    # 方案A 兼容：payload 提供时从它解析 username/uid（web 调用方零改动保留），
+    # 否则用显式参数（非 web 源）。
+    if payload:
+        username = username or payload.get("username") or "system"
+        if operator_uid is None:
+            operator_uid = _operator_uid(payload)
+    username = username or "system"
+    # 批187：跳过无任务账号（裁定 A），不再 400——下发判活集只认 DB running。
+    # 原 RISK_INVALID_ACCOUNT 预校验（已删）：把"启用但无 running 任务"误判为无效账号，
+    # 前端默认全选必夹带此类账号 ⇒ 必现 400。改为：无效账号计入 skipped 随回执明示。
+    _skipped = list(skipped or [])
     if accounts is not None:
         _all_rows = live_running_tasks()
         _valid = {a for _t_, a in _all_rows}
         _bad = set(accounts) - _valid
-        if _bad:
-            raise ApiError(400, "RISK_INVALID_ACCOUNT",
-                           f"无效账号 id: {sorted(_bad)}（不在 running 任务集）")
-    runners = _live_runners(accounts=accounts)
+        if _bad and not _skipped:
+            _skipped = sorted(_bad)
+            logger.warning("急停跳过无 running 任务的账号（裁定A）: %s", _skipped)
+    # 批187（v11）：下发判活 = **DB status=running**（config_store.live_running_tasks），
+    # **不看心跳**——心跳只用于展示健康度。僵尸 runner（DB running 心跳死）仍下发，
+    # 由回执暴露"没人接"（用户裁定：紧急场景 running 就发，30–90s 黑洞不得拦急停）。
+    # 不复用 _live_runners（它带 30s 心跳过滤）——manual-order 仍走 _live_runners，口径不动。
+    _all_running = live_running_tasks()
+    if accounts is None:
+        runners = [(str(tid), acct) for tid, acct in _all_running]
+    else:
+        runners = [(str(tid), acct) for tid, acct in _all_running if acct in set(accounts)]
     if not runners:
-        if accounts is not None and live_running_tasks():
+        if accounts is not None and _all_running:
+            # 有 running 任务但勾选集没有一个命中——区别于「全局无任务」(409)
             raise ApiError(400, "RISK_NO_MATCH_ACCOUNT",
-                           "勾选账号无活动 runner（其余账号有活任务但不在勾选集）")
-        audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
+                           "勾选账号无 status=running 的任务（其余账号有活任务但不在勾选集）")
+        audit_log(username, f"risk_{verb.replace('-', '_')}",
                   detail="no active runner (409)")
         raise ApiError(409, "RISK_NO_ACTIVE_RUNNER",
-                       "无活动实盘 runner（live_task running ∩ 心跳新鲜为空）——命令未下发")
+                       "无 status=running 的实盘任务（心跳仅用于展示，不参与下发判活）——命令未下发")
     # 批 171o（A-P1-4）：按 account 去重——同 account 多 runner 只发一 tid（撤/平是
     # 网关全账户动作，双发重复撤单）。
     _seen_accts = set()
     runners = [(tid, acct) for tid, acct in runners
                if not (acct in _seen_accts or _seen_accts.add(acct))]
     r = business_redis(socket_timeout=3)
-    # 批 171s（件四/件五）：cmd 带操作者 uid，供 worker 透传给 EmergencyWorker 做
-    # uid 定向零内容 SSE 终局帧。sub 可能是 str → 显式 int()（sse_bridge 频道后缀要求 int）。
-    # 缺失/转换失败属异常态：logger.warning 留痕 + cmd operator_uid=None（worker 据此不发
-    # SSE 帧、纯靠端点 + FE 轮询兜底），绝不退回 uid=0 全站广播。无「按权限键枚举用户」
-    # fallback（仓内无实现、死分支）。
-    operator_uid = _operator_uid(payload)
+    # 批187：operator_uid 已由显式参数（异步源）或 payload（web）解析，不再在此覆盖。
     if operator_uid is None:
-        logger.warning("risk cmd 缺合法 sub（停用 uid 定向 SSE，靠端点兜底）: verb=%s sub=%r",
-                       verb, payload.get("sub"))
+        logger.warning("risk cmd 缺合法 sub（停用 uid 定向 SSE，靠端点兜底）: verb=%s username=%r",
+                       verb, username)
     req_ids = []
     for tid, _acct in runners:
         req_id = _uuid.uuid4().hex[:12]
         r.set(f"risk:cmd:{tid}",
               _json.dumps({"id": req_id, "verb": verb,
-                           "operator": payload["username"], "ts": _t.time(),
-                           "operator_uid": operator_uid}),
+                           "operator": username, "ts": _t.time(),
+                           "operator_uid": operator_uid,
+                           "skipped_accounts": _skipped}),
               ex=10 * 60)
         req_ids.append((tid, req_id))
     # 批 171s：per-uid recent 索引（服务端真源——页面刷新/晚开无内存 req_ids 仍可查终局）。
@@ -375,24 +398,37 @@ def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = No
             r.expire(_idx, 30 * 60)
         except Exception as e:   # noqa: BLE001 —— 索引非关键路径，recent 端点有 scan 兜底
             logger.warning("risk close recent 索引写失败（recent 退 scan 兜底）: %s", e)
-    # 回执窗（5s——worker 拍周期 1s 轮询+执行）
+    # 批187：登记 active 索引供进度看板（所有 verb，web 源按 uid）——终局时由 UI 移除。
+    if operator_uid is not None and req_ids:
+        try:
+            _aidx = f"risk:cmd:active:{operator_uid}"
+            r.lpush(_aidx, *[rid for _tid, rid in req_ids])
+            r.ltrim(_aidx, 0, 19)
+            r.expire(_aidx, 30 * 60)
+        except Exception as e:   # noqa: BLE001
+            logger.warning("risk active 索引写失败: %s", e)
+    # 回执窗（5s——worker 拍周期 1s 轮询+执行）。异步派发 wait_ack=False 不空等。
     results = {}
-    deadline = _t.time() + 5
     pending = {req_id: tid for tid, req_id in req_ids}
-    while pending and _t.time() < deadline:
-        for req_id in list(pending):
-            raw = r.get(f"risk:cmd:result:{req_id}")
-            if raw:
-                results[pending.pop(req_id)] = _json.loads(raw)
-                r.delete(f"risk:cmd:result:{req_id}")
-        _t.sleep(0.3)
-    audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
-              detail=f"dispatched={len(req_ids)} acked={len(results)}")
-    # 批 171s：返回增 req_ids（tid→req_id，供 FE 按 req_id 短轮询单查端点）+ 首轮
-    # pending/no_quote/retrying 清单透传（终局清单以 :final 端点为准，件五）。
+    if wait_ack:
+        deadline = _t.time() + 5
+        while pending and _t.time() < deadline:
+            for req_id in list(pending):
+                raw = r.get(f"risk:cmd:result:{req_id}")
+                if raw:
+                    results[pending.pop(req_id)] = _json.loads(raw)
+                    r.delete(f"risk:cmd:result:{req_id}")
+            _t.sleep(0.3)
+    audit_log(username, f"risk_{verb.replace('-', '_')}",
+              detail=f"dispatched={len(req_ids)} acked={len(results)} skipped={_skipped}")
+    # 返回：req_ids（tid→req_id）+ 首轮清单 + skipped_accounts（裁定 A：未处置账号明示）
     base = {"dispatched": len(req_ids), "results": results,
             "req_ids": {tid: rid for tid, rid in req_ids},
+            "skipped_accounts": _skipped,
             **_aggregate_lists(results)}
+    if not wait_ack:
+        return {"status": "dispatched", "acked": 0,
+                "pending_runners": list(pending.values()), **base}
     if pending:
         # pending_runners=未回执 tid（旧 pending 字段改名——避免与「未平标的清单 pending」
         # 同名不同义）；逾 5s 窗的孤儿回执不再靠本字段，改由 :final 端点 + FE 轮询。
@@ -579,6 +615,100 @@ def risk_close_result(req_id: str, payload: dict = Depends(require_perm("halt"))
     if doc is None:
         return {"status": "pending", "req_id": req_id}
     return {**doc, "status": "final"}
+
+
+# ——— 批187（v11）：进度看板端点（active/progress/cancel）———
+# 进行中看板真源 = risk:cmd:progress:{req_id} + active 索引；与旧 :final/recent 双链并存、职责不重叠。
+
+@router.get("/api/risk/active")
+def risk_active(payload: dict = Depends(require_perm("halt"))):
+    """列当前进行中的处置任务 req_id（web 源按 uid 索引，非 web 源按 source 索引）。"""
+    import json as _json
+    import re as _re
+    from src.quant_common.redis_client import business_redis
+    r = business_redis(decode_responses=True, socket_timeout=2)
+    uid = _operator_uid(payload)
+    ids: list[str] = []
+    if uid is not None:
+        try:
+            ids += [x for x in (r.lrange(f"risk:cmd:active:{uid}", 0, 19) or [])
+                    if isinstance(x, str) and _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", x)]
+        except Exception:   # noqa: BLE001
+            pass
+    try:
+        for k in r.scan_iter(match="risk:cmd:active:src:*", count=100):
+            ks = k.decode() if isinstance(k, bytes) else k
+            ids += [x for x in (r.lrange(ks, 0, 19) or [])
+                    if isinstance(x, str) and _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", x)]
+    except Exception:   # noqa: BLE001
+        pass
+    # 只保留仍在进行（progress 键在且 phase=running）的；终局键由调用方拉取后自然消失
+    active = []
+    for rid in dict.fromkeys(ids):   # 去重保序
+        try:
+            raw = r.get(f"risk:cmd:progress:{rid}")
+        except Exception:   # noqa: BLE001
+            continue
+        if not raw:
+            continue
+        try:
+            doc = _json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(doc, dict) and doc.get("phase") == "running":
+            active.append({"req_id": rid, "verb": doc.get("verb", ""),
+                           "operator": doc.get("operator", ""), "ts": doc.get("ts")})
+    return {"items": active[:20]}
+
+
+@router.get("/api/risk/progress/{req_id}")
+def risk_progress(req_id: str, payload: dict = Depends(require_perm("halt"))):
+    """单任务进度（逐单状态）：读 progress 键；无键={status:unknown}。"""
+    import json as _json
+    import re as _re
+    from src.quant_common.redis_client import business_redis
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", req_id or ""):
+        raise ApiError(400, "BAD_REQ_ID", "req_id 非法")
+    r = business_redis(decode_responses=True, socket_timeout=2)
+    try:
+        raw = r.get(f"risk:cmd:progress:{req_id}")
+    except Exception:   # noqa: BLE001
+        raw = None
+    if not raw:
+        return {"status": "unknown", "req_id": req_id}
+    try:
+        doc = _json.loads(raw)
+    except (ValueError, TypeError):
+        return {"status": "unknown", "req_id": req_id}
+    if not isinstance(doc, dict):
+        return {"status": "unknown", "req_id": req_id}
+    return {**doc, "status": doc.get("phase", "running")}
+
+
+@router.post("/api/risk/cancel")
+def risk_cancel(body: dict = Body(default={}),
+                payload: dict = Depends(require_perm("halt"))):
+    """取消进行中处置：按 operator+批次取消同批全部 req_id（写取消键，worker 下轮检查即停）。
+
+    不 resume——risk:halted 保持，用户要恢复须显式点 resume。
+    """
+    from src.quant_common.redis_client import business_redis
+    req_ids = body.get("req_ids") or []
+    if isinstance(req_ids, str):
+        req_ids = [req_ids]
+    req_ids = [str(x) for x in req_ids if isinstance(x, (str, int))][:50]
+    if not req_ids:
+        raise ApiError(400, "BAD_REQ_IDS", "req_ids 不能为空")
+    r = business_redis(socket_timeout=2)
+    n = 0
+    for rid in req_ids:
+        try:
+            r.set(f"risk:cmd:cancel:{rid}", "1", ex=1800)
+            n += 1
+        except Exception as e:   # noqa: BLE001
+            logger.warning("取消键写失败 req=%s: %s", rid, e)
+    audit_log(payload["username"], "risk_cancel", detail=f"req_ids={req_ids} set={n}")
+    return {"status": "cancelling", "cancelled": n, "req_ids": req_ids}
 
 
 # ——— 批 173：手动买卖（复用 risk:cmd 命令通道，verb=manual-order）———

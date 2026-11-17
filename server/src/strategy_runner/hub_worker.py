@@ -83,6 +83,7 @@ def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None,
         "operator_uid": cmd.get("operator_uid"),   # worker3 _dispatch_risk_cmd 补 int(sub)
         "ts": cmd.get("ts"),
         "order": cmd.get("order") or {},   # 批173：手动买卖参数（verb=manual-order）
+        "skipped_accounts": cmd.get("skipped_accounts") or [],  # 批187：裁定A未处置账号
     }
     if cmd_queue is not None:
         cmd_queue.put_nowait(item)
@@ -221,7 +222,8 @@ class EmergencyWorker:
             self._adapter, account_id=self._account_id,
             operator=cmd.get("operator") or "manual",
             req_id=cmd.get("req_id") or "", deadline_ts=deadline_ts,
-            td_api=self._td_api)
+            td_api=self._td_api,
+            skipped_accounts=cmd.get("skipped_accounts") or [])
 
     def _manual_order(self, cmd) -> dict:
         """批 173：手动买卖在专用线程内执行（web-api 无 TD 会话）。"""

@@ -126,7 +126,14 @@ class TestCloseAllPositions:
 
     def _adapter(self, positions, px):
         a = MagicMock()
-        a.query_position.side_effect = [list(positions), []]
+        # 批187：无限循环下 mock 需可持续返回——第一次持仓，之后恒空（模拟卖出后清仓）。
+        # 原 [positions, []] 仅两次，第三轮 StopIteration 被复查 except 吞成 query-failed
+        # ⇒ pending 永不空 ⇒ 无限循环不终止。
+        _qp_calls = {"n": 0}
+        def _qp():
+            _qp_calls["n"] += 1
+            return list(positions) if _qp_calls["n"] == 1 else []
+        a.query_position.side_effect = _qp
         a.query_orders.return_value = []
         a.cancel_order.return_value = None
         a.close_action.side_effect = (
@@ -233,7 +240,8 @@ class TestEndpoints:
             json.dumps({"tid": "t1", "verb": "cancel-all",
                         "result": {"requested": 3, "failed": 0}})
             if "risk:cmd:result:" in k else None)
-        with patch.object(R, "_live_runners", return_value=[("t1", 1)]), \
+        # 批187：下发判活改 DB-only（live_running_tasks），不再用 _live_runners（心跳口径）
+        with patch("src.data_platform.config_store.live_running_tasks", return_value=[("t1", 1)]), \
              patch("src.quant_common.redis_client.business_redis", return_value=r):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"})
         assert out["status"] == "done" and out["results"]["t1"]["result"]["requested"] == 3
@@ -356,7 +364,14 @@ class TestCloseAllChunkingAndExchangeReject:
 
     def _adapter(self, positions, px, max_qty=100000):
         a = MagicMock()
-        a.query_position.side_effect = [list(positions), []]
+        # 批187：无限循环下 mock 需可持续返回——第一次持仓，之后恒空（模拟卖出后清仓）。
+        # 原 [positions, []] 仅两次，第三轮 StopIteration 被复查 except 吞成 query-failed
+        # ⇒ pending 永不空 ⇒ 无限循环不终止。
+        _qp_calls = {"n": 0}
+        def _qp():
+            _qp_calls["n"] += 1
+            return list(positions) if _qp_calls["n"] == 1 else []
+        a.query_position.side_effect = _qp
         a.query_orders.return_value = []
         a.cancel_order.return_value = None
         a.close_action.return_value = "SELL"

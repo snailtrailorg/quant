@@ -475,18 +475,20 @@ class TestS4GateBothChains:
 class TestS5TerminationAndVisibility:
     """删绝对 deadline / no_quote 空轮 / 终局 SSE / uid 定向（退回 0 全站）→ 本类红。"""
 
-    def test_three_termination_conditions_each_take_effect(self):
+    def test_infinite_loop_until_done_or_cancel_or_systemic(self):
+        """批187（v11 方向反转）：推翻原三终止（retry_max/deadline/no_quote）——
+        无限循环仅 systemic/cancelled/done 三态终止；tries/empty_streak 只用于展示。"""
         from src.strategy_runner.trading import next_action
-        now = 1000.0
         base = {"tries": 0, "empty_streak": 0, "systemic_down": False,
                 "pending": ["X:100"], "positions_remain": 1}
-        assert next_action({**base, "tries": 3}, now, 3, now + 100, 6) == "final:retries"
-        assert next_action({**base, "tries": 1}, now, 10, now, 6) == "final:deadline"
-        assert next_action({**base, "empty_streak": 6}, now, 10, now + 100, 6) == "final:no_quote"
-        assert next_action({**base, "pending": [], "positions_remain": 0},
-                           now, 10, now + 100, 6) == "final:done"
-        assert next_action({**base, "systemic_down": True},
-                           now, 10, now + 100, 6) == "final:systemic"
+        # 计数/空轮不再终止——仍 retry
+        assert next_action({**base, "tries": 3}) == "retry"
+        assert next_action({**base, "empty_streak": 6}) == "retry"
+        assert next_action(base) == "retry"
+        # 三态终止
+        assert next_action({**base, "pending": [], "positions_remain": 0}) == "final:done"
+        assert next_action(base, cancelled=True) == "final:cancelled"
+        assert next_action(base, systemic_down=True) == "final:systemic"
 
     def test_valkey_down_escalates_alert_and_does_not_spin(self):
         from src.strategy_runner import trading as T

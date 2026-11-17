@@ -86,7 +86,7 @@ class TestHaltThenCancelOrder:
         calls = []
         with patch("src.risk_control.risk.RiskControl.get") as rc, \
              patch.object(R, "_dispatch_risk_cmd", side_effect=lambda *a, **k: calls.append("dispatch") or {"status": "done"}):
-            rc.return_value.emergency_halt.side_effect = lambda *a: calls.append("halt")
+            rc.return_value.emergency_halt.side_effect = lambda *a, **k: calls.append("halt")
             R.risk_halt({"username": "t"})
         assert calls == ["halt", "dispatch"], "先停后撤（零窗口）"
 

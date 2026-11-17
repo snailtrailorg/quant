@@ -164,7 +164,9 @@ def test_cancel_missing_status_is_untranslatable():
     a = _adapter()
     a.query_orders.return_value = [SimpleNamespace(vt_orderid="x.1")]
     out = NEW._cancel_working_orders(a)
-    assert out == {"requested": 0, "failed": 0, "untranslatable": 1}
+    # 批187：新增 items 逐单明细，计数字段语义不变——校验计数 + items 存在
+    assert out["requested"] == 0 and out["failed"] == 0 and out["untranslatable"] == 1
+    assert out["items"] and out["items"][0]["result"] == "untranslatable"
     a.cancel_order.assert_not_called()
 
 
@@ -291,7 +293,9 @@ def test_cancel_all_three_working_states():
         SimpleNamespace(status=Status.ALLTRADED, vt_orderid="x.4"),
     ]
     out = NEW._cancel_working_orders(a)
-    assert out == {"requested": 3, "failed": 0, "untranslatable": 0}
+    # 批187：新增 items 逐单明细，计数字段语义不变
+    assert out["requested"] == 3 and out["failed"] == 0 and out["untranslatable"] == 0
+    assert len(out["items"]) == 3 and all(i["result"] == "requested" for i in out["items"])
     assert [c.args[0] for c in a.cancel_order.call_args_list] == ["x.1", "x.2", "x.3"]
 
 
@@ -299,7 +303,9 @@ def test_cancel_missing_vt_is_untranslatable():
     a = _adapter()
     a.query_orders.return_value = [SimpleNamespace(status=Status.NOTTRADED)]
     out = NEW._cancel_working_orders(a)
-    assert out == {"requested": 0, "failed": 0, "untranslatable": 1}
+    # 批187：新增 items 逐单明细，计数字段语义不变
+    assert out["requested"] == 0 and out["failed"] == 0 and out["untranslatable"] == 1
+    assert out["items"] and out["items"][0]["result"] == "untranslatable"
     a.cancel_order.assert_not_called()
 
 

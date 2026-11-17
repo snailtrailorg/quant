@@ -107,6 +107,85 @@ def risk_sweep():
     }
 
 
+# 批187（v11）：熔断触发→执行解耦的派发键（仅本任务生产+消费，单一真源）
+_HALT_TRIGGER_LIST = "risk:halt:trigger"
+_HALT_DISPATCHED_KEY = "risk:halt:dispatched:{halt_ts}"
+_RISK_CMD_KEY = "risk:cmd:{tid}"
+_ACTIVE_SRC_KEY = "risk:cmd:active:src:{source}"
+
+
+@app.task(name="src.scheduler.tasks.halt_dispatch")
+def halt_dispatch():
+    """消费 `risk:halt:trigger`，把非 web 源的熔断转成 cancel-all 命令（统一执行链）。
+
+    web 源 sync_dispatched=True（端点已同步派发）⇒ 跳过，避免双派发。
+    同 halt_ts 去重（SETNX），防事件重投/沿兜底重复。写命令走数据面
+    （config_store.live_running_tasks + business_redis），不 import web_api（分层铁律）。
+    progress 由 worker 执行时写（_close_all_positions），本任务只负责"下发+登记 active"。
+    """
+    import uuid as _uuid
+    import time as _t
+    from src.data_platform.config_store import live_running_tasks
+    raw = None
+    try:
+        raw = business_redis().lpop(_HALT_TRIGGER_LIST)
+    except Exception as e:
+        logger.warning("halt_dispatch 读 trigger 失败: %s", e)
+        return {"status": "skip", "reason": "trigger_read_failed"}
+    if not raw:
+        return {"status": "idle"}
+    try:
+        ev = json.loads(raw) if isinstance(raw, (str, bytes)) else {}
+    except (ValueError, TypeError):
+        logger.warning("halt_dispatch 坏事件（跳过）: %r", raw[:80] if raw else raw)
+        return {"status": "skip", "reason": "bad_event"}
+    if ev.get("sync_dispatched"):
+        return {"status": "skip", "reason": "web_synced"}
+    _halt_ts = str(ev.get("halt_ts") or "")
+    _source = str(ev.get("source") or "system")
+    _reason = str(ev.get("reason") or "system")
+    _uid = ev.get("operator_uid")
+    try:
+        _uid = int(_uid) if _uid is not None else None
+    except (TypeError, ValueError):
+        _uid = None
+    r = business_redis()
+    try:
+        if not r.set(_HALT_DISPATCHED_KEY.format(halt_ts=_halt_ts), "1", nx=True, ex=300):
+            return {"status": "skip", "reason": "deduplicated"}
+    except Exception as e:
+        logger.warning("halt_dispatch 去重键写失败（继续下发）: %s", e)
+    # 枚举 DB running（下发判活不看心跳，与 web 同口径），按 account 去重
+    _seen, runners = set(), []
+    for tid, acct in live_running_tasks():
+        if acct not in _seen:
+            _seen.add(acct)
+            runners.append((str(tid), acct))
+    _dispatched = []
+    for tid, _acct in runners:
+        req_id = _uuid.uuid4().hex[:12]
+        try:
+            r.set(_RISK_CMD_KEY.format(tid=tid), json.dumps({
+                "id": req_id, "verb": "cancel-all", "operator": _reason,
+                "ts": _t.time(), "operator_uid": _uid, "skipped_accounts": [],
+            }, ensure_ascii=False), ex=600)
+            _dispatched.append(req_id)
+        except Exception as e:
+            logger.warning("halt_dispatch 写 cmd 失败 tid=%s: %s", tid, e)
+    # 非 web 源按 source 登记 active（无 uid 时不污染 uid 索引）
+    try:
+        _idx = _ACTIVE_SRC_KEY.format(source=_source)
+        r.lpush(_idx, *_dispatched)
+        r.ltrim(_idx, 0, 19)
+        r.expire(_idx, 1800)
+    except Exception as e:
+        logger.warning("halt_dispatch active 索引写失败: %s", e)
+    audit_logish = {"status": "dispatched", "source": _source, "reason": _reason,
+                    "runners": len(_dispatched), "req_ids": _dispatched}
+    logger.info("halt_dispatch: %s", audit_logish)
+    return audit_logish
+
+
 @app.task(name="src.scheduler.tasks.daily_report", bind=True, max_retries=1)
 def daily_report(self):
     """盘后报告。LLM key 未配置时生成确定性摘要，不阻塞任务。"""

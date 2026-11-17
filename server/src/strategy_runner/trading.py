@@ -333,20 +333,25 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
 
 
 def _cancel_working_orders(adapter) -> dict:
-    """批 171n：撤全部在场委托（F-41 提纯+一键撤单共用核心；P1b 改读 domain）。
+    """撤全部在场委托（F-41 提纯+一键撤单共用核心；P1b 改读 domain）。
 
-    返回 {"requested": N, "failed": M, "untranslatable": U}——requested/failed 语义不变
-    （请求已受理/撤单异常）；untranslatable=状态或 vt_orderid 不可读而跳过的单（可观测，
-    不冒充撤单成功）。在场判定只读 status+vt_orderid 两字段（与基线同，缺字段不漏撤）。
+    返回 {"requested": N, "failed": M, "untranslatable": U, "items": [...]}——
+    三个计数语义不变（旧消费者只读计数，兼容）；批187 新增 items 逐单明细供进度看板：
+    [{symbol, vt_orderid, result: requested|failed|untranslatable}]。
+    untranslatable=状态或 vt_orderid 不可读而跳过的单（可观测，不冒充撤单成功），
+    逐单 result 保留 untranslatable（不塞 failed、不静默丢）。
     """
-    out = {"requested": 0, "failed": 0, "untranslatable": 0}
+    out = {"requested": 0, "failed": 0, "untranslatable": 0, "items": []}
     try:
         working = {OrderStatus.SUBMITTED, OrderStatus.NOT_TRADED, OrderStatus.PARTIAL}
         for od in (adapter.query_orders() or []):
+            _sym = str(getattr(od, "symbol", "") or "")
             try:
                 st = status_of(od)
             except Exception as e:
                 out["untranslatable"] += 1
+                out["items"].append({"symbol": _sym, "vt_orderid": "",
+                                     "result": "untranslatable", "detail": str(e)[:120]})
                 logger.warning("撤单状态翻译失败（跳过）: %s", e)
                 continue
             if st not in working:
@@ -354,13 +359,19 @@ def _cancel_working_orders(adapter) -> dict:
             vt = getattr(od, "vt_orderid", "") or ""
             if not vt:
                 out["untranslatable"] += 1
+                out["items"].append({"symbol": _sym, "vt_orderid": "",
+                                     "result": "untranslatable", "detail": "缺 vt_orderid"})
                 logger.warning("在场委托缺 vt_orderid，跳过撤单")
                 continue
             out["requested"] += 1
             try:
                 adapter.cancel_order(vt)
+                out["items"].append({"symbol": _sym, "vt_orderid": str(vt),
+                                     "result": "requested"})
             except Exception as ce:
                 out["failed"] += 1
+                out["items"].append({"symbol": _sym, "vt_orderid": str(vt),
+                                     "result": "failed", "detail": str(ce)[:120]})
                 logger.warning("撤单失败 %s: %s", vt, ce)
     except Exception as e:
         logger.error("撤单流程异常: %s", e)
@@ -579,64 +590,123 @@ def write_cmd_result(req_id: str, result: dict, *, final: bool = False) -> None:
         logger.warning("急停回执写失败 key=%s req=%s: %s", key, req_id, e)
 
 
-# ——— 重试编排纯函数（件五：假时钟可测、判定单源、禁两处分叉）———
+# ——— 进度看板写口 + 取消判定 + 重试编排纯函数（批187 v11）———
 
-def next_action(entry: dict, now: float, retry_max: int,
-                deadline_ts: float, empty_max: int) -> str:
-    """**单一判定源**：返回 'retry' 或 'final:<reason>'。
+RISK_PROGRESS_KEY = "risk:cmd:progress:{req_id}"
+RISK_ACTIVE_UID_KEY = "risk:cmd:active:{uid}"
+RISK_ACTIVE_SRC_KEY = "risk:cmd:active:src:{source}"
+RISK_CANCEL_KEY = "risk:cmd:cancel:{req_id}"
+RISK_TRIGGER_LIST = "risk:halt:trigger"
+RISK_DISPATCHED_KEY = "risk:halt:dispatched:{halt_ts}"
+_PROGRESS_TTL_S = 30 * 60
 
-    三终止条件取先到者：tries>=retry_max（final:retries）/ now>=绝对 deadline
-    （final:deadline）/ 连续 no_quote 空轮>=empty_max（final:no_quote）；另
-    systemic_down（valkey_down 全断）直接 final:systemic 不空转、pending 清空即
-    final:done。调用方按本函数结果决定是否 sleep 再来一轮，不在别处重算终止条件。
+
+def write_progress(req_id: str, payload: dict, *, uid: int | None = None,
+                   source: str | None = None) -> None:
+    """进度看板写口（never-raise，独立于 write_cmd_result）：
+    progress 键每轮覆盖写快照；done/cancelled 时由调用方传 phase 并额外清 active 索引。
     """
-    if entry.get("systemic_down"):
+    if not req_id:
+        return
+    try:
+        from src.quant_common.redis_client import business_redis
+        r = business_redis(decode_responses=True, socket_timeout=2)
+        r.set(RISK_PROGRESS_KEY.format(req_id=req_id),
+              json.dumps(payload, ensure_ascii=False), ex=_PROGRESS_TTL_S)
+    except Exception as e:
+        logger.warning("进度写失败 key=%s req=%s: %s", RISK_PROGRESS_KEY, req_id, e)
+
+
+def _merge_progress_items(cancel_items: list, out: dict) -> list:
+    """把撤单逐单 items + 清仓各清单归并成进度看板统一 items（kind 区分，status 语义保留）。
+
+    - 撤单：透传 requested/failed/untranslatable（带 symbol/vt_orderid）；
+    - 清仓：pending(待平)/no_quote(无报价)/rejected(被拒)/skipped_t1(T+1冻结)/closed_requested(已挂单)
+      各自成行，status 不合并（紧急决策要看真实原因，不糊成一个"失败"）。
+    """
+    items = []
+    for it in (cancel_items or []):
+        items.append({"symbol": it.get("symbol", ""), "kind": "cancel",
+                      "status": it.get("result", "unknown"),
+                      "detail": it.get("detail", ""),
+                      "vt_orderid": it.get("vt_orderid", "")})
+    for sym in (out.get("pending") or []):
+        items.append({"symbol": sym, "kind": "close", "status": "pending", "detail": "待平仓"})
+    for sym in (out.get("no_quote") or []):
+        items.append({"symbol": sym, "kind": "close", "status": "no_quote", "detail": "无可用报价"})
+    for sym in (out.get("rejected") or []):
+        items.append({"symbol": sym, "kind": "close", "status": "rejected", "detail": "被拒/未成交"})
+    for sym in (out.get("skipped_t1") or []):
+        items.append({"symbol": sym, "kind": "close", "status": "skipped", "detail": "T+1 冻结不可平"})
+    n = int(out.get("closed_requested") or 0)
+    if n:
+        items.append({"symbol": f"共 {n} 笔", "kind": "close", "status": "closed_requested",
+                      "detail": "已请求平仓（异步，成交见账户）"})
+    return items
+
+
+def cancel_requested(req_id: str) -> bool:
+    """取消键判定（never-throw）：键在=已请求取消；读失败按"未取消"继续（fail-open 到执行侧）。"""
+    if not req_id:
+        return False
+    try:
+        from src.quant_common.redis_client import business_redis
+        return bool(business_redis(decode_responses=True, socket_timeout=2).get(
+            RISK_CANCEL_KEY.format(req_id=req_id)))
+    except Exception as e:
+        logger.warning("取消键读取失败（按未取消继续）req=%s: %s", req_id, e)
+        return False
+
+
+def next_action(entry: dict, *, systemic_down: bool = False,
+                cancelled: bool = False) -> str:
+    """**单一判定源**（批187 v11 无限循环）：只三态终止——
+    systemic_down ⇒ final:systemic；cancelled ⇒ final:cancelled；
+    pending 清空且 positions_remain<=0 ⇒ final:done；否则 retry（**无次数/时限上限**）。
+
+    方向反转说明：171s 原三终止（retry_max/deadline/no_quote）被用户裁定推翻——紧急场景
+    须持续处置到成功/用户取消，界面持续保留状态；no_quote 空轮不再终止（继续取价重试），
+    systemic（valkey 全断）保留为真实故障终止。调用方不得在别处重算终止条件。
+    """
+    if systemic_down or entry.get("systemic_down"):
         return "final:systemic"
+    if cancelled:
+        return "final:cancelled"
     if not entry.get("pending") and int(entry.get("positions_remain", 0) or 0) <= 0:
         return "final:done"
-    if int(entry.get("tries", 0)) >= retry_max:
-        return "final:retries"
-    if deadline_ts and now >= deadline_ts:
-        return "final:deadline"
-    if int(entry.get("empty_streak", 0)) >= empty_max:
-        return "final:no_quote"
     return "retry"
 
 
-def retry_due(entry: dict, now: float, interval: float, retry_max: int,
-              deadline_ts: float, empty_max: int) -> bool:
-    """纯函数：next_action 的布尔视图（判定单源，禁分叉）。
-
-    interval 保留在签名供调用方对齐 sleep 节奏（每轮 sleep(max(1, interval)) 在
-    **专用线程内**阻塞推进，故判定本身不依赖 interval）。
-    """
-    return next_action(entry, now, retry_max, deadline_ts, empty_max) == "retry"
+def retry_due(entry: dict, *, systemic_down: bool = False,
+              cancelled: bool = False) -> bool:
+    """纯函数：next_action 的布尔视图（判定单源，禁分叉）。"""
+    return next_action(entry, systemic_down=systemic_down, cancelled=cancelled) == "retry"
 
 
 def bump(entry: dict, *, no_quote: bool, systemic_down: bool,
          pending: list, positions_remain: int) -> dict:
-    """纯函数：一轮结束后推进重试状态（返回新 dict，不改入参）。
+    """纯函数：一轮结束后推进展示计数（返回新 dict，不改入参）。
 
-    tries 每轮 +1；no_quote 连续空轮累加、有价轮清零；systemic_down 置终局标志。
+    tries/no_quote 连续空轮仅用于**展示**（进度看板显示"第 N 轮/连续无报价 M"），
+    不再参与终止判定（终止只由 next_action 的 systemic/cancelled/done 决定）。
     """
     out = dict(entry)
     out["tries"] = int(entry.get("tries", 0)) + 1
     out["pending"] = list(pending)
     out["positions_remain"] = int(positions_remain)
     out["systemic_down"] = bool(systemic_down)
-    if systemic_down:
-        out["empty_streak"] = 0
-    elif no_quote:
-        out["empty_streak"] = int(entry.get("empty_streak", 0)) + 1
-    else:
-        out["empty_streak"] = 0
+    out["empty_streak"] = (int(entry.get("empty_streak", 0)) + 1) if no_quote else 0
     return out
 
 
 def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                          req_id: str = "", deadline_ts: float = 0.0,
-                         td_api=None) -> dict:
-    """批 171s：一键全平（股灾急停）整轮编排——一轮全平 + 重取价循环重试 + 绝对上限。
+                         td_api=None, skipped_accounts: list | None = None) -> dict:
+    """一键全平（股灾急停）整轮编排——一轮全平 + 无限重取价循环（批187 v11 方向反转）。
+
+    **终止仅三态**：成功（pending 清空）、用户取消（risk:cmd:cancel:{req_id}）、
+    systemic（valkey 全断真实故障）；无 retry_max/deadline/no_quote 上限——紧急场景须持续
+    处置到成功或人工取消，界面全程保留状态。171s 原"绝对上限"硬约束已被用户推翻。
 
     只用**同源 hub tick**（_quote_price → hub_quote.get_hub_tick）与 **Adapter 接口**
     定价/方向/拆单/取整，主流程零 `if 品种/板块` 硬编码分支：
@@ -647,8 +717,8 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
       _close_order_mark 回填 adapter.get_vt_orderid(cid)（None→NULL 靠 client_order_id 认领）；
     - 拒单回执按 **vt_orderid** 比对 query_orders() 的 Status.REJECTED（件七 A2 根治）；
     - 每轮撤未成交单 + **重新 get_hub_tick 取新价** + 重新定价 + 重挂，绝不复用旧价；
-      终止三条件取先到者（retry_max / 绝对 deadline / 连续 no_quote 空轮），
-      valkey_down 直接升级 _alert 不计空轮。
+      每轮写 progress（逐单状态）；轮间隔 sleep 可中断（≤0.5s 检查取消键）；
+      valkey_down 直接升级 _alert 并 systemic 终止（不空转）。
     **所有 sleep（1.5s 拒单回报窗 / max(1, interval) 轮间隔）都在本函数内**，
     而本函数被 EmergencyWorker 专用 daemon 线程调用 ⇒ 主循环拍内零 sleep。
     第一轮结束即写主回执（web 5s 窗）；终局 :final + SSE 由 hub_worker 负责。
@@ -662,12 +732,9 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
 
     cfg = get_retry_config()
     interval = max(1, int(cfg.get("retry_interval_s", 5) or 5))
-    retry_max = int(cfg.get("retry_max", 10) or 10)
-    empty_max = int(cfg.get("no_quote_empty_max", 6) or 6)
-    # 件五配置返回键（worker1 实装，逐字对齐）：deadline_s
-    cfg_deadline = cfg.get("deadline_s", 120)
-    if not deadline_ts or deadline_ts <= 0:
-        deadline_ts = _t.time() + float(cfg_deadline)
+    # 批187（v11）：删除 retry_max/deadline/empty_max 三自终止——无限循环，
+    # 仅成功/取消/systemic 故障终止（用户推翻 171s"绝对上限"硬约束）。
+    # deadline_ts 形参保留兼容签名（调用方不再传，函数体不使用）。
 
     rc = RiskControl.get()
     out = {"closed_requested": 0, "skipped_t1": [], "rejected": [],
@@ -687,8 +754,13 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             out["rejected"].append(item)
 
     while True:
+        # 批187：循环首行检查取消——用户点取消后立即停，不再发新单。
+        if cancel_requested(req_id):
+            final_reason = "final:cancelled"
+            break
         # ——— 每轮：撤未成交单（上一轮重挂的单先撤，再用新价重挂）———
-        _cancel_working_orders(adapter)
+        _cancel_info = _cancel_working_orders(adapter)
+        round_cancel_items = _cancel_info.get("items", []) if isinstance(_cancel_info, dict) else []
         round_no_quote: list[str] = []
         round_priced = False
         round_alerted = False          # valkey_down 本轮只告一次（防按标的刷告警）
@@ -833,12 +905,23 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
         # 连通性真源（判「已清仓」的前置）：td_api 优先，缺则 adapter，均无按已连接（paper/mock）
         td_ok = bool(getattr(td_api, "connect_status",
                              getattr(adapter, "connect_status", True)))
+        sellable_remain = 0
         try:
             remain_positions = adapter.query_position() or []
             remain = sum(int(getattr(p, "volume", 0) or 0) for p in remain_positions)
-            out["positions_remain"] = remain   # 回执语义不变：如实报告剩余量（0/正数/-1）
-            round_pending = [f"{getattr(p, 'symbol', '?')}:{int(getattr(p, 'volume', 0) or 0)}"
-                             for p in remain_positions if int(getattr(p, "volume", 0) or 0) > 0]
+            out["positions_remain"] = remain   # 回执语义不变：如实报告剩余量（含 T+1 冻结，0/正/-1）
+            # 批187：pending 只算**可卖量**>0 的持仓。T+1 全冻票（volume>0 但可卖=0）
+            # 已在 skipped_t1 记名、本就卖不掉——若算进 pending，无限循环模式（无 retry_max）
+            # 会永不终止空转。冻结仓如实显示在 positions_remain/skipped_t1，但不再是 pending。
+            round_pending = []
+            sellable_remain = 0
+            for p in remain_positions:
+                _vol = int(getattr(p, "volume", 0) or 0)
+                _frozen = int(getattr(p, "frozen", 0) or 0)
+                _sellable = max(_vol - _frozen, 0)
+                sellable_remain += _sellable
+                if _sellable > 0:
+                    round_pending.append(f"{getattr(p, 'symbol', '?')}:{_vol}")
             if remain <= 0:
                 empty_hits += 1
                 # 本次曾见持仓却读到空：必须连续两次空且 TD 真连接才认「已清仓」——
@@ -860,25 +943,54 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                 out["no_quote"].append(item)
         out["pending"] = list(round_pending)
         no_quote_round = bool(round_no_quote) and not round_priced
+        # 终止判定用可卖剩余（T+1 全冻票不算未平，否则无限循环空转）；
+        # out["positions_remain"] 仍保留真实总量供回执展示。
         entry = bump(entry, no_quote=no_quote_round, systemic_down=systemic_down,
-                     pending=round_pending, positions_remain=out["positions_remain"])
-        now = _t.time()
-        due = retry_due(entry, now, interval, retry_max, deadline_ts, empty_max)
-        # ——— 第一轮完成即写主回执（web 5s 窗内可见 retrying/pending/no_quote）———
+                     pending=round_pending, positions_remain=sellable_remain)
+        # 批187：终止判定单源（无限循环——仅 systemic/cancelled/done）
+        _act = next_action(entry, systemic_down=systemic_down)
+        due = _act == "retry"
+        # ——— 每轮写主回执（web 5s 窗）+ 进度看板（逐单）———
         if not first_round_written:
             first_round_written = True
             snap = dict(out)
             snap.update({"req_id": req_id, "verb": "close-all", "phase": "first",
                          "retrying": bool(due), "interrupted": False})
             write_cmd_result(req_id, snap)
+        _items = _merge_progress_items(round_cancel_items, out)
+        write_progress(req_id, {
+            "req_id": req_id, "verb": "close-all", "phase": "running",
+            "items": _items, "round_no": int(entry.get("tries", 0)),
+            "closed_requested": out["closed_requested"],
+            "positions_remain": out["positions_remain"],
+            "skipped_t1": list(out["skipped_t1"]),
+            "skipped_accounts": list(skipped_accounts or []), "ts": _t.time(),
+        })
         if not due:
-            final_reason = next_action(entry, now, retry_max, deadline_ts, empty_max)
+            final_reason = _act
             break
         out["retrying"] = True
-        wait = min(interval, max(0.0, deadline_ts - _t.time()))
-        if wait > 0:
-            _t.sleep(wait)
-    # ——— 终局：到上限仍未平则告警（如实列未平清单，不假装成功）———
+        # 可中断 sleep：≤0.5s 检查一次取消键，点取消 ≤0.5s 响应（非等满 interval）
+        _elapsed = 0.0
+        while _elapsed < interval:
+            if cancel_requested(req_id):
+                final_reason = "final:cancelled"
+                break
+            _step = min(0.5, interval - _elapsed)
+            _t.sleep(_step)
+            _elapsed += _step
+        if final_reason == "final:cancelled":
+            break
+    # ——— 终局：写 progress 终态 + 告警（如实列未平清单，不假装成功）———
+    _items_final = _merge_progress_items([], out)
+    write_progress(req_id, {
+        "req_id": req_id, "verb": "close-all", "phase": final_reason,
+        "items": _items_final, "round_no": int(entry.get("tries", 0)),
+        "closed_requested": out["closed_requested"],
+        "positions_remain": out["positions_remain"],
+        "skipped_t1": list(out["skipped_t1"]),
+        "skipped_accounts": list(skipped_accounts or []), "ts": _t.time(),
+    })
     out["final_reason"] = final_reason
     if final_reason != "final:done":
         _alert(f"急停全平未竟（{final_reason}）req={req_id}",

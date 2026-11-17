@@ -31,6 +31,30 @@
       </el-card>
     </div>
 
+    <!-- 2.5 处置状态卡片（批187）：进行中的撤单/清仓逐单进展；取消图标停止；完成/取消自动消失 -->
+    <el-card v-if="activeTasks.length" style="margin-top: var(--sp-3)">
+      <template #header>
+        <div class="card-head-row">
+          <span>{{ t('emg.activeTitle') }}（{{ activeTasks.length }}）</span>
+          <span class="kpi-sub">{{ t('emg.activeHint') }}</span>
+        </div>
+      </template>
+      <div v-for="task in activeTasks" :key="task.req_id" class="active-task">
+        <div class="active-head">
+          <span class="active-verb">{{ task.verb === 'close-all' ? t('emg.opClose') : (task.verb === 'cancel-all' ? t('emg.opCancel') : task.verb) }}</span>
+          <span class="kpi-sub">{{ t('emg.activeOperator') }}: {{ task.operator || '—' }}</span>
+          <el-button link type="danger" size="small" @click="onCancelTask(task)">{{ t('emg.activeCancel') }}</el-button>
+        </div>
+        <div v-if="!task.progress || !task.progress.items?.length" class="kpi-sub">{{ t('emg.activeWaiting') }}</div>
+        <div v-for="(it, i) in (task.progress?.items || [])" :key="i" class="active-row">
+          <span class="active-kind">{{ it.kind === 'cancel' ? t('emg.kindCancel') : t('emg.kindClose') }}</span>
+          <span class="active-sym">{{ it.symbol }}</span>
+          <span class="active-status" :class="'st-' + it.status">{{ t('emg.st_' + it.status, it.status) }}</span>
+          <span class="kpi-sub active-detail">{{ it.detail }}</span>
+        </div>
+      </div>
+    </el-card>
+
     <!-- 3 处置记录 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header>
@@ -53,7 +77,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { sse, getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure, getRiskCloseResult, getRiskCloseResultsRecent, apiErr } from '../api'
+import { sse, getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure, getRiskCloseResult, getRiskCloseResultsRecent, getRiskActive, getRiskProgress, riskCancel, apiErr } from '../api'
 import { selectedIds, canResume } from '../utils/emergency'
 
 const { t } = useI18n()
@@ -63,6 +87,10 @@ const accounts = ref([])
 const timeline = ref([])
 const nowTs = ref(Math.floor(Date.now() / 1000))
 let timer = null
+
+// 批187（v11）：进行中处置任务看板（撤单/清仓逐单进展；完成/取消后从 active 移除、卡片消失）
+const activeTasks = ref([])
+let activePollTimer = null
 
 const halted = computed(() => !!state.value.halted)
 const selectedCount = computed(() => selectedIds(accounts.value).length)
@@ -179,6 +207,31 @@ const loadRecent = async () => {
   } catch { /* recent 端点失败不阻塞页面（轮询 + 单查仍可用） */ }
 }
 
+// ── 批187（v11）：进行中处置看板——拉 active → 逐 req_id 拉 progress，2s 轮询 ──
+const loadActive = async () => {
+  try {
+    const d = await getRiskActive()
+    const items = d?.items || []
+    // 逐任务拉 progress（并发；单任务失败不影响其余）
+    const tasks = await Promise.all(items.map(async (it) => {
+      try { return { ...it, progress: await getRiskProgress(it.req_id) } }
+      catch { return { ...it, progress: null } }
+    }))
+    activeTasks.value = tasks
+  } catch { activeTasks.value = [] }
+}
+
+async function onCancelTask (task) {
+  try {
+    await ElMessageBox.confirm(t('emg.activeCancelConfirm', { op: task.verb }), { type: 'warning' })
+    await riskCancel([task.req_id])
+    ElMessage.success(t('emg.activeCancelling'))
+    loadActive()
+  } catch (e) {
+    if (e?.response || e?.code) ElMessage.error(apiErr(e, t('common.failed')))
+  }
+}
+
 let finalPollTimer = null
 const finalPollIds = ref([])
 let finalPollTicks = 0
@@ -209,6 +262,7 @@ const startFinalPoll = (ids) => {
 const onSseFrame = (ev) => {
   if (ev.event !== 'data' || ev.data?.type !== 'emergency_close_final') return
   loadRecent()   // 零内容信号帧不带清单/req_id——重拉 recent 端点取权威清单
+  loadActive()   // 批187：终局帧到达→重拉 active（完成的任务卡片消失）
 }
 let sseUnsub = null
 
@@ -301,14 +355,17 @@ async function onResume () {
 onMounted(async () => {
   await load()
   loadRecent()                              // ①页面刷新/晚开无内存 req_ids 仍可查已有终局
-  sseUnsub = sse.subscribe(onSseFrame)       // ②零内容信号帧 → 重拉 recent
+  loadActive()                              // 批187：刷新/晚开重建进行中看板
+  sseUnsub = sse.subscribe(onSseFrame)       // ②零内容信号帧 → 重拉 recent + active
   timer = setInterval(() => {
     nowTs.value = Math.floor(Date.now() / 1000)
     load()
   }, 5000)
+  activePollTimer = setInterval(loadActive, 2000)   // 批187：进行中任务 2s 轮询；终局后 active 移除⇒卡片消失
 })
 onUnmounted(() => {
   clearInterval(timer)
+  if (activePollTimer) clearInterval(activePollTimer)
   stopFinalPoll()
   if (sseUnsub) sseUnsub()
 })
@@ -328,4 +385,17 @@ onUnmounted(() => {
 .tl-warn { color: var(--critical); }
 .dot-live { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%;
   background: var(--critical); margin-left: var(--sp-1); }
+/* 批187：进行中处置看板 */
+.active-task { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.active-task:last-child { border-bottom: none; }
+.active-head { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-1); }
+.active-verb { font-weight: 600; }
+.active-row { display: flex; gap: var(--sp-2); align-items: baseline; padding-left: var(--sp-2); }
+.active-kind { min-width: 42px; color: var(--text-secondary); }
+.active-sym { min-width: 96px; }
+.active-status { min-width: 96px; }
+.active-detail { flex: 1; }
+.st-rejected, .st-failed, .st-no_quote, .st-untranslatable { color: var(--critical); }
+.st-pending, .st-requested { color: var(--text-secondary); }
+.st-closed_requested, .st-done { color: var(--success); }
 </style>

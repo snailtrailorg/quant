@@ -194,6 +194,13 @@ app.conf.update(
             "schedule": 60.0,
             "options": {"queue": "risk"},
         },
+        "halt-dispatch": {
+            # 批187（v11）：熔断触发→执行解耦的高频派发（2s）；不放 risk_sweep 因它是 60s，
+            # 紧急场景延迟不可接受。web 源 sync_dispatched 跳过，只在非 web 源派 cancel-all。
+            "task": "src.scheduler.tasks.halt_dispatch",
+            "schedule": 2.0,
+            "options": {"queue": "risk"},
+        },
         "email-outbox-sweep": {
             "task": "src.scheduler.tasks.email_outbox_sweep",
             "schedule": 60.0,

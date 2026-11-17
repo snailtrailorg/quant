@@ -83,6 +83,10 @@ export const getRiskExposure = () => api.get('/risk/exposure')
 // 批 171s：急停终局清单——零内容 SSE 信号帧 emergency_close_final 触发重拉，清单只走鉴权端点
 export const getRiskCloseResult = (reqId) => api.get('/risk/close-result/' + encodeURIComponent(reqId))
 export const getRiskCloseResultsRecent = () => api.get('/risk/close-result/recent')
+// 批187（v11）：进度看板——进行中任务/逐单进展/取消（统一处置状态卡片）
+export const getRiskActive = () => api.get('/risk/active')
+export const getRiskProgress = (reqId) => api.get('/risk/progress/' + encodeURIComponent(reqId))
+export const riskCancel = (reqIds) => api.post('/risk/cancel', { req_ids: reqIds })
 
 // 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
 export const getUsers = () => api.get('/user')

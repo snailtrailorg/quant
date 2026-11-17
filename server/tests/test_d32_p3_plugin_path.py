@@ -91,8 +91,16 @@ def test_close_all_via_plugin_compat():
     for p in patches:
         p.start()
     try:
+        # 批187：平仓改无限循环（无 retry_max）——本 mock 的 query_position 每轮都推同一持仓，
+        # pending 永不空会死循环。用 cancel_requested 第 2 轮返回 True 模拟"发完一轮后终止"：
+        # 首轮照常发单（验证 cid 前缀），第 2 轮起取消，循环终止。
+        _cancel_calls = {"n": 0}
+        def _cancel_after_first(req_id):
+            _cancel_calls["n"] += 1
+            return _cancel_calls["n"] > 1
         with patch.object(T, "_quote_price", return_value=({"bid": [10.0], "last_price": 10.0}, "")), \
              patch.object(T, "write_cmd_result"), patch.object(T, "_alert"), \
+             patch.object(T, "cancel_requested", side_effect=_cancel_after_first), \
              patch("time.sleep"):
             out = T._close_all_positions(compat, account_id=None, operator="u", req_id="p3")
     finally:
