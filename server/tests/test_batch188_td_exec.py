@@ -164,6 +164,88 @@ def test_sa4_desired_includes_td_exec():
     assert ("quant-td-exec@4.service", "td_exec") in desired
 
 
+def test_sa4_units_scans_td_exec_pattern():
+    """扫描面必须含 td-exec@*：漏则 active 被判缺失→每 300s 重复 start + 告警刷屏，
+    且 failed 态进不了 78 配置错分流（sa4 对 td-exec 的恢复语义全失效）。"""
+    from src.scheduler import tasks as T
+    calls = []
+    ok = MagicMock(returncode=0, stdout="")
+    with patch.object(T, "_sa4_systemctl",
+                      side_effect=lambda *a: calls.append(a) or ok):
+        T._sa4_units("active")
+    assert len(calls) == 1 and "quant-td-exec@*" in calls[0]
+
+
+def test_sa4_stops_non_desired_td_exec():
+    """账号禁用/删除后 td_exec 常驻进程随之停（否则 TD 会话遗留无人管）。"""
+    from src.scheduler import tasks as T
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    calls = []
+    with patch.object(T, "_sa4_units",
+                      side_effect=lambda st: {"failed": [],
+                                              "active": ["quant-td-exec@9.service"]}.get(st, [])), \
+         patch.object(T, "_desired_units", return_value=[]), \
+         patch.object(T, "get_conn", return_value=conn), \
+         patch.object(T, "business_redis", side_effect=RuntimeError("no valkey")), \
+         patch.object(T, "_sa4_systemctl",
+                      side_effect=lambda *a: calls.append(a) or MagicMock(returncode=0)), \
+         patch("src.alert_notify.notify"):
+        T.sa4_reconciler()
+    assert ("stop", "quant-td-exec@9.service") in calls
+
+
+# ——— 每日连接窗：盘外启动必须窗开沿建连 ———
+# 钉反面：进程在窗关时启动 → _build 的 connect() 跳过；若主循环没有这一腿，
+# 当日开盘零 TD 会话（下单全拒且进程无报错），systemd 凌晨重启即触发。
+
+def _mk_exec_for_window():
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.account_id = 1
+    ex._td_window = (10, 10)
+    ex._last_conn_ts = 0.0
+    ex._exec_port = MagicMock(connected=False)
+    ex._adapter = MagicMock()
+    return ex
+
+
+def test_window_open_connects_and_reconciles():
+    ex = _mk_exec_for_window()
+    ex._exec_port.connect.side_effect = lambda: setattr(ex._exec_port, "connected", True)
+    with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True), \
+         patch("src.strategy_runner.trading.reconcile_orders") as rec:
+        ex._maybe_connect()
+    ex._exec_port.connect.assert_called_once()
+    rec.assert_called_once()
+
+
+def test_window_closed_no_connect():
+    ex = _mk_exec_for_window()
+    with patch("src.providers.xtp.session.xtp_session_window_open", return_value=False), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True):
+        ex._maybe_connect()
+    ex._exec_port.connect.assert_not_called()
+
+
+def test_window_connected_skips_and_throttles():
+    ex = _mk_exec_for_window()
+    ex._exec_port.connected = True
+    with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True):
+        ex._maybe_connect()
+    ex._exec_port.connect.assert_not_called()
+    # 未连但 60s 节流窗内：不重试（防每 10s createTraderApi 循环）
+    ex2 = _mk_exec_for_window()
+    import time as _t
+    ex2._last_conn_ts = _t.time()
+    with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True):
+        ex2._maybe_connect()
+    ex2._exec_port.connect.assert_not_called()
+
+
 # ——— td→quote 迁移列 ———
 
 def test_quote_account_column_exists():

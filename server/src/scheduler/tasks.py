@@ -2015,11 +2015,14 @@ def _sa4_systemctl(*args):
 
 
 def _sa4_units(state: str) -> list[str]:
-    """按状态列受管单元名（批5 三源扩面：live-task + md-hub + strategy，含 .service 后缀）。
+    """按状态列受管单元名（批188 四源：live-task + md-hub + strategy + td-exec，含 .service 后缀）。
 
-    一次 list-units 传三模式（systemctl 支持多 pattern，省两次调用）；采集失败返回空（D-F5）。
+    一次 list-units 传四模式（systemctl 支持多 pattern，省多次调用）；采集失败返回空（D-F5）。
+    **td-exec 必须在本扫描面**：漏掉会让 L3 每周期把 active 的 td-exec 当"缺失"重复 start
+    （告警刷屏 + attempts 无界增长），且 failed 态进不了 78 配置错分流。
     """
     r = _sa4_systemctl("list-units", "quant-live-task@*", "quant-md-hub@*", "quant-strategy@*",
+                       "quant-td-exec@*",
                        "--state", state, "--no-legend", "--plain", "--no-pager")
     if r is None or r.returncode != 0:
         return []
@@ -2346,6 +2349,17 @@ def sa4_reconciler():
                     logger.warning("L3 停非期望账号 hub: %s（account %s 已禁用/删除）", unit, vid)
                 except Exception as e:
                     logger.warning("L3 停账号 hub %s 失败: %s", unit, e)
+            elif unit.startswith("quant-td-exec@"):
+                # 批188：账号禁用/删除后 td_exec 常驻进程随之停（否则遗留 TD 会话无人管）
+                vid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
+                if not vid.isdigit() or unit in desired_units:
+                    continue
+                try:
+                    _sa4_systemctl("stop", unit)
+                    result.setdefault("l3_stopped", []).append(unit)
+                    logger.warning("L3 停非期望账号 td-exec: %s（account %s 已禁用/删除）", unit, vid)
+                except Exception as e:
+                    logger.warning("L3 停账号 td-exec %s 失败: %s", unit, e)
     except Exception as e:
         logger.warning("L3 意图调和失败: %s", e)
 

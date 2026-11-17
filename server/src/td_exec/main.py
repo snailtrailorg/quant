@@ -77,6 +77,8 @@ class TdExec:
         self._hb = None
         self._quote_account = self.account_id
         self._row: dict = {}
+        self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
+        self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
 
     def _load_account(self) -> dict:
         from src.data_platform.db import get_conn
@@ -90,6 +92,10 @@ class TdExec:
         if not row.get("enabled"):
             raise RuntimeError(f"trading_account {self.account_id} 未启用——拒绝启动")
         self._quote_account = int(row.get("quote_account_id") or self.account_id)
+        if row.get("provider") == "xtp":
+            # 与 live_task 同源（hub_worker._td_connect_due）：启动时读一次，改动重启生效
+            from src.providers.xtp.session import load_xtp_window_cfg
+            self._td_window = load_xtp_window_cfg()
         return row
 
     def _build(self):
@@ -158,6 +164,46 @@ class TdExec:
         self.worker = EmergencyWorker(
             adapter=self._adapter, td_api=self._td_api, account_id=self.account_id,
             tid=str(self.account_id), closing=threading.Event())
+
+    def _maybe_connect(self) -> None:
+        """窗开沿建连（与 live_task 同一纯函数语义：交易日门 + 60s 节流）。
+
+        常驻进程常在盘外启动（批量上产/凌晨 systemd 重启）——_build 时窗关 connect() 跳过，
+        没有这一腿当日开盘就没有 TD 会话，下单全拒且无进程级报错。连上沿重跑对账补宕机窗成交。
+        """
+        win = self._td_window
+        if not win or self._exec_port is None:
+            return
+        try:
+            if self._exec_port.connected:
+                return
+        except Exception:  # noqa: BLE001 —— 端口无 connected 属性按未连处理
+            return
+        now = time.time()
+        if now - self._last_conn_ts < 60.0:
+            return
+        from datetime import datetime
+        from src.providers.xtp.session import is_trading_day, xtp_session_window_open
+        if not xtp_session_window_open(datetime.now(), win[0], win[1],
+                                       trading_day=is_trading_day()):
+            return
+        self._last_conn_ts = now
+        try:
+            self._exec_port.connect()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
+            return
+        try:
+            if not self._exec_port.connected:
+                return
+        except Exception:  # noqa: BLE001
+            return
+        logger.info("TD 窗开沿建连成功 account=%s", self.account_id)
+        try:
+            from src.strategy_runner import trading
+            trading.reconcile_orders(self._adapter, "", "")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("重连对账失败: %s", e)
 
     def _start_heartbeat(self):
         from src.strategy_framework.runtime.pulse import HeartbeatWriter
@@ -258,6 +304,7 @@ class TdExec:
                     logger.warning("命令解析失败（丢弃）: %r", item)
             now = time.time()
             if now - last_hb >= 10:
+                self._maybe_connect()
                 self._hb.beat()
                 try:
                     from src.quant_common.guard import sd_notify as _sd_notify

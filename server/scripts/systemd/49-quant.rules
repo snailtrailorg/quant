@@ -1,5 +1,5 @@
 // polkit 规则：允许 quant 用户管理 quant-live-task@* / quant-feishu-bot@* /
-// quant-md-hub@* systemd 实例（Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制
+// quant-md-hub@* / quant-td-exec@* systemd 实例（Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制
 // 实盘任务/飞书子进程；celery reconciler 亦以 quant 跑，L3 调和需 start md-hub——
 // 批5 2026-08-27 增 quant-md-hub@* 放行，不加则 L3 扩面空转，两件必须同批）。
 // 批17 挂账清理 2026-09-13：quant-strategy@* 摘除（旧架构 --id 直启单元退役；
@@ -19,7 +19,8 @@ polkit.addRule(function(action, subject) {
         subject.user == "quant" &&
         (action.lookup("unit").startsWith("quant-live-task@") ||
          action.lookup("unit").startsWith("quant-feishu-bot@") ||
-         action.lookup("unit").startsWith("quant-md-hub@"))) {
+         action.lookup("unit").startsWith("quant-md-hub@") ||
+         action.lookup("unit").startsWith("quant-td-exec@"))) {
         return polkit.Result.YES;
     }
 });
