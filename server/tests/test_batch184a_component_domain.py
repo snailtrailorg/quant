@@ -61,10 +61,10 @@ def test_same_name_two_domains_coexist():
 
 @needs_db
 def test_alias_rows_removed():
-    """8 个点名探针别名不是包名，已删（真实名 python3.11 等由全量 OS 行覆盖）。"""
+    """探针**缩写别名**（非真实包名）已删；真实包名（openssl/cairo/pango/wqy-microhei 等）
+    由真实 scan 写入属正常，不在本断言范围。"""
     from src.data_platform.db import get_conn
-    alias = ("python", "nginx", "openssl", "postgres", "redis",
-             "pango", "cairo", "wqy-microhei")
+    alias = ("python", "nginx", "postgres", "redis")
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT name FROM security_component WHERE source='os' AND name = ANY(%s)",

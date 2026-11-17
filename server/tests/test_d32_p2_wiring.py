@@ -29,6 +29,7 @@ def _strategy():
     st = Strategy(cfg, _Adapter())
     st.account_id = None
     st.operator = "tester"
+    st.paper_mode = True   # 批188 形态X：本文件测本地合规/WAL 顺序（paper 路径）；live 命令路径见 test_batch188
     return st
 
 

@@ -110,7 +110,6 @@ def risk_sweep():
 # 批187（v11）：熔断触发→执行解耦的派发键（仅本任务生产+消费，单一真源）
 _HALT_TRIGGER_LIST = "risk:halt:trigger"
 _HALT_DISPATCHED_KEY = "risk:halt:dispatched:{halt_ts}"
-_RISK_CMD_KEY = "risk:cmd:{tid}"
 _ACTIVE_SRC_KEY = "risk:cmd:active:src:{source}"
 
 
@@ -120,12 +119,13 @@ def halt_dispatch():
 
     web 源 sync_dispatched=True（端点已同步派发）⇒ 跳过，避免双派发。
     同 halt_ts 去重（SETNX），防事件重投/沿兜底重复。写命令走数据面
-    （config_store.live_running_tasks + business_redis），不 import web_api（分层铁律）。
-    progress 由 worker 执行时写（_close_all_positions），本任务只负责"下发+登记 active"。
+    （config_store.enabled_exec_accounts + business_redis），不 import web_api（分层铁律）。
+    progress 由 td_exec 执行时写（_close_all_positions），本任务只负责"下发+登记 active"。
+    批188：枚举 exec-capable 账号（enabled ∩ execution 能力域，与 web/SA4 同源），写 td:cmd:{account}。
     """
     import uuid as _uuid
     import time as _t
-    from src.data_platform.config_store import live_running_tasks
+    from src.data_platform.config_store import enabled_exec_accounts
     raw = None
     try:
         raw = business_redis().lpop(_HALT_TRIGGER_LIST)
@@ -155,23 +155,25 @@ def halt_dispatch():
             return {"status": "skip", "reason": "deduplicated"}
     except Exception as e:
         logger.warning("halt_dispatch 去重键写失败（继续下发）: %s", e)
-    # 枚举 DB running（下发判活不看心跳，与 web 同口径），按 account 去重
-    _seen, runners = set(), []
-    for tid, acct in live_running_tasks():
+    # 批188：下发零判活——枚举 exec-capable 账号（与 web/SA4 同源），写账号队列 td:cmd:{account}
+    _seen, targets = set(), []
+    for row in enabled_exec_accounts():
+        acct = int(row[0])
         if acct not in _seen:
             _seen.add(acct)
-            runners.append((str(tid), acct))
+            targets.append(acct)
     _dispatched = []
-    for tid, _acct in runners:
+    for acct in targets:
         req_id = _uuid.uuid4().hex[:12]
         try:
-            r.set(_RISK_CMD_KEY.format(tid=tid), json.dumps({
+            r.lpush(f"td:cmd:{acct}", json.dumps({
                 "id": req_id, "verb": "cancel-all", "operator": _reason,
-                "ts": _t.time(), "operator_uid": _uid, "skipped_accounts": [],
-            }, ensure_ascii=False), ex=600)
+                "ts": _t.time(), "operator_uid": _uid,
+            }, ensure_ascii=False))
+            r.expire(f"td:cmd:{acct}", 600)
             _dispatched.append(req_id)
         except Exception as e:
-            logger.warning("halt_dispatch 写 cmd 失败 tid=%s: %s", tid, e)
+            logger.warning("halt_dispatch 写 cmd 失败 account=%s: %s", acct, e)
     # 非 web 源按 source 登记 active（无 uid 时不污染 uid 索引）
     try:
         _idx = _ACTIVE_SRC_KEY.format(source=_source)
@@ -2078,6 +2080,10 @@ def _desired_units(conn) -> list[tuple[str, str]]:
         "AND provider = ANY(%s)", (sorted(md_providers),))
     for row in cur.fetchall():
         desired.append((f"quant-md-hub@{row[0]}.service", "hub"))
+    # 批188：账号级 TD 执行进程（enabled ∩ execution 能力域；与 web 下发同源 enabled_exec_accounts）
+    from src.data_platform.config_store import enabled_exec_accounts as _enabled_exec
+    for row in _enabled_exec():
+        desired.append((f"quant-td-exec@{row[0]}.service", "td_exec"))
     return desired
 
 

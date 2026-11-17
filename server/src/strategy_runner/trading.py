@@ -573,6 +573,112 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
         return {"accepted": False, "reason": "SEND_ERROR", "client_order_id": cid}
 
 
+# ——— 批188：形态X 共同路径下单（td_exec 唯一咽喉）———
+
+def _wal_insert_order(account_id, order, signal_id, bar_fingerprint, status: str = "submitting"):
+    """写 order_log（返回行 id；失败 None）。bar_fingerprint 传 dict→jsonb。"""
+    try:
+        from src.data_platform.db import get_conn
+        from src.data_platform.jsonb import jsonb
+        with get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,"
+                "account_id,bar_fingerprint) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (order.get("strategy_id"), order.get("symbol"), order.get("action"),
+                 int(order.get("volume", 0) or 0), float(order.get("price", 0) or 0),
+                 signal_id, status, account_id,
+                 jsonb(bar_fingerprint) if bar_fingerprint else None))
+            oid = cur.fetchone()[0]
+            conn.commit()
+            return oid
+    except Exception as e:
+        logger.warning("order_log 写入失败（WAL fail-closed）: %s", e)
+        return None
+
+
+def _update_order_status_row(oid, status: str, *, client_order_id=None, error=None, vt_orderid=None) -> None:
+    """order_log 状态流转（td_exec 侧共同路径用；never-raise）。"""
+    if not oid:
+        return
+    try:
+        from src.data_platform.db import get_conn
+        sets = ["status=%s"]
+        vals = [status]
+        if client_order_id is not None:
+            sets.append("client_order_id=%s")
+            vals.append(client_order_id)
+        if error is not None:
+            sets.append("error=%s")
+            vals.append(str(error)[:500])
+        if vt_orderid is not None:
+            sets.append("vt_orderid=%s")
+            vals.append(vt_orderid)
+        vals.append(oid)
+        with get_conn() as conn:
+            conn.execute(f"UPDATE order_log SET {','.join(sets)} WHERE id=%s", vals)
+            conn.commit()
+    except Exception as e:
+        logger.warning("order_log 状态更新失败 oid=%s: %s", oid, e)
+
+
+def execute_place_order(adapter, *, account_id, order, signal_id=None,
+                        bar_fingerprint=None, req_id: str = "") -> dict:
+    """批188 形态X：td_exec 共同路径下单（唯一咽喉）。
+
+    check_order → order_log(submitting) → 合规校验 → adapter.send_order → 回填 → 返回回执。
+    风控/合规/记账/发单全在此一次完成——策略进程不碰 adapter（禁第二真源）。
+    """
+    from src.risk_control.risk import RiskControl
+    from src.strategy_framework.adapters import Order
+
+    # 1. 风控（唯一咽喉）
+    try:
+        decision = RiskControl.get().check_order(order, account_id, paper=False)
+    except Exception as e:
+        logger.exception("check_order 异常（fail-closed）req=%s", req_id)
+        return {"accepted": False, "reason": f"RISK_ERROR: {e}"}
+    if not decision.approved:
+        _wal_insert_order(account_id, order, signal_id, bar_fingerprint, "rejected")
+        return {"accepted": False, "reason": decision.reason}
+    final = decision.adjusted if decision.adjusted is not None else order
+
+    # 2. WAL order_log(submitting)
+    oid = _wal_insert_order(account_id, final, signal_id, bar_fingerprint, "submitting")
+    if oid is None:
+        return {"accepted": False, "reason": "WAL_FAILED"}
+
+    # 3. 合规校验
+    try:
+        from types import SimpleNamespace as _NS
+        from src.data_platform.rules import RuleViolation, rules_for
+        rs = rules_for(account_id, final.get("symbol"), provider=getattr(adapter, "cfg_adapter", None))
+        rs.validate(_NS(symbol=final.get("symbol"), action=final.get("action", ""),
+                        volume=final.get("volume", 0), price=final.get("price", 0),
+                        order_type=final.get("order_type", "limit"), reason=order.get("reason", "")),
+                    {"symbol": final.get("symbol"), "last_price": final.get("price", 0)}, "open")
+    except RuleViolation as e:
+        _update_order_status_row(oid, "rejected", error=f"{e.code}: {e}")
+        return {"accepted": False, "reason": f"RULE:{e.code}"}
+    except Exception as e:
+        _update_order_status_row(oid, "rejected", error=f"RULE_UNAVAILABLE: {e}")
+        return {"accepted": False, "reason": "RULE_UNAVAILABLE"}
+
+    # 4. send_order
+    try:
+        client_id = adapter.send_order(Order(
+            symbol=final.get("symbol"), action=final.get("action", ""),
+            volume=int(final.get("volume", 0) or 0), price=float(final.get("price", 0) or 0),
+            order_type=final.get("order_type", "limit")))
+    except Exception as e:
+        _update_order_status_row(oid, "send_failed", error=str(e))
+        return {"accepted": False, "reason": "SEND_ERROR"}
+    if not client_id:
+        _update_order_status_row(oid, "send_failed", error="adapter 返回空委托号（委托未发出）")
+        return {"accepted": False, "reason": "NOT_SENT"}
+    vt = adapter.get_vt_orderid(client_id)
+    _update_order_status_row(oid, "submitted", client_order_id=client_id, vt_orderid=vt)
+    return {"accepted": True, "client_id": client_id, "order_row_id": oid, "vt_orderid": vt}
+
 def write_cmd_result(req_id: str, result: dict, *, final: bool = False) -> None:
     """急停回执写（never-raise 留痕）：主回执=第一轮快照（web 5s 窗），终局=:final（TTL 30min）。
 

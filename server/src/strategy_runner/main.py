@@ -21,6 +21,14 @@ except ImportError:
     EventEngine = None
 
 
+def make_event_engine():
+    """批188：EventEngine 工厂（供 td_exec 复用——避免 providers/ 外新增 vnpy import，
+    D32 S1「只减不增」；本模块顶部已在基线内，复用不新增 vnpy 依赖行）。"""
+    if EventEngine is None:
+        raise RuntimeError("vnpy.event 不可用（EventEngine 未安装）")
+    return EventEngine()
+
+
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
 # 批65a：builder 下沉 td_registry 后 main 零直接使用——属性别名保 tests/scripts 旧 import

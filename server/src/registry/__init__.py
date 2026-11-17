@@ -117,6 +117,24 @@ def pick(domain: str, provider: str, need: set[str], impl: str) -> Any:
     return plugin
 
 
+def exec_capable_providers() -> set:
+    """批188：具备 execution 能力（交易执行）的 provider 集。
+
+    TD 执行进程（td_exec）与 web 下发账号集共用此集合（SA4 第四源 + enabled_exec_accounts），
+    保证「下发覆盖的账号 = SA4 拉起 exec 的账号」，杜绝静默丢单。
+    """
+    out = set()
+    for _domain, _provider in registered():
+        if _domain != DOMAIN_TRADING:
+            continue
+        try:
+            pick(_domain, _provider, {"execution"}, "plugin")
+            out.add(_provider)
+        except UnsupportedCapability:
+            pass
+    return out
+
+
 def registered() -> list[tuple[str, str]]:
     return sorted(_REGISTRY)
 

@@ -36,6 +36,7 @@ def strat():
                          symbol="600000.XSHG", adapter="xtp")
     s = Strategy(cfg, None)
     s.operator = "tester"   # 批15：runner 注入位（place_order 读 getattr）
+    s.paper_mode = True     # 批188 形态X：本文件测本地 WAL/发单顺序（paper 路径）；live 命令路径见 test_batch188
     return s
 
 

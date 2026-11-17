@@ -458,6 +458,11 @@ class Strategy:
             # D2：account 身份（读方/写方 per-account 过滤的真源；runner 注入）
             "account_id": getattr(self, "account_id", None),
         }
+        # 批188 形态X：live 走 td_exec 命令通道（策略只写 signal_log + 投命令 + 等回执）；
+        # paper/回测保留本地路径（paper 无 td_exec）。
+        if not getattr(self, "paper_mode", False):
+            self._place_order_via_cmd(sig, order)
+            return
         # 批 86-B：paper 模式随实例属性注入（同 operator/account_id 模式）——
         # 走完整风控链但跳过「实盘开关」一级（见 RiskControl.check_order 的 paper 形参说明）。
         decision = RiskControl.get().check_order(
@@ -522,6 +527,96 @@ class Strategy:
         vt_orderid = self.adapter.get_vt_orderid(client_id)
         self._update_order_status(order_row_id, "submitted", client_order_id=client_id,
                                   vt_orderid=vt_orderid)
+
+    def _place_order_via_cmd(self, sig, order) -> None:
+        """批188 形态X：live 下单经 td_exec 命令通道（策略只写 signal_log + 投命令 + 等回执）。
+
+        风控/合规/WAL(order_log)/send_order 全在 td_exec 共同路径完成（唯一咽喉，禁第二真源）。
+        """
+        import json as _json
+        import time as _t
+        import uuid as _uuid
+
+        aid = getattr(self, "account_id", None)
+        if aid is None:
+            logger.error("account_id 缺失，无法路由下单命令: %s %s", self.symbol, sig.action.name)
+            return
+        sig_id = self._log_signal_only(sig, order)
+        if sig_id is None:
+            logger.error("signal_log 写入失败，放弃下单（fail-closed）: %s %s",
+                         self.symbol, sig.action.name)
+            return
+        req_id = _uuid.uuid4().hex[:12]
+        cmd = {
+            "id": req_id, "verb": "place-order",
+            "order": {"symbol": order["symbol"], "action": order["action"],
+                      "volume": order["volume"], "price": order["price"],
+                      "order_type": "limit", "strategy_id": order.get("strategy_id"),
+                      "reason": order.get("reason", "")},
+            "signal_id": sig_id,
+            "bar_fingerprint": self._bar_fingerprint(),
+            "operator": getattr(self, "operator", ""),
+            "operator_uid": getattr(self, "operator_uid", None),
+            "ts": _t.time(),
+        }
+        try:
+            from ..quant_common.redis_client import business_redis
+            r = business_redis(socket_timeout=3)
+            r.lpush(f"td:cmd:{int(aid)}", _json.dumps(cmd))
+            r.expire(f"td:cmd:{int(aid)}", 10 * 60)
+        except Exception as e:
+            logger.error("下单命令入队失败: %s %s: %s", self.symbol, sig.action.name, e)
+            return
+        deadline = _t.time() + 2.0
+        while _t.time() < deadline:
+            try:
+                raw = r.get(f"risk:cmd:result:{req_id}")
+            except Exception:
+                raw = None
+            if raw:
+                try:
+                    doc = _json.loads(raw)
+                except (ValueError, TypeError):
+                    doc = {}
+                try:
+                    r.delete(f"risk:cmd:result:{req_id}")
+                except Exception:  # noqa: S110
+                    pass
+                if not doc.get("accepted"):
+                    logger.warning("td_exec 拒绝下单 %s %s: %s",
+                                   self.symbol, sig.action.name, doc.get("reason"))
+                return
+            _t.sleep(0.05)
+        logger.warning("下单回执超时（命令已入队，td_exec 稍后处理）: %s req=%s", self.symbol, req_id)
+
+    def _bar_fingerprint(self):
+        from math import isfinite
+        lb = getattr(self, "_last_bar", None) or {}
+        vals = {k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}
+        ok = lb and all(v is None or not isinstance(v, float) or isfinite(v) for v in vals.values())
+        return vals if ok else None
+
+    def _log_signal_only(self, sig, order) -> int | None:
+        """批188 形态X：只写 signal_log（order_log 由 td_exec 建），返回 signal_id。"""
+        try:
+            from ..data_platform.db import get_conn
+            lb = getattr(self, "_last_bar", None) or {}
+            _src = self.config.adapter or None
+            _fat = getattr(self, "_pub_ts", None)
+            _ver = (f"hub:{self.account_id}:{getattr(self, '_hub_gen', '')}"
+                    if getattr(self, "_hub_gen", None) else None)
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "INSERT INTO signal_log (strategy_id,symbol,action,score,price,source,"
+                    "fetched_at,dataset_version) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                    (self.config.id, self.symbol, sig.action.name, sig.score, sig.price,
+                     _src, _fat, _ver))
+                sig_id = cur.fetchone()[0]
+                conn.commit()
+                return sig_id
+        except Exception as e:
+            logger.warning("signal_log 写入失败: %s", e)
+            return None
 
     def _log_signal_order(self, sig: Signal, final_order: dict, status: str = "submitted") -> tuple:
         """写 signal_log + order_log（三账对账数据来源，P1-3；SC1 起带 status 流转）。

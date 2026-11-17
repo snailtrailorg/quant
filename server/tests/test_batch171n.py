@@ -222,13 +222,15 @@ class TestEndpoints:
         app.include_router(router)
         return app
 
-    def test_no_runner_409(self):
-        from src.web_api.errors import ApiError
+    def test_empty_account_set_zero(self):
+        """批188：无 exec-capable 账号 → dispatched=0（不 409，判活退役）。"""
         from src.web_api.routes import risk as R
-        with patch.object(R, "_live_runners", return_value=[]):
-            with pytest.raises(ApiError) as ei:
-                R._dispatch_risk_cmd("cancel-all", {"username": "t"})
-            assert ei.value.status_code == 409
+        r = MagicMock()
+        with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+             patch("src.quant_common.redis_client.business_redis", return_value=r), \
+             patch.object(R, "audit_log"):
+            out = R._dispatch_risk_cmd("cancel-all", {"username": "t"}, wait_ack=False)
+        assert out["dispatched"] == 0
 
     def test_dispatched_and_ack(self):
         import json
@@ -237,14 +239,14 @@ class TestEndpoints:
         r.set.return_value = True
         # 立即回执
         r.get.side_effect = lambda k, **kw: (
-            json.dumps({"tid": "t1", "verb": "cancel-all",
+            json.dumps({"verb": "cancel-all",
                         "result": {"requested": 3, "failed": 0}})
             if "risk:cmd:result:" in k else None)
-        # 批187：下发判活改 DB-only（live_running_tasks），不再用 _live_runners（心跳口径）
-        with patch("src.data_platform.config_store.live_running_tasks", return_value=[("t1", 1)]), \
+        # 批188：下发零判活，账号集 = enabled_exec_accounts；results 以 account 为 key
+        with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
              patch("src.quant_common.redis_client.business_redis", return_value=r):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"})
-        assert out["status"] == "done" and out["results"]["t1"]["result"]["requested"] == 3
+        assert out["status"] == "done" and out["results"][1]["result"]["requested"] == 3
 
     def test_close_all_confirm_gate(self):
         from src.web_api.errors import ApiError

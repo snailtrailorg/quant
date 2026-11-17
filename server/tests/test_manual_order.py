@@ -44,14 +44,13 @@ def test_invalid_params_never_dispatch(bad, code):
 
 # ——— 无活 runner：409 且命令未下发 ———
 
-def test_no_active_runner_409():
-    with patch.object(risk_routes, "_live_runners", return_value=[]), \
-         patch.object(risk_routes, "audit_log"), \
-         patch("src.quant_common.redis_client.business_redis") as br:
+def test_account_not_exec_400():
+    """批188：账号不在 exec-capable 集合 → 400 MANUAL_ACCOUNT_NOT_EXEC（防静默丢单）。"""
+    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+         patch.object(risk_routes, "audit_log"):
         with pytest.raises(ApiError) as e:
             risk_routes._dispatch_manual_cmd(GOOD, _payload())
-        assert e.value.code == "MANUAL_NO_ACTIVE_RUNNER"
-        br.return_value.set.assert_not_called()
+        assert e.value.code == "MANUAL_ACCOUNT_NOT_EXEC"
 
 
 # ——— 下发：命令键带 order 子对象、verb 正确、审计留痕 ———
@@ -59,13 +58,13 @@ def test_no_active_runner_409():
 def test_dispatch_writes_cmd():
     fake_r = MagicMock()
     fake_r.get.return_value = None
-    with patch.object(risk_routes, "_live_runners", return_value=[("19", 1)]), \
+    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
          patch.object(risk_routes, "audit_log") as al, \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r):
         out = risk_routes._dispatch_manual_cmd(GOOD, _payload())
     assert out["status"] == "dispatched"
-    key, raw = fake_r.set.call_args_list[0].args
-    assert key == "risk:cmd:19"
+    key, raw = fake_r.lpush.call_args_list[0].args
+    assert key == "td:cmd:1"   # 批188：账号维度队列
     import json
     cmd = json.loads(raw)
     assert cmd["verb"] == "manual-order"
@@ -81,14 +80,14 @@ def test_duplicate_cid_400():
     fake_r = MagicMock()
     fake_r.set.return_value = False   # nx 失败
     body = {**GOOD, "client_order_id": "mo-fixed-1"}
-    with patch.object(risk_routes, "_live_runners", return_value=[("19", 1)]), \
+    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r), \
          patch.object(risk_routes, "audit_log"):
         with pytest.raises(ApiError) as e:
             risk_routes._dispatch_manual_cmd(body, _payload())
         assert e.value.code == "MANUAL_DUPLICATE_CID"
-        # 只有去重键的 set，没有命令键
-        assert all("risk:cmd:" not in c.args[0] for c in fake_r.set.call_args_list)
+        # 只有去重键的 set，没有命令入队
+        assert all("td:cmd:" not in str(c.args[0]) for c in fake_r.lpush.call_args_list)
 
 
 # ——— 必过风控：拒单时零 send_order、零 WAL ———

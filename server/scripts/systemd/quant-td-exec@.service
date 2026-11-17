@@ -1,0 +1,30 @@
+[Unit]
+Description=Quant TD Exec %i (账号级常驻交易执行进程——批188)
+# SA4：期望源=trading_account enabled ∩ execution 能力域（scheduler _desired_units 第四源）
+After=network-online.target
+Wants=network-online.target
+OnFailure=quant-task-failed@%i.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=ACCOUNT_ID=%i
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.td_exec.main
+# 看门狗：td_exec 主循环每 10s 喂狗（sd_notify WATCHDOG=1），挂死 90s 强杀重启
+WatchdogSec=90
+NotifyAccess=main
+# 正常退出 exit(0) 不重启；退出码 78（EX_CONFIG 配置错）不重启直接 Failed → OnFailure 告警
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=30
+MemoryMax=1G
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

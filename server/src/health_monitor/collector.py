@@ -224,6 +224,13 @@ def collect(now: float | None = None) -> dict:
     snap: dict = {"ts": now, "units": {}, "deps": {}, "hubs": {}, "tasks": {}}   # 批 66b：hub 单对象→hubs N 实例
 
     snap["units"] = systemctl_units(CORE_UNITS)
+    # 批188：td_exec 期望集（enabled ∩ execution 能力域；与 SA4 同源）+ 在场集（TTL 心跳键）
+    try:
+        from src.data_platform.config_store import enabled_exec_accounts
+        _exec_expected = {int(r[0]) for r in enabled_exec_accounts()}
+    except Exception:
+        _exec_expected = set()
+    snap["td_execs"] = {"expected": sorted(_exec_expected), "alive": []}
 
     # 系统资源（内存/磁盘/swap，各按配置周期采集；psutil 缺失→对应项 None=证据缺失）+ 生效阈值（同源配置）
     snap["resources"] = _collect_resources(now)
@@ -233,6 +240,16 @@ def collect(now: float | None = None) -> dict:
         r = _valkey()
         r.ping()
         snap["deps"]["valkey"] = True
+        # 批188：td_exec 在场键扫描（td:exec:{account} 存在=进程在场）
+        try:
+            _alive = []
+            for _k in r.scan_iter("td:exec:*", count=100):
+                _a = _k.rsplit(":", 1)[-1]
+                if _a.isdigit():
+                    _alive.append(int(_a))
+            snap["td_execs"]["alive"] = sorted(_alive)
+        except Exception:
+            pass
         # hub 心跳 N 实例（批 66b：SCAN per-account 在场集——{account_id: {...}}；
         # legacy 兼容读：键切换窗裸键在场也收编（account_id=0 表示）防观测面瞬盲）
         for key in list(r.scan_iter(HUB_HB_PATTERN, count=100)):

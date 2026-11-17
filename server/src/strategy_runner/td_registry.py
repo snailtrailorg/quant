@@ -30,16 +30,20 @@ def register_td_builder(provider: str):
 _RT_KEYS = ("gw", "td_api", "adapter", "setting", "td_open", "lead", "lag", "cfg_adapter")
 
 
-def build_td_runtime(provider, ee, tid, account_id, boot_epoch) -> dict | None:
+def build_td_runtime(provider, ee, tid, account_id, boot_epoch,
+                     *, client_id=None, order_prefix=None) -> dict | None:
     """单入口分发：未注册返 None（调用方走 stub 硬闸分支）。
 
     已注册但返 None/缺键=builder bug → raise（防静默落 stub 装死——批 63 P4 第二实例的
     前向防御）；缺键在消费点（main try 外）会 KeyError 退码 1 重启 churn，此处校验转 78。
+
+    批188：新增账号级号段注入口 client_id/order_prefix（TD 执行进程每账号单连接、固定号）。
+    传入则 builder 用之；None 时回落既有任务号段派生（live_task 路径兼容不变）。
     """
     builder = TD_BUILDERS.get(provider)
     if builder is None:
         return None
-    rt = builder(ee, tid, account_id, boot_epoch)
+    rt = builder(ee, tid, account_id, boot_epoch, client_id=client_id, order_prefix=order_prefix)
     if rt is None:
         raise RuntimeError(f"TD builder {provider} 返回 None（契约须八键 dict）")
     missing = [k for k in _RT_KEYS if k not in rt]
@@ -49,7 +53,7 @@ def build_td_runtime(provider, ee, tid, account_id, boot_epoch) -> dict | None:
 
 
 @register_td_builder("xtp")
-def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
+def _build_xtp_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
     """XTP TD 运行时组装（P3 收口：唯一路径=providers/xtp 插件端口）。
 
     旧 ThinTdGateway + XtpTdApi + XTPAdapter 组装已于批 172d 删除；
@@ -78,7 +82,8 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
     from src.strategy_framework.runtime.alerts import make_alert, make_guard
     from src.strategy_runner.session_slot import SessionSlotAllocator
 
-    setting = build_xtp_setting(client_id=runner_client_id(tid), row_id=account_id)
+    _cid = client_id if client_id is not None else runner_client_id(tid)
+    setting = build_xtp_setting(client_id=_cid, row_id=account_id)
 
     # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
     # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
@@ -102,7 +107,7 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
 
 
 @register_td_builder("emt_emq")
-def _build_emt_runtime(ee, tid, account_id, boot_epoch) -> dict:
+def _build_emt_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
     """批 63 P4：EMT 极速柜台 TD 运行时（TD_BUILDERS 第二实例——D26-A 框架第一消费者）。
 
     EmtAdapter 兼任 gw/td_api（薄壳：connect(setting)=Login；connect_status 属性——
@@ -129,8 +134,9 @@ def _build_emt_runtime(ee, tid, account_id, boot_epoch) -> dict:
     lead, lag = load_xtp_window_cfg()
     td_open = xtp_session_window_open(_dt.now(), lead, lag, trading_day=is_trading_day())
 
-    adapter = EmtAdapter(event_engine=ee, order_prefix=f"t{tid}:e{boot_epoch}:",
-                         td_client_id=(tid - 1) % 100 + 20)
+    _prefix = order_prefix or f"t{tid}:e{boot_epoch}:"
+    _tcid = client_id if client_id is not None else (tid - 1) % 100 + 20
+    adapter = EmtAdapter(event_engine=ee, order_prefix=_prefix, td_client_id=_tcid)
     if td_open:
         adapter.connect(setting)   # Login fail-fast raise → main EX_CONFIG
     else:

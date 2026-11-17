@@ -13,7 +13,7 @@
           </span>
           <span v-if="(a.working_orders || 0) > 0" class="dot-live" :title="t('emg.hasWorking')" />
           <span v-if="!a.enabled" class="kpi-sub">（{{ t('emg.disabledAccount') }}）</span>
-          <span v-else-if="!a.running" class="kpi-sub">（{{ t('emg.notRunning') }}）</span>
+          <span v-else-if="!a.execAlive" class="kpi-sub">（{{ t('emg.execOffline') }}）</span>
         </el-checkbox>
       </div>
     </el-card>

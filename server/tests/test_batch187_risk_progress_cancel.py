@@ -11,49 +11,43 @@ import pytest
 
 # ——— 账号校验（裁定 A） ——
 
-def test_skipped_account_no_400_and_reported():
-    """无 running 任务的账号：不 400，计入 skipped_accounts 随回执明示。"""
+def test_no_judgment_dispatches_to_queue():
+    """批188：下发零判活——勾选账号直接写 td:cmd 队列（无 skipped/无 409）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    r.set.return_value = True
-    r.get.side_effect = lambda k, **kw: None   # 无回执→走 dispatched，不空等由 wait_ack=False 控制
-    with patch("src.data_platform.config_store.live_running_tasks",
-               return_value=[("t1", 1)]), \
+    r.get.side_effect = lambda k, **kw: None
+    with patch("src.data_platform.config_store.enabled_exec_accounts",
+               return_value=[(1, None), (999, None)]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         out = R._dispatch_risk_cmd("cancel-all", {"username": "u"},
                                    accounts=[1, 999], wait_ack=False,
                                    username="u", operator_uid=7)
-    assert out["status"] == "dispatched"
-    assert 999 in out["skipped_accounts"], "无任务账号须进 skipped"
-    assert out["dispatched"] == 1
+    assert out["dispatched"] == 2, "两个 exec-capable 账号都下发（不再 skipped）"
+    keys = [str(c.args[0]) for c in r.lpush.call_args_list if c.args]
+    assert "td:cmd:1" in keys and "td:cmd:999" in keys
 
 
-def test_zombie_runner_still_dispatched():
-    """僵尸 runner（DB running 即下发，不看心跳）——下发判活只认 live_running_tasks。"""
+def test_dispatch_without_any_running_task():
+    """批188：无 live_task running 也照常下发（执行载体=常驻 td_exec，非 live_task）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    with patch("src.data_platform.config_store.live_running_tasks",
-               return_value=[("zombie", 5)]), \
+    with patch("src.data_platform.config_store.enabled_exec_accounts",
+               return_value=[(5, None)]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         out = R._dispatch_risk_cmd("cancel-all", None, wait_ack=False,
                                    username="飞书:张三", operator_uid=None)
-    assert out["dispatched"] == 1, "DB running 的僵尸仍须下发（心跳不参与判活）"
+    assert out["dispatched"] == 1, "常驻执行体在 → 无 running 任务也下发"
 
 
-def test_no_match_account_400_vs_no_runner_409():
-    """三态分叉：有 running 但勾选不命中=400；全局无 running=409。"""
-    from src.web_api.errors import ApiError
+def test_empty_exec_account_set_returns_zero():
+    """批188：无 exec-capable 账号 → 返回 dispatched=0（不 400/409，判活退役）。"""
     from src.web_api.routes import risk as R
-    with patch("src.data_platform.config_store.live_running_tasks",
-               return_value=[("t1", 1)]):
-        with pytest.raises(ApiError) as e:
-            R._dispatch_risk_cmd("cancel-all", None, accounts=[999],
-                                 username="u", wait_ack=False)
-        assert e.value.status_code == 400
-    with patch("src.data_platform.config_store.live_running_tasks", return_value=[]):
-        with pytest.raises(ApiError) as e:
-            R._dispatch_risk_cmd("cancel-all", None, username="u", wait_ack=False)
-        assert e.value.status_code == 409
+    r = MagicMock()
+    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+         patch("src.quant_common.redis_client.business_redis", return_value=r), \
+         patch.object(R, "audit_log"):
+        out = R._dispatch_risk_cmd("cancel-all", None, username="u", wait_ack=False)
+    assert out["dispatched"] == 0 and out["status"] == "done"
 
 
 # ——— 方案 A：payload 与执行参数解耦 ———
@@ -62,13 +56,13 @@ def test_dispatch_accepts_explicit_identity_without_payload():
     """非 web 源无 payload，靠显式 username/operator_uid 也能下发（方案 A 核心）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    with patch("src.data_platform.config_store.live_running_tasks",
-               return_value=[("t1", 1)]), \
+    with patch("src.data_platform.config_store.enabled_exec_accounts",
+               return_value=[(1, None)]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         R._dispatch_risk_cmd("cancel-all", None, wait_ack=False,
                              username="飞书:张三", operator_uid=None)
     # cmd 载荷 operator 须为显式传入值，不从 payload（None）取
-    cmd = json.loads(r.set.call_args_list[0].args[1])
+    cmd = json.loads(r.lpush.call_args_list[0].args[1])
     assert cmd["operator"] == "飞书:张三"
     assert cmd["operator_uid"] is None
 
@@ -179,13 +173,13 @@ def test_halt_dispatch_dedup_and_dispatch():
                                       "operator_uid": 9})
     r.set.return_value = True   # SETNX 成功
     with patch("src.scheduler.tasks.business_redis", return_value=r), \
-         patch("src.data_platform.config_store.live_running_tasks",
-               return_value=[("t1", 1), ("t2", 1)]):
+         patch("src.data_platform.config_store.enabled_exec_accounts",
+               return_value=[(1, None)]):
         out = halt_dispatch()
-    assert out["status"] == "dispatched" and out["runners"] == 1, "同 account 去重"
-    # 第一个 set 是去重键，找 verb=cancel-all 的 cmd set
+    assert out["status"] == "dispatched" and out["runners"] == 1, "单账号下发"
+    # 批188：命令走 LPUSH td:cmd:{account}（账号队列）
     cmd = None
-    for c in r.set.call_args_list:
+    for c in r.lpush.call_args_list:
         try:
             d = json.loads(c.args[1])
             if isinstance(d, dict) and d.get("verb") == "cancel-all":
@@ -194,6 +188,7 @@ def test_halt_dispatch_dedup_and_dispatch():
         except (ValueError, TypeError, IndexError):
             continue
     assert cmd is not None and cmd["operator"] == "飞书:张三"
+    assert any(str(c.args[0]) == "td:cmd:1" for c in r.lpush.call_args_list)
 
 
 def test_route_auth_gate_for_new_endpoints():

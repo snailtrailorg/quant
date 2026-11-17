@@ -136,6 +136,18 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             out.append({"rule_id": "dep_down", "component": dep, "severity": "critical",
                         "detail": str(deps.get(f"{dep}_err", ""))[:200]})
 
+    # 批188 R11 td_exec_down：期望有 TD 执行进程（enabled ∩ execution 能力域）但心跳键缺失；
+    # 服务面规则（响应=查 systemd/日志/S4 期望源），与 unit_down 同域、不违反 D15 边界。
+    _te = snap.get("td_execs")
+    if _te:
+        _exp = set(_te.get("expected") or [])
+        _alive = set(_te.get("alive") or [])
+        for _acct in sorted(_exp - _alive):
+            out.append({"rule_id": "td_exec_down", "component": f"td-exec:{_acct}",
+                        "severity": "critical",
+                        "detail": f"交易账号 {_acct} 的 TD 执行进程不在场（td:exec 心跳缺失）——"
+                                  "交易操作将入队待消费，查 systemd quant-td-exec@%s 与 SA4 期望源" % _acct})
+
     # R7 长事务预警（arch-18 §4.2，DB 优化批 2026-08-21）：idle in transaction >3min——
     # 参数防线（idle_in_tx 5min）杀掉前的预警窗，留人工 pg_terminate 介入（诊断钥匙见 arch-18 §4.3）
     stale_tx = snap.get("db_idle_tx_stale")

@@ -152,6 +152,23 @@ def trading_accounts_with_flags() -> list[tuple]:
             "ORDER BY enabled DESC, id").fetchall()
 
 
+def enabled_exec_accounts() -> list[tuple]:
+    """批188：enabled ∩ execution 能力域的 (id, quote_account_id)。
+
+    与 SA4 第四源（scheduler._desired_units）同源（都走 registry.exec_capable_providers），
+    保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」，杜绝静默丢单。
+    """
+    from src.registry import exec_capable_providers
+    provs = sorted(exec_capable_providers())
+    if not provs:
+        return []
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, quote_account_id FROM trading_account "
+            "WHERE enabled=true AND provider = ANY(%s) ORDER BY id", (provs,)).fetchall()
+
+
 def exposure_snapshots() -> dict:
     """批 171o：紧急处置 exposure 的 PG 真相表读（路由层禁内联 SQL 铁律下沉）。
     返回 {account_id: {"pos_ts": ts, "pos_value": float, "snap": (tv, pnl, ts)}}。"""

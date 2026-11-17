@@ -46,38 +46,29 @@ class TestExposure:
 
 
 class TestDispatchAccounts:
-    def test_filter_and_dedup(self, monkeypatch):
-        """accounts 过滤（集外不收）+ 同 account 双 runner 去重（只发一 tid）。"""
-        import json
+    def test_filter_by_accounts(self):
+        """批188：按勾选过滤——只有勾选的 exec-capable 账号入队（账号维度）。"""
         r = MagicMock()
-        r.get.side_effect = lambda k, **kw: (
-            json.dumps({"tid": "t1", "verb": "cancel-all", "result": {"requested": 1, "failed": 0}})
-            if "risk:cmd:result:" in k else None)
-        # 走真 _live_runners（含 accounts 过滤）——patch 其依赖层；心跳键预置未来 ts 保新鲜
-        r.hgetall.side_effect = lambda k: {"ts": "9999999999"}
+        r.get.side_effect = lambda k, **kw: None
         with patch("src.quant_common.redis_client.business_redis", return_value=r), \
-             patch("src.data_platform.config_store.live_running_tasks",
-                   return_value=[("t1", 4), ("t2", 4), ("t3", 51)]):
-            out = R._dispatch_risk_cmd("cancel-all", {"username": "t"}, accounts=[4])
-        # 只发 t1（account 4 去重）；t3（51）被过滤
-        set_keys = [c.args[0] for c in r.set.call_args_list if str(c.args[0]).startswith("risk:cmd:")]
-        assert set_keys == ["risk:cmd:t1"], f"去重+过滤: {set_keys}"
-        assert out["status"] == "done"
+             patch("src.data_platform.config_store.enabled_exec_accounts",
+                   return_value=[(4, None), (51, None)]):
+            out = R._dispatch_risk_cmd("cancel-all", {"username": "t"},
+                                       accounts=[4], wait_ack=False)
+        keys = [str(c.args[0]) for c in r.lpush.call_args_list if c.args]
+        assert keys == ["td:cmd:4"], f"只发勾选的 account 4: {keys}"
+        assert out["dispatched"] == 1
 
-    def test_no_match_account_400(self):
-        from src.web_api.errors import ApiError
-        with patch.object(R, "_live_runners", return_value=[]), \
-             patch("src.data_platform.config_store.live_running_tasks", return_value=[("t1", 4)]):
-            with pytest.raises(ApiError) as ei:
-                R._dispatch_risk_cmd("cancel-all", {"username": "t"}, accounts=[51])
-            assert ei.value.status_code == 400
-
-    def test_invalid_account_400(self):
-        from src.web_api.errors import ApiError
-        with patch("src.data_platform.config_store.live_running_tasks", return_value=[("t1", 4)]):
-            with pytest.raises(ApiError) as ei:
-                R._dispatch_risk_cmd("cancel-all", {"username": "t"}, accounts=[999])
-            assert ei.value.status_code == 400
+    def test_non_exec_account_not_dispatched(self):
+        """批188：勾选账号不在 exec-capable 集合 → dispatched=0（不 400，判活退役）。"""
+        r = MagicMock()
+        with patch("src.quant_common.redis_client.business_redis", return_value=r), \
+             patch("src.data_platform.config_store.enabled_exec_accounts",
+                   return_value=[(4, None)]), \
+             patch.object(R, "audit_log"):
+            out = R._dispatch_risk_cmd("cancel-all", {"username": "t"},
+                                       accounts=[999], wait_ack=False)
+        assert out["dispatched"] == 0
 
 
 class TestHaltThenCancelOrder:

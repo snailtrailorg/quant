@@ -29,8 +29,8 @@ strategy_framework/md_gateway.py:517:8
 strategy_framework/md_gateway.py:523:12
 strategy_runner/hub_worker.py:823:16
 strategy_runner/main.py:19:4
-strategy_runner/main.py:324:4
-strategy_runner/main.py:347:4
-strategy_runner/main.py:356:4
-strategy_runner/trading.py:729:4
+strategy_runner/main.py:332:4
+strategy_runner/main.py:355:4
+strategy_runner/main.py:364:4
+strategy_runner/trading.py:835:4
 # count: 31

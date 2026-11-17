@@ -563,7 +563,8 @@ class TestCollectorLegacyHub:
         from src.health_monitor import collector
         r = MagicMock()
         r.ping.return_value = True
-        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+        r.scan_iter.side_effect = lambda pattern, **k: (
+            iter(["quant:hb:md-hub:1"]) if "md-hub" in str(pattern) else iter([]))
 
         def _hgetall(key):
             return ({"gen": "9", "subs": "1", "ticks": "1", "bars": "1", "sess_ticks": "1",

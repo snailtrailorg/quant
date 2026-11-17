@@ -18,7 +18,7 @@ def test_register_mechanism():
     """decorator 注册/重复注册 AssertionError/未注册返 None（注入后自清——模块级 dict 可变）。"""
     try:
         @register_td_builder("__test_probe__")
-        def _probe(ee, tid, account_id, boot_epoch):
+        def _probe(ee, tid, account_id, boot_epoch, **k):
             return {k: None for k in ("gw", "td_api", "adapter", "setting",
                                       "td_open", "lead", "lag", "cfg_adapter")}
         assert "__test_probe__" in TD_BUILDERS
@@ -108,7 +108,7 @@ def test_dispatch_none_and_dict_equivalence():
     sentinel = {"gw": object(), "td_api": None, "adapter": object(), "setting": None,
                 "td_open": True, "lead": None, "lag": None, "cfg_adapter": "x"}
     try:
-        TD_BUILDERS["__eq_probe__"] = lambda ee, tid, a, b: dict(sentinel)
+        TD_BUILDERS["__eq_probe__"] = lambda ee, tid, a, b, **k: dict(sentinel)
         assert build_td_runtime("__eq_probe__", None, 1, 1, 1) == sentinel
     finally:
         TD_BUILDERS.pop("__eq_probe__", None)
@@ -124,13 +124,13 @@ def test_main_reexport_compatible():
 def test_builder_contract_defense():
     """已注册 builder 返 None/缺键=raise（防批 63 P4 第二实例 bug 静默落 stub 装死）。"""
     try:
-        TD_BUILDERS["__none_probe__"] = lambda ee, tid, a, b: None
+        TD_BUILDERS["__none_probe__"] = lambda ee, tid, a, b, **k: None
         try:
             build_td_runtime("__none_probe__", None, 1, 1, 1)
             raise AssertionError("返 None 应炸")
         except RuntimeError as e:
             assert "None" in str(e)
-        TD_BUILDERS["__keys_probe__"] = lambda ee, tid, a, b: {"gw": 1}
+        TD_BUILDERS["__keys_probe__"] = lambda ee, tid, a, b, **k: {"gw": 1}
         try:
             build_td_runtime("__keys_probe__", None, 1, 1, 1)
             raise AssertionError("缺键应炸")

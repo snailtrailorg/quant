@@ -166,6 +166,7 @@ class TestOperatorInjection:
                              symbol="600000.XSHG", adapter="xtp")
         s = Strategy(cfg, None)
         s.operator = "bernard"
+        s.paper_mode = True   # 批188：本测验证 order 构造（paper 本地路径）；live 走命令不带 order 到 check_order
 
         captured = {}
 
@@ -190,6 +191,7 @@ class TestOperatorInjection:
         cfg = StrategyConfig(id="t15b", name="t", type="astock_analysis",
                              symbol="600000.XSHG", adapter="xtp")
         s = Strategy(cfg, None)   # 不设 operator → ""
+        s.paper_mode = True       # 批188：走 paper 本地路径以捕获 order
 
         captured = {}
 

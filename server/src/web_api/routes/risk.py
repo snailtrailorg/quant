@@ -318,20 +318,19 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
                        wait_ack: bool = True, skipped: list[int] | None = None) -> dict:
     """急停命令下发共用体（cancel-all/close-all/异步 halt 派发同链）。
 
-    批187（v11 方案A）：payload 与执行参数**解耦**——username/operator_uid 提为显式参数，
-    使非 web 源（飞书/异步 halt_dispatch，无 HTTP payload）也能调用。`payload` 保留兼容
-    web 调用方（传 None 时必给 username）；三态分叉/去重/审计不变。
+    批188：**下发零判活**——常驻 td_exec 载体恒在，判活是「任务生灭」时代产物，已整体退役
+    （原 409/400/skipped 三态分叉全部删除）。账号集 = SA4 同源 enabled_exec_accounts()
+    （enabled ∩ execution 能力域），保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」。
+    勾选账号直接 LPUSH td:cmd:{account}（List 队列）。
 
-    三态分叉：无 runner ⇒ 409；有 running 但勾选集不命中 ⇒ 400 RISK_NO_MATCH_ACCOUNT；
-    已下发未回执（5s 窗）⇒ 202 dispatched；回执在窗内 ⇒ 200 汇总。
-    wait_ack=False（异步派发）：下发后立即返回，不空等 5s（回执由 progress/终局端点取）。
+    payload 与执行参数解耦（批187 方案A保留）：username/operator_uid 可显式传（非 web 源）。
+    wait_ack=True 时 5s 内收主回执（risk:cmd:result:{{req_id}}）；False 时立即返回。
     """
     import json as _json
     import time as _t
     import uuid as _uuid
-    from src.web_api.errors import ApiError
     from src.quant_common.redis_client import business_redis
-    from src.data_platform.config_store import live_running_tasks
+    from src.data_platform.config_store import enabled_exec_accounts
     # 方案A 兼容：payload 提供时从它解析 username/uid（web 调用方零改动保留），
     # 否则用显式参数（非 web 源）。
     if payload:
@@ -339,55 +338,41 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
         if operator_uid is None:
             operator_uid = _operator_uid(payload)
     username = username or "system"
-    # 批187：跳过无任务账号（裁定 A），不再 400——下发判活集只认 DB running。
-    # 原 RISK_INVALID_ACCOUNT 预校验（已删）：把"启用但无 running 任务"误判为无效账号，
-    # 前端默认全选必夹带此类账号 ⇒ 必现 400。改为：无效账号计入 skipped 随回执明示。
-    _skipped = list(skipped or [])
-    if accounts is not None:
-        _all_rows = live_running_tasks()
-        _valid = {a for _t_, a in _all_rows}
-        _bad = set(accounts) - _valid
-        if _bad and not _skipped:
-            _skipped = sorted(_bad)
-            logger.warning("急停跳过无 running 任务的账号（裁定A）: %s", _skipped)
-    # 批187（v11）：下发判活 = **DB status=running**（config_store.live_running_tasks），
-    # **不看心跳**——心跳只用于展示健康度。僵尸 runner（DB running 心跳死）仍下发，
-    # 由回执暴露"没人接"（用户裁定：紧急场景 running 就发，30–90s 黑洞不得拦急停）。
-    # 不复用 _live_runners（它带 30s 心跳过滤）——manual-order 仍走 _live_runners，口径不动。
-    _all_running = live_running_tasks()
-    if accounts is None:
-        runners = [(str(tid), acct) for tid, acct in _all_running]
-    else:
-        runners = [(str(tid), acct) for tid, acct in _all_running if acct in set(accounts)]
-    if not runners:
-        if accounts is not None and _all_running:
-            # 有 running 任务但勾选集没有一个命中——区别于「全局无任务」(409)
-            raise ApiError(400, "RISK_NO_MATCH_ACCOUNT",
-                           "勾选账号无 status=running 的任务（其余账号有活任务但不在勾选集）")
+    # 批188：**下发零判活**——常驻 td_exec 载体恒在，进程死活归 systemd + health_monitor；
+    # 原 409/400/skipped/RISK_NO_ACTIVE_RUNNER 判活链全部退役（判活是「任务生灭」时代产物）。
+    # 账号集 = SA4 同源 enabled_exec_accounts()（enabled ∩ execution 能力域），
+    # 保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」，杜绝静默丢单。
+    accounts_set = None if accounts is None else set(int(a) for a in accounts)
+    _dedup = set()
+    targets = []
+    for row in enabled_exec_accounts():
+        aid = int(row[0])
+        if accounts_set is not None and aid not in accounts_set:
+            continue
+        if aid in _dedup:
+            continue
+        _dedup.add(aid)
+        targets.append(aid)
+    if not targets:
         audit_log(username, f"risk_{verb.replace('-', '_')}",
-                  detail="no active runner (409)")
-        raise ApiError(409, "RISK_NO_ACTIVE_RUNNER",
-                       "无 status=running 的实盘任务（心跳仅用于展示，不参与下发判活）——命令未下发")
-    # 批 171o（A-P1-4）：按 account 去重——同 account 多 runner 只发一 tid（撤/平是
-    # 网关全账户动作，双发重复撤单）。
-    _seen_accts = set()
-    runners = [(tid, acct) for tid, acct in runners
-               if not (acct in _seen_accts or _seen_accts.add(acct))]
+                  detail="no exec-capable account (0 dispatched)")
+        return {"status": "done", "dispatched": 0, "results": {}, "req_ids": {},
+                "pending": [], "no_quote": [], "skipped_t1": [], "rejected": [],
+                "closed_requested": 0, "positions_remain": 0, "retrying": False}
     r = business_redis(socket_timeout=3)
     # 批187：operator_uid 已由显式参数（异步源）或 payload（web）解析，不再在此覆盖。
     if operator_uid is None:
         logger.warning("risk cmd 缺合法 sub（停用 uid 定向 SSE，靠端点兜底）: verb=%s username=%r",
                        verb, username)
     req_ids = []
-    for tid, _acct in runners:
+    for _acct in targets:
         req_id = _uuid.uuid4().hex[:12]
-        r.set(f"risk:cmd:{tid}",
-              _json.dumps({"id": req_id, "verb": verb,
-                           "operator": username, "ts": _t.time(),
-                           "operator_uid": operator_uid,
-                           "skipped_accounts": _skipped}),
-              ex=10 * 60)
-        req_ids.append((tid, req_id))
+        r.lpush(f"td:cmd:{_acct}",
+                _json.dumps({"id": req_id, "verb": verb,
+                             "operator": username, "ts": _t.time(),
+                             "operator_uid": operator_uid}))
+        r.expire(f"td:cmd:{_acct}", 10 * 60)   # List 兜底 TTL（防无人消费堆积）
+        req_ids.append((_acct, req_id))
     # 批 171s：per-uid recent 索引（服务端真源——页面刷新/晚开无内存 req_ids 仍可查终局）。
     # web 下发时即登记 req_id；worker 写 :final 后 recent 端点按 uid 取（只 close-all 有终局）。
     if verb == "close-all" and operator_uid is not None:
@@ -409,7 +394,7 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
             logger.warning("risk active 索引写失败: %s", e)
     # 回执窗（5s——worker 拍周期 1s 轮询+执行）。异步派发 wait_ack=False 不空等。
     results = {}
-    pending = {req_id: tid for tid, req_id in req_ids}
+    pending = {req_id: acct for acct, req_id in req_ids}
     if wait_ack:
         deadline = _t.time() + 5
         while pending and _t.time() < deadline:
@@ -420,11 +405,10 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
                     r.delete(f"risk:cmd:result:{req_id}")
             _t.sleep(0.3)
     audit_log(username, f"risk_{verb.replace('-', '_')}",
-              detail=f"dispatched={len(req_ids)} acked={len(results)} skipped={_skipped}")
-    # 返回：req_ids（tid→req_id）+ 首轮清单 + skipped_accounts（裁定 A：未处置账号明示）
+              detail=f"dispatched={len(req_ids)} acked={len(results)}")
+    # 返回：req_ids（account→req_id）+ 首轮清单（返回值契约保持，skipped_accounts 随判活退役移除）
     base = {"dispatched": len(req_ids), "results": results,
-            "req_ids": {tid: rid for tid, rid in req_ids},
-            "skipped_accounts": _skipped,
+            "req_ids": {acct: rid for acct, rid in req_ids},
             **_aggregate_lists(results)}
     if not wait_ack:
         return {"status": "dispatched", "acked": 0,
@@ -487,10 +471,19 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         ts_fresh = sn.get("pos_ts")
         stale = (ts_fresh is None) or (now - ts_fresh.timestamp() > 120)
         snap = sn.get("snap")
+        # 批188：执行进程在场（td:exec:{acct} 心跳键存在）——前端据此显示「执行进程离线」
+        # 但**不 disable 下发**（命令进队列、自愈后消费；下发路径零判活）。
+        _exec_alive = False
+        if r is not None:
+            try:
+                _exec_alive = bool(r.exists(f"td:exec:{acct_id}"))
+            except Exception:
+                _exec_alive = False
         items.append({
             "account_id": acct_id, "name": name, "provider": provider,
             "enabled": bool(acct_enabled),   # 批 171q：未启用=FE 灰态不可勾
             "running": running,
+            "execAlive": _exec_alive,        # 批188：td_exec 在场（展示用，不参与下发判活）
             "working_orders": working,          # None=无活 runner/键缺（FE 显 —）
             "position_value": None if stale else sn.get("pos_value", 0.0),
             "daily_pnl": (None if not snap or (now - snap[2].timestamp() > 120)
@@ -721,13 +714,15 @@ def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
     from src.web_api.errors import ApiError
     from src.quant_common.redis_client import business_redis
     account_id = int(body["account_id"])
-    runners = _live_runners(accounts=[account_id])
-    if not runners:
+    # 批188：下发零判活，但手工单是**单账号指定**——必须确认该账号有 td_exec 载体
+    # （enabled ∩ execution 能力域，与 SA4 同源），否则写进无人消费队列=静默丢单。
+    from src.data_platform.config_store import enabled_exec_accounts
+    _ok = {int(r[0]) for r in enabled_exec_accounts()}
+    if account_id not in _ok:
         audit_log(payload["username"], "manual_order",
-                  detail=f"no active runner acct={account_id} (409)")
-        raise ApiError(409, "MANUAL_NO_ACTIVE_RUNNER",
-                       "该账号无活动实盘 runner（TD 会话不可用）——命令未下发")
-    tid, _acct = runners[0]
+                  detail=f"account {account_id} not exec-capable (400)")
+        raise ApiError(400, "MANUAL_ACCOUNT_NOT_EXEC",
+                       "该账号无交易执行能力（未启用或无 execution 能力域的 provider）")
     req_id = _uuid.uuid4().hex[:12]
     cid = str(body.get("client_order_id") or f"mo-{req_id}-{body['symbol']}")
     r = business_redis(socket_timeout=3)
@@ -740,9 +735,10 @@ def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
            "order": {"symbol": body["symbol"], "action": body["action"],
                      "volume": int(body["volume"]), "price": float(body["price"]),
                      "order_type": "limit", "client_order_id": cid}}
-    r.set(f"risk:cmd:{tid}", _json.dumps(cmd), ex=10 * 60)
+    r.lpush(f"td:cmd:{account_id}", _json.dumps(cmd))
+    r.expire(f"td:cmd:{account_id}", 10 * 60)
     audit_log(payload["username"], "manual_order",
-              detail=f"req={req_id} tid={tid} {cmd['order']['action']} "
+              detail=f"req={req_id} account={account_id} {cmd['order']['action']} "
                      f"{cmd['order']['symbol']} x{cmd['order']['volume']} @{cmd['order']['price']}")
     deadline = _t.time() + 5
     while _t.time() < deadline:
@@ -754,10 +750,10 @@ def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
                 doc = {}
             r.delete(f"risk:cmd:result:{req_id}")
             return {"status": "accepted" if doc.get("accepted") else "rejected",
-                    "req_id": req_id, "tid": tid, **doc}
+                    "req_id": req_id, "account_id": account_id, **doc}
         _t.sleep(0.3)
-    audit_log(payload["username"], "manual_order_dispatched", detail=f"req={req_id} tid={tid}")
-    return {"status": "dispatched", "req_id": req_id, "tid": tid}
+    audit_log(payload["username"], "manual_order_dispatched", detail=f"req={req_id} account={account_id}")
+    return {"status": "dispatched", "req_id": req_id, "account_id": account_id}
 
 
 @router.post("/api/manual-order")
