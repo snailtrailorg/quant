@@ -259,15 +259,6 @@ class TestHeartbeatDecoding:
     """2026-11-09 e2e 抓到的真因：business_redis 默认 bytes 键 ⇒ hb.get("ts") 恒 None
     ⇒ cancel-all/close-all/halt 恒 409（mock 用 str-key dict 全绿掩盖）。"""
 
-    def test_live_runners_accepts_bytes_keys(self, monkeypatch):
-        import time as _t
-        from src.web_api.routes import risk as R
-        r = MagicMock()
-        r.hgetall.return_value = {b"ts": str(_t.time()).encode(), b"working_orders": b"3"}
-        monkeypatch.setattr("src.data_platform.config_store.live_running_tasks",
-                            lambda: [(11, 1)])
-        with patch("src.quant_common.redis_client.business_redis", return_value=r):
-            assert R._live_runners() == [("11", 1)]
 
     def test_exposure_running_requires_fresh_hb(self, monkeypatch):
         import time as _t

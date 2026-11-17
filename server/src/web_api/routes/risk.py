@@ -232,36 +232,6 @@ def _hb_get(hb, key: str):
     return hb.get(key.encode())
 
 
-def _live_runners(accounts: list[int] | None = None) -> list[tuple[str, int]]:
-    """批 171n：活 runner 枚举——live_task status='running' 行 ∩ 心跳键新鲜（B-P0-2：
-    td_registry 是 builder 插件表非运行时枚举；僵尸 runner〔行 running 心跳死〕不收——
-    命令下发给死进程=静默过期）。返回 [(tid, account_id)]。
-    批 171o：accounts 过滤（勾选集——None=全部；过滤后空=调用方区分 400/409）。"""
-    from src.quant_common.redis_client import business_redis
-    from src.data_platform.config_store import live_running_tasks
-    out = []
-    rows = live_running_tasks()
-    if accounts is not None:
-        rows = [(tid, acct) for tid, acct in rows if acct in set(accounts)]
-    try:
-        # 2026-11-09（171n e2e 抓真因）：business_redis 默认 decode_responses=False
-        # ⇒ hgetall 返回 bytes 键，`hb.get("ts")` 恒 None ⇒ 所有 runner 被判「心跳死」
-        # ⇒ cancel-all/close-all/halt 恒 409（mock 用 str-key dict 全绿掩盖）。
-        # 修：decode_responses=True + _hb_get 双形态容错（旧 client 复用也不炸）。
-        r = business_redis(decode_responses=True, socket_timeout=3)
-        import time as _t
-        for tid, acct in rows:
-            try:
-                hb = r.hgetall(f"quant:hb:task:{tid}")
-                ts = _hb_get(hb, "ts")
-                if ts and _t.time() - float(ts) < 30:
-                    out.append((str(tid), acct))
-            except Exception:
-                continue
-    except Exception:
-        pass   # Valkey 不可达：返回空=端点侧 409（保守——不发命令给未知态）
-    return out
-
 
 # ——— 批 171s：急停终局可见（cmd uid 定向 + :final 端点重拉 + recent 索引）———
 _CLOSE_FINAL_PREFIX = "risk:cmd:result:"
@@ -444,7 +414,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
     accts = [r[:4] for r in _rows if not r[4]]
     r = None
     try:
-        r = business_redis(decode_responses=True, socket_timeout=3)   # 同 _live_runners：bytes 键防呆
+        r = business_redis(decode_responses=True, socket_timeout=3)   # bytes 键防呆
     except Exception:
         pass
     now = _t.time()
