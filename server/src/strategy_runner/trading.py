@@ -1035,13 +1035,14 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                     round_pending.append(f"{getattr(p, 'symbol', '?')}:{_vol}")
             if remain <= 0:
                 empty_hits += 1
-                # 本次曾见持仓却读到空：必须连续两次空且 TD 真连接才认「已清仓」——
-                # TD 断线/查询零回报时 query_position 清缓存返 []，一次空就 done=假报
-                # 「全部平仓完成」（P1-2）。起始即空仓（saw_positions=False）不受此门约束。
-                if saw_positions and (empty_hits < 2 or not td_ok):
+                # 空回报双确认（批188 上产实录修正）：**一律**要求连续两轮空 + TD 真连接才认
+                # 「已清仓」。原「起始即空仓不受此门约束」在常驻进程冷启时是假阴性来源——
+                # 刚建连登录、持仓缓存尚未回报，一次空就 final:done（prod 实录：零委托报成功，
+                # 页面却是既有持仓）。多花一轮（interval≈5s）换「绝不假报清完」。
+                if empty_hits < 2 or not td_ok:
                     round_pending = [":position-query-unstable"]
-                    logger.warning("全平剩余仓判空但未确认（empty_hits=%d td_connected=%s）"
-                                   "——按未清仓继续重试", empty_hits, td_ok)
+                    logger.warning("全平剩余仓判空但未确认（empty_hits=%d td_connected=%s saw=%s）"
+                                   "——按未清仓继续重试", empty_hits, td_ok, saw_positions)
             else:
                 empty_hits = 0
         except Exception as e:

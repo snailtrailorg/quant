@@ -303,6 +303,31 @@ class TestS3ReQuoteEveryRound:
 
 # ─────────────────── S4 Gate（两条链）+ 主循环不阻塞 ───────────────────
 
+    def test_first_empty_query_not_trusted_as_done(self):
+        """冷启空回报：首轮初始+复查都空不得直接 final:done。
+        prod 实录（批188 上产）：常驻进程刚登录、持仓缓存未回，第一次清仓零委托却报成功。"""
+        from src.strategy_runner import trading as T
+        pos = _pos("600000.XSHG", volume=100)
+        # 四拍：第1轮初始空/复查空（冷缓存），第2轮初始有仓/复查空（终局）
+        adapter = _Adapter(position_seq=[[], [], [pos], []])
+        adapter.close_reference_price = lambda tick, p, action: float(tick["px"])
+        adapter.round_close_price = lambda px, tick: px
+        rc = MagicMock()
+        rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
+        with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
+             _patch_rules(), \
+             patch("src.data_platform.hub_quote.get_retry_config", return_value=_retry_cfg()), \
+             patch.object(T, "_quote_price", return_value=({"px": 10.0}, "")), \
+             patch.object(T, "_close_order_open",
+                          side_effect=lambda sym, vol, px, *a, **k: (None, "cid")), \
+             patch.object(T, "write_cmd_result"), \
+             patch.object(T, "write_progress"), \
+             patch.object(T, "_alert"), \
+             patch("time.sleep"):
+            out = T._close_all_positions(adapter)
+        assert adapter.sent, "首轮空回报后必须继续查询——否则真实持仓被静默漏平"
+        assert out["final_reason"] == "final:done"
+
 class _FakeVK:
     def __init__(self):
         self.kv, self.hashes, self.xacks = {}, {}, []
