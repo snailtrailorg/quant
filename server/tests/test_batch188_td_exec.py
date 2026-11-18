@@ -213,6 +213,23 @@ def test_shutdown_stops_engine_and_exits():
     ex._r.delete.assert_called_once()
 
 
+def test_enabled_exec_accounts_ensures_registry():
+    """钉反面：web 进程 registry 未加载时 exec_capable_providers() 空 → 下发 0 账号、
+    接口仍返 done（prod 实录：一键清仓「成功」但 td_exec 没收到任何命令）。"""
+    import src.providers as P
+    import src.registry as R
+    from src.data_platform import config_store as C
+    seen = {"ok": False}
+    _orig_ensure, _orig_prov = P.ensure_registered, R.exec_capable_providers
+    P.ensure_registered = lambda: seen.__setitem__("ok", True)
+    R.exec_capable_providers = lambda: set()
+    try:
+        C.enabled_exec_accounts()
+    finally:
+        P.ensure_registered, R.exec_capable_providers = _orig_ensure, _orig_prov
+    assert seen["ok"], "enabled_exec_accounts 必须先 ensure_registered（否则 web 冷启动恒 0 账号）"
+
+
 # ——— 持仓快照 60s 刷新 ——
 # 钉反面：live_task 退役后无人写 position_snapshot → Web 持仓页/风控快照年龄永久陈旧，
 # 与清仓按实时 query_position 的判定不一致（prod 实录：页面 5 天旧仓 + 清仓零委托）。

@@ -159,6 +159,11 @@ def enabled_exec_accounts() -> list[tuple]:
     保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」，杜绝静默丢单。
     """
     from src.registry import exec_capable_providers
+    # 幂等注册：**web 进程冷启动时 registry 为空** → exec_capable_providers() 返空集 →
+    # 本函数恒 []，下发侧 200 + dispatched=0（界面「已受理/成功」但零命令，prod 实录 11:08）。
+    # SA4 侧（tasks._desired_units）一直有这步，下发侧漏了；两处必须同源同前提。
+    import src.providers as _providers
+    _providers.ensure_registered()
     provs = sorted(exec_capable_providers())
     if not provs:
         return []
