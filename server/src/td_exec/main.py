@@ -79,6 +79,7 @@ class TdExec:
         self._row: dict = {}
         self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
+        self._conn_announced = False                     # 连上沿已对账（XTP 登录异步，靠轮询沿）
 
     def _load_account(self) -> dict:
         from src.data_platform.db import get_conn
@@ -167,19 +168,31 @@ class TdExec:
             tid=str(self.account_id), closing=threading.Event())
 
     def _maybe_connect(self) -> None:
-        """窗开沿建连（与 live_task 同一纯函数语义：交易日门 + 60s 节流）。
+        """窗开沿建连 + 连上沿对账（与 live_task 同一纯函数语义：交易日门 + 60s 节流）。
 
         常驻进程常在盘外启动（批量上产/凌晨 systemd 重启）——_build 时窗关 connect() 跳过，
-        没有这一腿当日开盘就没有 TD 会话，下单全拒且无进程级报错。连上沿重跑对账补宕机窗成交。
+        没有这一腿当日开盘就没有 TD 会话，下单全拒且无进程级报错。
+        XTP 登录是**异步**的（connect() 返回时 connect_status 仍 False），故连上沿观测心跳式轮询：
+        每 tick 看 connected，False→True 的沿做一次对账（补宕机窗成交），并只在沿上打日志。
         """
         win = self._td_window
         if not win or self._exec_port is None:
             return
         try:
-            if self._exec_port.connected:
-                return
+            connected = bool(self._exec_port.connected)
         except Exception:  # noqa: BLE001 —— 端口无 connected 属性按未连处理
             return
+        if connected:
+            if not self._conn_announced:
+                self._conn_announced = True
+                logger.info("TD 会话就绪 account=%s", self.account_id)
+                try:
+                    from src.strategy_runner import trading
+                    trading.reconcile_orders(self._adapter, "", "")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("连上沿对账失败: %s", e)
+            return
+        self._conn_announced = False
         now = time.time()
         if now - self._last_conn_ts < 60.0:
             return
@@ -193,18 +206,6 @@ class TdExec:
             self._exec_port.connect(force=True)   # 实时窗口已由上一行判定；槽内快照是建槽时刻的陈旧值
         except Exception as e:  # noqa: BLE001
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
-            return
-        try:
-            if not self._exec_port.connected:
-                return
-        except Exception:  # noqa: BLE001
-            return
-        logger.info("TD 窗开沿建连成功 account=%s", self.account_id)
-        try:
-            from src.strategy_runner import trading
-            trading.reconcile_orders(self._adapter, "", "")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("重连对账失败: %s", e)
 
     def _start_heartbeat(self):
         from src.strategy_framework.runtime.pulse import HeartbeatWriter

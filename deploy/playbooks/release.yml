@@ -586,7 +586,7 @@
           changed_when: false
           failed_when: false
 
-        - name: 阶段 7 —— 波次重启 + 稳定窗（web→celery→feishu→hub→task）
+        - name: 阶段 7 —— 波次重启 + 稳定窗（web→celery→feishu→task→hub→td_exec）
           include_tasks: wave.yml
           loop: "{{ deploy_waves }}"
           loop_control:

@@ -251,6 +251,7 @@ def _mk_exec_for_window():
     ex._last_conn_ts = 0.0
     ex._exec_port = MagicMock(connected=False)
     ex._adapter = MagicMock()
+    ex._conn_announced = False
     return ex
 
 
@@ -260,7 +261,8 @@ def test_window_open_connects_and_reconciles():
     with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
          patch("src.providers.xtp.session.is_trading_day", return_value=True), \
          patch("src.strategy_runner.trading.reconcile_orders") as rec:
-        ex._maybe_connect()
+        ex._maybe_connect()      # 建连（XTP 登录异步：此时 connected 仍 False）
+        ex._maybe_connect()      # 次 tick 观测到连上沿 → 对账一次
     ex._exec_port.connect.assert_called_once_with(force=True)
     rec.assert_called_once()
 
@@ -290,6 +292,7 @@ def test_window_closed_no_connect():
 def test_window_connected_skips_and_throttles():
     ex = _mk_exec_for_window()
     ex._exec_port.connected = True
+    ex._conn_announced = True      # 已宣告过 → 不再对账
     with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
          patch("src.providers.xtp.session.is_trading_day", return_value=True):
         ex._maybe_connect()
