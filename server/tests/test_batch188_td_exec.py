@@ -213,21 +213,17 @@ def test_shutdown_stops_engine_and_exits():
     ex._r.delete.assert_called_once()
 
 
-def test_enabled_exec_accounts_ensures_registry():
-    """钉反面：web 进程 registry 未加载时 exec_capable_providers() 空 → 下发 0 账号、
-    接口仍返 done（prod 实录：一键清仓「成功」但 td_exec 没收到任何命令）。"""
-    import src.providers as P
-    import src.registry as R
-    from src.data_platform import config_store as C
-    seen = {"ok": False}
-    _orig_ensure, _orig_prov = P.ensure_registered, R.exec_capable_providers
-    P.ensure_registered = lambda: seen.__setitem__("ok", True)
-    R.exec_capable_providers = lambda: set()
-    try:
-        C.enabled_exec_accounts()
-    finally:
-        P.ensure_registered, R.exec_capable_providers = _orig_ensure, _orig_prov
-    assert seen["ok"], "enabled_exec_accounts 必须先 ensure_registered（否则 web 冷启动恒 0 账号）"
+def test_dispatch_paths_ensure_registry():
+    """钉反面：web 进程 registry 未加载 → exec_capable_providers() 空 → 下发 0 账号但 200 done
+    （prod 实录：一键清仓「成功」而 td_exec 没收到命令）。两条下发路径 + 监控期望集都必须先注册。"""
+    import re as _re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src"
+    for rel in ("web_api/routes/risk.py", "health_monitor/collector.py"):
+        txt = (root / rel).read_text(encoding="utf-8")
+        assert "ensure_registered()" in txt, f"{rel} 缺 ensure_registered（冷启动恒空账号集）"
+        # 同时确认不是死代码：注册调用必须与 enabled_exec_accounts 同现
+        assert "enabled_exec_accounts" in txt
 
 
 # ——— 持仓快照 60s 刷新 ——

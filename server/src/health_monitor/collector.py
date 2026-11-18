@@ -227,6 +227,8 @@ def collect(now: float | None = None) -> dict:
     # 批188：td_exec 期望集（enabled ∩ execution 能力域；与 SA4 同源）+ 在场集（TTL 心跳键）
     try:
         from src.data_platform.config_store import enabled_exec_accounts
+        import src.providers as _providers   # 冷启动注册（否则期望集恒空 → td_exec_down 永不触发）
+        _providers.ensure_registered()
         _exec_expected = {int(r[0]) for r in enabled_exec_accounts()}
     except Exception:
         _exec_expected = set()

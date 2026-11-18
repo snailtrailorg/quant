@@ -301,6 +301,11 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
     import uuid as _uuid
     from src.quant_common.redis_client import business_redis
     from src.data_platform.config_store import enabled_exec_accounts
+    # 批188 上产实录：web 进程冷启动 registry 为空 → exec_capable_providers() 空集 →
+    # 下方 targets=[] → 200 done/dispatched=0（界面「成功」但零命令，持仓未动）。
+    # 入口层（4）→ providers（2）方向合法；幂等，SA4 侧（tasks._desired_units）同款。
+    import src.providers as _providers
+    _providers.ensure_registered()
     # 方案A 兼容：payload 提供时从它解析 username/uid（web 调用方零改动保留），
     # 否则用显式参数（非 web 源）。
     if payload:
@@ -687,6 +692,8 @@ def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
     # 批188：下发零判活，但手工单是**单账号指定**——必须确认该账号有 td_exec 载体
     # （enabled ∩ execution 能力域，与 SA4 同源），否则写进无人消费队列=静默丢单。
     from src.data_platform.config_store import enabled_exec_accounts
+    import src.providers as _providers   # 冷启动注册（同 _dispatch_risk_cmd；否则恒判「无执行能力」）
+    _providers.ensure_registered()
     _ok = {int(r[0]) for r in enabled_exec_accounts()}
     if account_id not in _ok:
         audit_log(payload["username"], "manual_order",
