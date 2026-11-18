@@ -646,6 +646,42 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
             "total": len(rows)}
 
 
+@router.get("/api/trades")
+def list_trades(limit: int = Query(200, ge=1, le=1000),
+                symbol: str | None = None,
+                account_id: int | None = None,
+                since: str | None = None,
+                payload: dict = Depends(require_perm("read"))):
+    """成交流水（trade_log 唯一读出口；批188 补：此前只有写口，清仓到底成没成交无法自查）。
+
+    since 支持 ISO 日期/时间（如 2026-11-18），按 ts >= since 过滤。
+    """
+    from src.data_platform.db import get_conn
+    sql = ("SELECT ts, symbol, action, volume, price, commission, strategy_id, "
+           "order_id, account_id, trade_ref FROM trade_log WHERE 1=1")
+    args: list = []
+    if symbol:
+        sql += " AND symbol=%s"
+        args.append(symbol)
+    if account_id is not None:
+        sql += " AND account_id=%s"
+        args.append(int(account_id))
+    if since:
+        sql += " AND ts >= %s::timestamptz"
+        args.append(since)
+    sql += " ORDER BY ts DESC LIMIT %s"
+    args.append(int(limit))
+    with get_conn() as conn:
+        rows = conn.execute(sql, tuple(args)).fetchall()
+    return {"items": [{"ts": r[0].isoformat() if r[0] else "", "symbol": r[1],
+                       "action": r[2], "volume": r[3],
+                       "price": float(r[4]) if r[4] is not None else None,
+                       "commission": float(r[5]) if r[5] is not None else None,
+                       "strategy_id": r[6], "order_id": r[7],
+                       "account_id": r[8], "trade_ref": r[9]} for r in rows],
+            "total": len(rows)}
+
+
 @router.get("/api/account")
 def list_accounts(payload: dict = Depends(require_perm("read"))):   # 批55b:LiveTask 建任务下拉依赖(viewer 可见掩码提示)
     """列券商/交易所账户（密钥不返回明文）。"""
