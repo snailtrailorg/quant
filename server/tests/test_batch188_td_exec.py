@@ -230,21 +230,24 @@ def test_dispatch_paths_ensure_registry():
 # 钉反面：live_task 退役后无人写 position_snapshot → Web 持仓页/风控快照年龄永久陈旧，
 # 与清仓按实时 query_position 的判定不一致（prod 实录：页面 5 天旧仓 + 清仓零委托）。
 
-def test_flush_positions_cadence_and_gate():
+def test_snapshot_cycle_cadence_and_gate():
+    """账户快照与持仓同批刷新（snapshot_cycle）——缺账户快照则风控 fail-closed 拒所有平仓单。"""
     from src.td_exec import main as M
     ex = _mk_exec_for_window()
     ex._last_flush = 0.0
+    ex._baseline_cache = {}
     ex._exec_port.connected = True
-    with patch("src.strategy_runner.trading._flush_positions") as fl:
+    with patch("src.strategy_runner.trading.snapshot_cycle") as sc:
         ex._maybe_flush_positions()
         ex._maybe_flush_positions()      # 60s 节流内不重复
-    assert fl.call_count == 1
+    assert sc.call_count == 1
     # 未连不写（防断线空缓存覆盖真相表）
     ex2 = _mk_exec_for_window()
     ex2._last_flush = 0.0
-    with patch("src.strategy_runner.trading._flush_positions") as fl2:
+    ex2._baseline_cache = {}
+    with patch("src.strategy_runner.trading.snapshot_cycle") as sc2:
         ex2._maybe_flush_positions()
-    fl2.assert_not_called()
+    sc2.assert_not_called()
 
 
 # ——— 建连入参：tid 必须是 int ———

@@ -80,7 +80,8 @@ class TdExec:
         self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
         self._conn_announced = False                     # 连上沿已对账（XTP 登录异步，靠轮询沿）
-        self._last_flush = 0.0                           # 持仓快照 60s 刷新节流
+        self._last_flush = 0.0                           # 账户/持仓快照 60s 刷新节流
+        self._baseline_cache: dict = {}                  # _account_baseline_capital 缓存（每进程一份）
 
     def _load_account(self) -> dict:
         from src.data_platform.db import get_conn
@@ -209,11 +210,11 @@ class TdExec:
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
 
     def _maybe_flush_positions(self) -> None:
-        """60s 持仓快照刷新（position_snapshot 唯一写入口随 live_task 退役后由本进程承接）。
+        """60s 账户+持仓快照刷新（live_task 退役后由本进程承接；复用 trading.snapshot_cycle）。
 
-        缺这一腿的后果（prod 实录）：无 live_task 时 position_snapshot 永久停在最后一次任务那天，
-        Web 持仓页/风控快照年龄全是陈旧值；而一键清仓按实时 query_position 判定，二者不一致。
-        只写不判：失败仅 warning，不阻断主循环。
+        缺这一腿的后果（prod 实录）：无 live_task 时 account_snapshot / position_snapshot 永久停在
+        最后一次任务那天——Web 持仓页是旧仓，风控「账户快照陈旧」fail-closed 把所有平仓单拒掉
+        （清仓无限重试但永远发不出去）。只写不判：失败仅 warning，不阻断主循环。
         """
         now = time.time()
         if now - self._last_flush < 60.0:
@@ -226,9 +227,9 @@ class TdExec:
         self._last_flush = now
         try:
             from src.strategy_runner import trading
-            trading._flush_positions(self._adapter, self.account_id, None)
+            trading.snapshot_cycle(self._adapter, self.account_id, None, self._baseline_cache)
         except Exception as e:  # noqa: BLE001
-            logger.warning("持仓快照刷新失败: %s", e)
+            logger.warning("账户/持仓快照刷新失败: %s", e)
 
     def _start_heartbeat(self):
         from src.strategy_framework.runtime.pulse import HeartbeatWriter
