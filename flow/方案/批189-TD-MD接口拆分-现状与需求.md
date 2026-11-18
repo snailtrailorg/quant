@@ -225,6 +225,57 @@
 - **D3 映射缺失**：**允许留空**；运行时报错（exec 启动不拒、清仓/下单取价时返回明确 `no_quote` 类错误并告警），页面上对该交易接口标黄。
 - **D4 数据源归属**：tushare/akshare 等**不算行情接口**，保留独立「数据源」页签；行情接口只承载实时行情（rt_quote 及未来同一链路的 hist/ref_data/inst_event 若走实时通道）。
 
+
+## 7. 模块拆分与契约（2026-11-18 用户要求：小步、契约先行、每步完整）
+
+### 7.1 原则
+
+- **契约先于代码**：C0 契约冻结先行；任何模块实现不得私自扩/改契约，要改先回 C0。
+- **每步可独立验收**：每个模块给一条可执行证据（curl / systemctl / psql / 日志断言），不靠"全量测试绿"当完成证据。
+- **每步不留尾巴**：模块内六面（数据/写入/读展示/可观测/测试/文档）齐全；明确列出"本模块不做什么"。
+- **依赖单向**：下游模块只消费上游契约，禁止反向 import；跨模块只走 API/表/键。
+
+### 7.2 契约清单（C0 冻结物）
+
+| 编号 | 契约 | 内容要点 |
+|---|---|---|
+| C1 身份 | `code` | 正则 `^[a-z][a-z0-9-]{1,30}$`；全局唯一；不可改；三类前缀 `md-/td-/ds-`；unit/键/日志/UI 全用 code |
+| C2 数据 | 三表 + 映射 | `market_interface(code,name,provider,market,params,credentials,enabled,...)`；`trade_interface` 同构 + `code`；`td_md_map(td_code,md_code,priority,is_primary)`；7 张业务表 FK 指向 `trade_interface.id`（历史 id 不变） |
+| C3 运行 | 状态机 | `registered → running(idle) → working(enabled) → idle(disabled) → deleting → stopped`；配置轮询 ≤5s；空闲不建会话、不占 terminal；删除=先停后删 |
+| C4 键与心跳 | Redis/unit | unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:{md|td}:<code>` 字段 `{enabled,working,provider,market,conn,subs,bars,ts,seq}`；数据键 `hub:latest_tick:<md_code>:<vt>`、`td:cmd:<td_code>`、`td:exec:<td_code>` |
+| C5 API | 端点与错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/api/td-interfaces/{code}/mappings`；错误码 `MAPPING_MISSING`、`PROVIDER_UNSUPPORTED`、`CODE_CONFLICT`、`IFACE_BUSY`；权限沿用 `system_config` |
+| C6 能力 | 插件声明 | manifest 按接口类型声明：行情类 `market_data`、交易类 `execution`；未插件化 provider 只能建"待接入"且不可启用 |
+
+### 7.3 模块表
+
+| 模块 | 范围（做什么） | 依赖 | 验收证据（一条） | 明确不做 | 规模 |
+|---|---|---|---|---|---|
+| **M0** 契约冻结 | 把 C1–C6 写成文档 + 契约测试骨架（表/键/正则断言） | — | 文档评审通过；`test_contract_b189.py` 空跑绿 | 不写业务代码 | 1 文档 + 1 测试 |
+| **M1** 三表 expand | 迁移建 `market_interface`/`trade_interface`/`td_md_map`；存量 4 行拆行；`trading_account` 保留为兼容视图；补 `code` | M0 | scratch 库 `upgrade→downgrade→upgrade` 往返绿；旧代码仍能读写（视图） | 不切代码读路径 | 1 迁移 + 1 往返脚本 |
+| **M2** 接口后端 | 三类实体 CRUD、code 生成/冲突校验、映射 CRUD、能力域二套校验、审计 | M1 | `curl` 建 md-xtp / td-xtp / 映射 → 列表回读一致；重复 code 返回 `CODE_CONFLICT` | 不做 UI/进程 | 1 路由 + 1 仓储 + 测试 |
+| **M3** 进程常驻空转 | SA4 期望=全部接口；unit 用 code；进程读配置决定干活/空转；空闲释放 session slot；懒加载；删除先停 | M2 | 注册后 `systemctl is-active`=active；切 enabled → 心跳 `working` 5s 内翻转；停用后 `ss` 无券商连接 | 不做订阅模型 | 3 文件（tasks/hub_loop/exec_loop）+ 测试 |
+| **M4** MD 数据面 | 订阅真相源按「行情接口 + provider + market」隔离（含两 bug）；transient/shadow 表补维度；tick 键改 code | M3 | OKX 1h 无 `symbol not found: *_SWAP_OKX`；币安 10min 无 reset 且 bars 递增 | 不做 TD | 2 文件 + 回归测试 |
+| **M5** TD 执行面 | 映射解析（1:N 主备）、取价降级、`MAPPING_MISSING` 报错、心跳 working、空闲不登录 | M3 | 改映射后清仓日志显示新 md code；留空映射返回明确错误 | 不做 UI | 2 文件 + 测试 |
+| **M6** 前端两页签 | 集成中心拆「行情接口/交易接口」；列表/表单按类型裁剪；映射编辑器；监控三值状态 | M2/M4/M5 | 页面建两类接口 + 映射；build 门（tokens/locales/pageshell）全绿 | 不做权限键 | 3-4 前端文件 + 三语 |
+| **M7** 观测告警 | 按接口维度的监控卡片；`iface_down`/`subscription_fail`/`mapping_missing` 规则；working 态可见 | M3 | 停进程 → 一个对账周期内出告警；页面显示空闲/停止 | 不做新 UI 框架 | 2 文件 + 测试 |
+| **M8** contract 收口 | 删兼容视图/旧列；文档重写（A02/D25/D26/A06/CLAUDE）；待办/进展归档 | M1–M7 | 全量绿 + 部署后 pinned 单版 + 旧视图已删 | 不再改语义 | 1 迁移 + 文档 |
+
+### 7.4 交付顺序
+
+```
+M0 ── M1 ── M2 ─┬─ M3 ─┬─ M4 ─┐
+                │      └─ M5 ─┼─ M6 ── M7 ── M8
+                └─────────────┘
+```
+
+- 串行主干：M0 → M1 → M2 → M3；M4/M5 可并行（互不依赖）；M6 依赖 M2（接口就绪）与 M4/M5（状态可展示）。
+- M3 起即必须"进程常驻空转"语义，晚做会导致 UI/监控返工。
+
+### 7.5 止血项（可选，先于 M4）
+
+- **189a**：只改 `md_hub/main.py::_desired_symbols` 的过滤（provider/market/接口维度）+ 回归测试，约 1-2 文件。
+- 定位：临时止血，**会被 M4 取代**；若接受 M4 在数日内交付，可跳过，避免同一段代码改两遍。
+
 ## 6. 建议切分（供方案阶段参考，非承诺）
 
 1. 批 189a：**两个 bug 快修**（订阅源按 provider/market/接口过滤 + 无凭证接口治理），不依赖拆分。
