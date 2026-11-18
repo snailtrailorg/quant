@@ -190,7 +190,7 @@ class TdExec:
             return
         self._last_conn_ts = now
         try:
-            self._exec_port.connect()
+            self._exec_port.connect(force=True)   # 实时窗口已由上一行判定；槽内快照是建槽时刻的陈旧值
         except Exception as e:  # noqa: BLE001
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
             return

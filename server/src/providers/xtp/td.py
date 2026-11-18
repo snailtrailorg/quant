@@ -112,8 +112,13 @@ class XtpExecutionPort:
             self._accounts[d.accountid] = d
 
     # ── 生命周期 ──────────────────────────────────────────
-    def connect(self) -> None:
-        if not self.slot.window_open:
+    def connect(self, *, force: bool = False) -> None:
+        """建连。force=True 跳过槽内窗快照。
+
+        slot.window_open 是**建槽时刻**的布尔快照（frozen dataclass 字段）——常驻进程在窗关
+        时启动后它永久为 False，靠快照永远连不上。窗开沿补连由调用方按实时窗口判定后 force。
+        """
+        if not (force or self.slot.window_open):
             logger.info("XTP TD 窗关：跳过建连（等窗开沿）")
             return
         self._gw.connect(self._setting)

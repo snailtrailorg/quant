@@ -256,13 +256,27 @@ def _mk_exec_for_window():
 
 def test_window_open_connects_and_reconciles():
     ex = _mk_exec_for_window()
-    ex._exec_port.connect.side_effect = lambda: setattr(ex._exec_port, "connected", True)
+    ex._exec_port.connect.side_effect = lambda **kw: setattr(ex._exec_port, "connected", True)
     with patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
          patch("src.providers.xtp.session.is_trading_day", return_value=True), \
          patch("src.strategy_runner.trading.reconcile_orders") as rec:
         ex._maybe_connect()
-    ex._exec_port.connect.assert_called_once()
+    ex._exec_port.connect.assert_called_once_with(force=True)
     rec.assert_called_once()
+
+
+def test_port_connect_force_bypasses_stale_slot_snapshot():
+    """钉反面：slot.window_open 是建槽时刻快照（窗关启动后恒 False）——
+    补连必须走 force，否则 connect() 永远打日志跳过，当日零 TD 会话且无报错。"""
+    from src.providers.xtp.td import XtpExecutionPort
+    p = XtpExecutionPort.__new__(XtpExecutionPort)
+    p.slot = SimpleNamespace(window_open=False)
+    p._gw = MagicMock()
+    p._setting = {"k": 1}
+    XtpExecutionPort.connect(p)
+    p._gw.connect.assert_not_called()
+    XtpExecutionPort.connect(p, force=True)
+    p._gw.connect.assert_called_once_with({"k": 1})
 
 
 def test_window_closed_no_connect():
