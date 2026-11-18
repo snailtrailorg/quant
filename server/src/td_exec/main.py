@@ -80,6 +80,7 @@ class TdExec:
         self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
         self._conn_announced = False                     # 连上沿已对账（XTP 登录异步，靠轮询沿）
+        self._last_flush = 0.0                           # 持仓快照 60s 刷新节流
 
     def _load_account(self) -> dict:
         from src.data_platform.db import get_conn
@@ -207,6 +208,28 @@ class TdExec:
         except Exception as e:  # noqa: BLE001
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
 
+    def _maybe_flush_positions(self) -> None:
+        """60s 持仓快照刷新（position_snapshot 唯一写入口随 live_task 退役后由本进程承接）。
+
+        缺这一腿的后果（prod 实录）：无 live_task 时 position_snapshot 永久停在最后一次任务那天，
+        Web 持仓页/风控快照年龄全是陈旧值；而一键清仓按实时 query_position 判定，二者不一致。
+        只写不判：失败仅 warning，不阻断主循环。
+        """
+        now = time.time()
+        if now - self._last_flush < 60.0:
+            return
+        try:
+            if not self._exec_port.connected:
+                return
+        except Exception:  # noqa: BLE001
+            return
+        self._last_flush = now
+        try:
+            from src.strategy_runner import trading
+            trading._flush_positions(self._adapter, self.account_id, None)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("持仓快照刷新失败: %s", e)
+
     def _start_heartbeat(self):
         from src.strategy_framework.runtime.pulse import HeartbeatWriter
         self._hb = HeartbeatWriter(
@@ -307,6 +330,7 @@ class TdExec:
             now = time.time()
             if now - last_hb >= 10:
                 self._maybe_connect()
+                self._maybe_flush_positions()
                 self._hb.beat()
                 try:
                     from src.quant_common.guard import sd_notify as _sd_notify

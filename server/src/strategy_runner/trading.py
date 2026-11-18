@@ -878,6 +878,11 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             logger.error("全平：持仓查询失败: %s", e)
             positions = []
             round_no_quote.append(":position-query-failed")
+        if int(entry.get("tries", 0)) == 0:
+            # 诊断锚（批188 上产实录：零持仓直接 done，无任何留痕，事后无法判断是真空仓还是查询空回报）
+            logger.info("全平首轮 req=%s 持仓查询=%d 条（TD连接=%s）",
+                        req_id, len(positions),
+                        bool(getattr(td_api, "connect_status", None)))
         for pos in positions:
             vol = int(getattr(pos, "volume", 0) or 0)
             frozen = int(getattr(pos, "frozen", 0) or 0)
@@ -1098,6 +1103,9 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
         "skipped_accounts": list(skipped_accounts or []), "ts": _t.time(),
     })
     out["final_reason"] = final_reason
+    logger.info("全平结束 req=%s reason=%s 已发单=%d 剩余=%s T+1未平=%d 拒单=%d",
+                req_id, final_reason, out["closed_requested"], out["positions_remain"],
+                len(out["skipped_t1"]), len(out["rejected"]))
     if final_reason != "final:done":
         _alert(f"急停全平未竟（{final_reason}）req={req_id}",
                f"account={account_id} pending={out['pending']} no_quote={out['no_quote']} "
