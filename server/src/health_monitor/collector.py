@@ -232,7 +232,7 @@ def collect(now: float | None = None) -> dict:
         _exec_expected = {int(r[0]) for r in enabled_exec_accounts()}
     except Exception:
         _exec_expected = set()
-    snap["td_execs"] = {"expected": sorted(_exec_expected), "alive": []}
+    snap["td_execs"] = {"expected": sorted(_exec_expected), "alive": [], "details": {}}
 
     # 系统资源（内存/磁盘/swap，各按配置周期采集；psutil 缺失→对应项 None=证据缺失）+ 生效阈值（同源配置）
     snap["resources"] = _collect_resources(now)
@@ -245,11 +245,21 @@ def collect(now: float | None = None) -> dict:
         # 批188：td_exec 在场键扫描（td:exec:{account} 存在=进程在场）
         try:
             _alive = []
+            _details = {}
             for _k in r.scan_iter("td:exec:*", count=100):
                 _a = _k.rsplit(":", 1)[-1]
-                if _a.isdigit():
-                    _alive.append(int(_a))
+                if not _a.isdigit():
+                    continue
+                _alive.append(int(_a))
+                try:
+                    _h = r.hgetall(_k) or {}
+                except Exception:  # noqa: BLE001
+                    _h = {}
+                _details[_a] = {"provider": _h.get("provider", ""),
+                                "quote_account_id": _h.get("quote_account_id", ""),
+                                "ts": _h.get("ts")}
             snap["td_execs"]["alive"] = sorted(_alive)
+            snap["td_execs"]["details"] = _details
         except Exception:
             pass
         # hub 心跳 N 实例（批 66b：SCAN per-account 在场集——{account_id: {...}}；
