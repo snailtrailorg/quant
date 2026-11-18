@@ -164,16 +164,25 @@
 
 ## 5. 待拍板问题（Q1–Q10）
 
-- **Q1 实体形态**：A) 新建 `market_interface` / `trade_interface` 两表；B) 保留 `trading_account` 加 `role(md|td)` 列 + 唯一约束。A 更彻底但要动 7 张 FK；B 改动小但「账号」语义仍混。
-- **Q2 一个 TD 对应几个 MD**：1:1 / 1:N（主备切换）？影响映射列与清仓取价降级策略。
+- ~~Q1 实体形态~~ → **D1：行情/交易各一单表（A 方案，待确认「数据源是单表」推理）**。
+- ~~Q2 TD:MD~~ → **D2：1:N 主备**。
 - **Q3 跨市场映射**：TD(astock) 能否映射 MD(crypto)？（应为否，需要校验）
 - **Q4 权限**：两个页签共用 `system_config`，还是新增 `md_config`/`td_config`？（RBAC 注册表要同步）
-- **Q5 映射缺失**：TD 未指定 MD 时——阻止保存 / 自动取同市场唯一 MD / 运行时报错拒单？
+- ~~Q5 映射缺失~~ → **D3：允许留空，运行时报错**。
 - **Q6 EMT 交易**：本期是否把 EMT 纳入 execution（D32 P4）并建 TD 接口？不做则 EMT 只有行情接口。
 - **Q7 无凭证账号（币安/欧易）**：本期禁用 / 保留空转 / 拆分后允许「仅行情且匿名」？
 - **Q8 「注册即建进程」语义**：停用时要不要在监控/页面上显示「已创建·stopped」（systemd 无实例概念，需 SA4 保持一个 stopped 实例 or 仅 UI 展示期望态）？
-- **Q9 数据源表是否并入「行情接口」**：`data_source`（tushare/akshare 等历史数据拉取）是否也算行情接口，还是保持独立「数据源」页签？
+- ~~Q9 数据源是否并入行情接口~~ → **D4：不并入，保留独立数据源页签**。
 - **Q10 迁移 id 策略**：TD 沿用旧 account id、MD 新建 id？（推荐，保 7 张 FK 数据语义）——需确认历史 `quote_account_id` 与 `position_snapshot.account_id` 的归属。
+
+## 5-A. 已裁定（2026-11-18 用户）
+
+- **D1 实体形态（待确认措辞）**：现状 `data_source` 是**单表**（83a 起每域一张表：`data_source` / `trading_account`）。按「单表则都建成单表」的口径 ⇒ **行情接口、交易接口各建一张单表**（数据源保持 `data_source` 不动），即原 Q1 的 **A 方案**：`market_interface` + `trade_interface` 两表。
+  - 原 `trading_account` 行迁为 `trade_interface`（**沿用旧 id**，7 张 FK 与历史数据语义不变）；行情侧新建 `market_interface` 行（新 id）。
+  - 数据源页签（tushare/akshare）**不并入**行情接口（见 D4）。
+- **D2 TD→MD 关系**：**1:N 主备**——交易接口可关联多个行情接口，带 priority；清仓取价按主→备降级（需定义降级判据：主接口无 tick/断流/未启用）。
+- **D3 映射缺失**：**允许留空**；运行时报错（exec 启动不拒、清仓/下单取价时返回明确 `no_quote` 类错误并告警），页面上对该交易接口标黄。
+- **D4 数据源归属**：tushare/akshare 等**不算行情接口**，保留独立「数据源」页签；行情接口只承载实时行情（rt_quote 及未来同一链路的 hist/ref_data/inst_event 若走实时通道）。
 
 ## 6. 建议切分（供方案阶段参考，非承诺）
 
