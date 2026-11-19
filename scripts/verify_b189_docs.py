@@ -78,8 +78,8 @@ def ref_exists(rel: str) -> bool:
 
 
 def collect():
-    req, arch = read(DOC_REQ), read(DOC_ARCH)
-    both = req + '\n' + arch
+    req, arch, m0 = read(DOC_REQ), read(DOC_ARCH), read(DOC_M0)
+    both = req + '\n' + arch + '\n' + m0
     rows = []
 
     for k, why in NEED_KEYS.items():
@@ -116,8 +116,10 @@ def collect():
     if DOC_M0.exists():
         m = re.search(r'## 6\..*?(?=\n## )', req, re.S)
         block = m.group(0) if m else ''
-        ok = not re.search(r'\n\|\s*C[1-7]\s*\|', block)
-        rows.append(('M0 指针', '需求 §6 无 C 表体', 'M0 合并后 §6 必须是纯指针', ok))
+        ok = ('M0-契约' in block) and ('varchar(32)' not in block) and ('MAPPING_MISSING' not in block)
+        rows.append(('M0 指针', '需求 §6 为纯指针', '契约正文只在 M0', ok))
+        heads = all(f'## {i}.' in m0 for i in range(1, 8))
+        rows.append(('M0 完整', 'C1–C7 七节齐备', 'M0 契约不得缺节', heads))
     return rows
 
 

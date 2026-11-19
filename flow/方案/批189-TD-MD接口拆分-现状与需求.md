@@ -146,34 +146,22 @@
 | D15 | 迁移唯一路线=离线窗口；M1 一次切完；不做双写 |
 | D16 | 回滚=快照恢复；基线重置为授权兜底（需判据与决策人） |
 
-## 6. 契约（C0）
+## 6. 契约（指针）
 
-| 编号 | 契约 | 内容 |
+> C1–C7 与 §6.1 列归属表已迁至 **`flow/方案/批189-M0-契约.md`**（唯一真源，2026-11-19）。
+> 本节只保留指针：契约改动走 M0 文件 + 断言，改这里无效。
+
+| 编号 | 主题 | 真源 |
 |---|---|---|
-| C1 身份 | code | `varchar(32) COLLATE "C"`；正则 `^[a-z][a-z0-9-]{1,30}$`；前缀 CHECK（md-/td-/ds-）；不可改 |
-| C2 数据 | 三表+映射+租约 | 三表 code PK + 列归属表（见 §6.1）；`quote_account_id` 由 `td_md_map` 取代（M1 删）；业务表 `account_code` TEXT FK→trade_interface；`account_permission` 锚 `login_key`（物理账号权限，不随 TD 行）；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
-| C3 运行 | 两轴 | 运行轴：`运行`/`停止`（`working` 仅副标）；配置轴：`完整`/`未完成(缺载体\|缺凭证\|缺映射)`；`enabled=true ⇒ 完整`（保存即校验）；配置轮询 ≤5s；有载体即拉起；删除=先停→物理删 |
-| C4 键与流 | unit/Redis | **唯一键族**：unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working/subs/bars/reset_cnt`，替代 `quant:hb:md-hub:*` 与 `td:exec:*`）；`hub:latest_tick:<md_code>:<sym>`、`hub:latest_tick:pub:<sym>`（公共快照，跨接口共享故不带 code）、`hub:bars:<md_code>:<sym>`、`hub:worker:max_ts:<md_code>:<sym>`、`td:cmd:<td_code>`、`risk:cmd:result:<req_id>[:final]`；**`td:exec:*` 退役**（在场判据=心跳键存在）；消息 account=MD code |
-| C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；**业务码（用户可据此行动）**：`MAPPING_MISSING`（去配映射）/`NO_QUOTE`（查行情，仅 `no_tick`）/`PROVIDER_UNSUPPORTED`（换 provider 或等插件）/`CREDENTIALS_INCOMPLETE`（补凭证）/`IFACE_IDLE`（先启用）/`CODE_CONFLICT`（改名）/`IFACE_BUSY`（先停任务）；**基础设施故障不进业务码**：`valkey_down`/`bad_json` → 503 + `detail`；入参/出参 account 一律 code（旧 int 拒绝） |
-| C6 插件 | manifest | provider 可声明 md/td 双角色。**载体定义（M8 前）**=`registry` 插件 ∪ legacy `create_md_gateway`（`md_hub` 的 `_LegacyMdShim` 通路，现网 emt/binance/okx 行情走此）——否则 D8「币安/欧易行情启用」与 M4 两 bug 验收自相矛盾。无载体→不建进程、不可启用；**M8 验收=`registry` only 且 legacy 注册点为零** |
-| C7 部署 | 波次/wrapper | 波次取在跑实例；dbro/hbcheck **按 marker 二选一（新/旧），未知 rc=1**；破坏性门参数；pinned 覆盖 code 实例 |
+| C1 | 身份（code 规则/前缀/不可改） | M0 §1 |
+| C2 | 数据（三表/映射/租约/8 处引用/删除行为） | M0 §2 |
+| C3 | 运行（两轴 + 启用校验矩阵） | M0 §3 |
+| C4 | 键族白名单与退役键 | M0 §4 |
+| C5 | API 端点/业务码/HTTP 映射 | M0 §5 |
+| C6 | 载体定义（registry 与 legacy 过渡） | M0 §6 |
+| C7 | 部署（marker/0192/波次/wrapper） | M0 §7 |
+| 列归属 | 旧 trading_account 到三表 | M0 §2.1 |
 
-### 6.1 列归属表（M1 建表/回填唯一依据）
-
-| 旧 `trading_account` 列 | market_interface | trade_interface | data_source | 处置 |
-|---|---|---|---|---|
-| id | — | — | — | 不再作为身份；新表主键=code |
-| name/provider/market/params/credentials_encrypted/impl/enabled/position/created_at/updated_at | ✓ | ✓ | ✓ | 原样复制 |
-| account_key | ✓ | ✓ | 视原行 | 物理账号语义键；同物理账号 md/td 相同 |
-| login_key（新） | ✓ | ✓ | — | **稳定物理身份**=`provider + account_key`（缺失回落 `provider + code`），**禁含凭证**；租约与权限锚点（见 §4.2） |
-| exchanges | ✓ | — | — | 行情侧市场范围 |
-| capabilities | — | — | — | **不落新表**：由接口类型+manifest 派生；迁移时仅用于分流 |
-| quote_account_id | — | — | — | 由 `td_md_map` 取代，M1 删除 |
-| is_virtual | — | ✓ | — | 纸交易虚拟账号属于交易接口 |
-
-**引用归属**：`live_task/position_snapshot/position_refresh/account_snapshot/order_log/trade_log` → `trade_interface(code)`；`account_permission` → `login_key`（物理账号权限，不随 TD 行增删）；`data_source_usage.interface_id` → `data_source(code)`。
-
-**订阅辅助表**：`hub_transient_subs` 增 `md_code`（+market）与 TTL 唯一键；`hub_shadow_symbols` 改为带 `md_code/market` 的表（或键带前缀），禁止全局符号键。
 ## 7. 模块
 
 | 模块 | 范围 | 依赖 | 验收 | 不做什么 |
@@ -184,8 +172,8 @@
 | M3 进程与部署 | 期望=有载体接口（不看 enabled）；注册即 enable+start；enabled 干活/空转（**`get_interface_row` 去掉 `enabled=true` 谓词**，否则停用即 exit 78 重启环）；凭证/provider 变更检测（exit 9）；释放 slot；懒加载；删除先停；波次/wrapper；`td_exec` 登记 LAYER=3；回执/心跳写口下沉 `quant_common`；**心跳读侧全量改接**（`td:exec`→`iface:hb:td`：`routes/risk.py`、`collector`、`monitor`；MD 侧 `quant:hb:md-hub`→`iface:hb:md`：`collector`、`readyz`、`hub_worker`、`run_hub_postverify`）；**删 `legacy_transition` 豁免**；既有两条告警规则 code 化 + `evaluate` fail-loud | M2 | 两轴可复现（运行/停止 + 配置完整度）；停用无连接；改凭证后自动重建；code unit 正常；停一个 hub 下一轮出 `hub_hb_lost`；readyz 在 code 键下为 200；发布+恢复演练 | 不做订阅模型 |
 | M4 MD 数据面 | 订阅按接口/provider/market；映射解析（`MAPPING_MISSING`/`NO_QUOTE` 分码）；bar 归属；data_license；**两 bug（含 `strategy_framework/md_gateway.py` 的 `_SWAP_OKX` 生成点）**；心跳加 `subs/bars/reset_cnt` | M3 | OKX/币安断言（reset_cnt/bars 可观测）；worker 正常收 bar；取价日志含 `quote_key` | 不做 TD 执行 |
 | M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working；**三处 `td:cmd` 直写点改 code**（`strategy.py` / `scheduler/tasks.py` / `routes/risk.py`）；**dispatch 入口判 enabled/连接态 → `IFACE_IDLE` 短路且不写 order_log**；`hub_quote` 入参由 account_id 改 md_code（三种 `_unavailable` 不合并） | M4 | 映射切换生效；空映射/无行情/空闲下发三码分清；策略单/定时急停/手工单三路可消费 | 不做 UI |
-| M6a 两页签（**并入原子单元**） | 集成中心两页签 + 类型化表单 + AccountsCard 落位 + **映射只读列表** + 状态只读卡 | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期按 runbook SQL，见总体架构 §3） |
-| M6b 映射与状态 | 映射编辑器 + 四值状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
+| M6a 两页签（**并入原子单元**） | 集成中心两页签 + 类型化表单 + AccountsCard 落位 + **映射只读列表** + 状态只读卡 | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期走 M2 映射 API，见总体架构 §3） |
+| M6b 映射与状态 | 映射编辑器 + 两轴状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
 | M7 观测 | 接口卡片 + 新增三条告警（`subscription_fail`/`mapping_missing`/`iface_idle_dispatch`） | M4/M5 | 各出一次告警 | 不新建框架；既有两条规则已在原子单元 code 化 |
 | M8 收口 | wrapper code-only、删残留键读、**`DOMAIN_TRADING` 域词改名**、**legacy 载体销账（registry only）**、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版；**旧键可证伪判据**：旧键常量（`HUB_HB_KEY`/`HUB_HB_PATTERN`/`td:exec` 字面量）零定义 + 读点清单逐项核对（不靠正则匹配 f-string 键）+ registry-only | 不改语义 |
 
