@@ -88,7 +88,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/series` | GET | viewer+ | 批50：每模型今日汇总+48h×小时曲线（generate_series 补零；原 summary 退役） |
 | **外部接口** | `- `/api/routing/*`（批 57 M2：policies CRUD+dry-run 试算+decisions 审计——全端点 system_config 键）
-/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` `/api/interfaces/providers` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（行=账号/列=能力——27 号）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities；批55b：providers=新建下拉目录（注册表派生） | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
+/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` `/api/interfaces/providers` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（**批189 起改三接口族 / 行=接口 / code 身份**；本条为现行形态）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities；批55b：providers=新建下拉目录（注册表派生） | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
 | 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） | GET/POST/POST/DELETE | admin | PT6（risk_rules CRUD） |
 | 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/POST/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
 | 策略校验 | `/api/strategy/validate-python` `/api/strategy/validate-params` | POST | analyst+ | Python 代码 AST 校验 + parameter_defs 校验 |

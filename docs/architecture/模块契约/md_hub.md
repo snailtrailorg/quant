@@ -1,6 +1,6 @@
 # 模块契约 · md_hub（共享行情 Hub，ST7 2026-08-17）
 
-> 终态设计：`docs/design/D26-市场接入架构.md`（**批 66a/66b/66c 已实施上产**——本契约现行代码形态=账号级 hub：unit `quant-md-hub@{account_id}`，一行接口=一 hub）。纯数据面（无下单/无风控）。
+> 终态设计：`docs/design/D26-市场接入架构.md` **v6 接口级拓扑**。**本契约描述批189 实施前的现行代码形态**（账号级 hub：unit `quant-md-hub@{account_id}`）；实施 189 后按接口 code 与 `market_interface` 改写。纯数据面（无下单/无风控）。
 > 批 2（2026-08-25）主循环迁上 `strategy_framework/runtime/` 骨架：EngineLoop 到期驱动钩子（废 counter%N 相位耦合），L2 会话自愈收编 MdSessionSupervisor——行为值不变（确证差异见「行为差异」节）。
 
 > **最近变更（批 66a/66b/66c，2026-09-26/27 上产）**：M5 机关全退役（switch.py 删/退出码 5/6 退役/Prevent=0 78）+ boot 守卫 a′（SET NX EX 30 per-account）；unit=`quant-md-hub@{account_id}`（数字实例名=接口行 id，`@quant` 过渡实例已 disable）+ ACCOUNT_ID 必数字断言（非数字 exit 78）；流键/心跳/latest_tick 全键族 per-account（`_key`）；payload 恒带 account_id；`_poll_iface_switch` 扩凭证摘要（三元组）+读行失败版本顺延；STREAM_MAXLEN 从 MarketSpec channels 读（`_stream_maxlen`）；时段谓词 `in_session(market)`。
@@ -26,7 +26,7 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 | `_poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash=None)` | `-> (新版本, 新凭证摘要, 是否切换)` | 批 64+66a：对账 external_interface 行——provider **或凭证摘要**变化即切换（66a 闭「只改凭证不 bump 版本漏检」缺口）。prev_version=None=首次读基线（版本与摘要同轮建立）；Valkey 读失败返回原值不判切换；读行失败**版本顺延**（固化新版本+旧摘要会漏掉本轮即轮换——盲审 A-P1）。switched 时 main 消费方 `os._exit(9)` 让 systemd 拉起重读行 |
 | `LATEST_TICK_PREFIX` | 重导出 | test_stock_detail 经 main 取用 |
 
-**switch.py——已删除（批 66a）**：M5 切换编排器（confirm/check/abort/diff 子命令、intent/active_instance/guarded Lua 协议）随 M5 退役整体删除（D26 §4.1——互备体系让位于账号级拓扑：一行一 hub，切换=Web 拖拽行 → cfg:version 对账 exit 9 → systemd 重启读新行，`_poll_iface_switch` 承接）。
+**switch.py——已删除（批 66a）**：M5 切换编排器（confirm/check/abort/diff 子命令、intent/active_instance/guarded Lua 协议）随 M5 退役整体删除（D26 §4.1——互备体系让位于实例化拓扑：一行一进程，切换=Web 拖拽行 → cfg:version 对账 exit 9 → systemd 重启读新行，`_poll_iface_switch` 承接；批189 目标态=接口级）。
 
 **parts.py（数据面部件）**
 

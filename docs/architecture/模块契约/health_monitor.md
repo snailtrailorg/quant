@@ -27,7 +27,7 @@ server/src/health_monitor/
 ### collector.py
 ```python
 CORE_UNITS: list[str]          # 4 个常驻 unit（web-api/celery-worker/beat/risk，实例 @quant）——批 66b：
-                               # md-hub 移出（账号级实例化 quant-md-hub@{account_id}，@quant 退役），
+                               # md-hub 移出（当前账号级实例化 quant-md-hub@{account_id}；189 后=接口 code），
                                # hub 健康=心跳键 SCAN 动态发现（HUB_HB_PATTERN），不在 CORE_UNITS
 systemctl_units(units) -> dict  # 批量 ActiveState/SubState/NRestarts；失败返回 {}（=证据缺失）
 collect(now=None) -> dict      # 幂等快照 {ts, units, deps, hubs, tasks, valkey_memory, resources, ...}；

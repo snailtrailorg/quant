@@ -1,7 +1,7 @@
 # 模块契约 · strategy_runner（策略实盘化进程）
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量 + 已知差异。任务改本模块前读本文件。
-> 注：流键/水位键条目=**批 66b 起 per-account 现行形态**（`hub:bars:{account_id}:{symbol}` / `hub:worker:max_ts:{account_id}:{symbol}`——D26 账号级已实施上产）。
+> 注：流键/水位键条目=**批 66b 起现行形态**（`hub:bars:{account_id}:{symbol}` / `hub:worker:max_ts:{account_id}:{symbol}`）。**批189 目标态改为 `<md_code>` 身份**（见 189 需求 C4），本契约待实施后改写。
 > 配套：`接口契约.md`（Order/Position/live_task/持仓真相源）+ `模块契约/md_hub.md`（hub 侧）+ `模块契约/strategy_framework.md`（runtime 骨架/SDK 守卫/L2 会话契约）。
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。

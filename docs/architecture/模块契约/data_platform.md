@@ -339,7 +339,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `bar_1D` / `bar_1min` / `bar_5min` | `db.save_bars` / `save_bars_overwrite` | `db.get_bars`（回测/分析/K线端点） |
 | `daily_basic` | `tushare_adapter.save_daily_basic` | web_api（筛选端点） |
 | `trade_cal` | `tushare_adapter.pull_trade_cal` | `db.get_trade_calendar` / `is_trading_day` |
-| `data_source`（0116 拆表，原 data_source_config；行=账号/列=能力，见 A02）+ `trading_account`（0116 拆表，原 broker_config） | web_api（/api/interfaces 族，写侧 ⊆ 代码能力校验） | `data_source.get_data_source`（数据源）/ `broker.get_broker`（交易账号） |
+| `data_source` + `trading_account`（0116 拆表；**批189 目标态：data_source / market_interface / trade_interface 三表、code 身份**；现行仍两表） | web_api（/api/interfaces 族，写侧 ⊆ 代码能力校验） | `data_source.get_data_source`（数据源）/ `broker.get_broker`（交易账号） |
 | `data_source_usage` | `DataSource.record_usage`（API 用量，A4 #36；批55a 加 interface_id 列——provider 双填保留显示冗余） | web_api（用量看板，GROUP BY provider 不变） |
 | `channel_config` | web_api（消息通道端点） | `channel.get_channel` |
 | `live_trading_config` | web_api（实盘开关端点） | `risk.is_live_trading_allowed` |
