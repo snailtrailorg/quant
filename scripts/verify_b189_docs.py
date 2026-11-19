@@ -47,6 +47,7 @@ NEED_TOKENS = {
     'legacy_transition': '旧键豁免需删除（M3）',
     '_LegacyMdShim': 'legacy 行情载体（C6 过渡）',
     'run_hub_postverify': 'postverify 读点（M3）',
+    'freeze_event': '第 9 处引用（无 FK，需回填）',
 }
 
 FORBIDDEN = [

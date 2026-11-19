@@ -13,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "server" / "src"
 MIG = sorted((ROOT / "server" / "migrations" / "versions").glob("0192_*.py"))
+# armed 标记：与 0192 同批落地的代码切换提交创建；M8 删除。
+# 没有它时，单提 0192 不应把主线打进红（M1 不可单独发布，见 M1 §0）。
+MARKER = ROOT / "server" / "src" / "quant_common" / "b189.py"
 
 OLD_PATTERNS = [
     r"td:cmd:\{(?:int\(|account_id|_acct|aid)",
@@ -43,8 +46,8 @@ def test_detector_not_vacuous():
 
 
 def test_no_old_identity_after_0192():
-    if not MIG:
-        return  # latch 未armed（当前态）
+    if not (MIG and MARKER.exists()):
+        return  # latch 未 armed（当前态）
     bad = []
     for p in SRC.rglob("*.py"):
         if "__pycache__" in str(p):
@@ -56,7 +59,7 @@ def test_no_old_identity_after_0192():
 
 def test_new_mechanism_present_when_armed():
     """0192 存在 ⇒ 新键族必须已在代码里（防只删旧不建新）。"""
-    if not MIG:
+    if not (MIG and MARKER.exists()):
         return
     text = "".join(p.read_text(encoding="utf-8", errors="ignore")
                    for p in SRC.rglob("*.py") if "__pycache__" not in str(p))
