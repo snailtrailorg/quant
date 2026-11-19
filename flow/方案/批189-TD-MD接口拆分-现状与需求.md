@@ -111,13 +111,13 @@
 - **code 唯一身份**：三表主键、8 处引用、unit、Redis 键、API、日志、UI；`varchar(32) COLLATE "C"`，正则 `^[a-z][a-z0-9-]{1,30}$`（≤31 字符），表级 `CHECK (code LIKE 'md-%')` 等。
 - **不用 registry**：三类前缀互斥，跨表唯一由表内 UNIQUE + 前缀约束自然成立；减少中心表与写序耦合。
 - **唯一索引按表分别建**：`(market, account_key) WHERE account_key IS NOT NULL AND enabled` 每表一份（不再有同表 md/td 撞索引问题；M1 预检各表重复计数）。
-- **租约域改为物理登录**：`provider_session_slot(login_key, provider, role, terminal_id, ...)`，PK=`(login_key, provider, role, terminal_id)`；`login_key`=凭证/账号指纹派生（同券商同账号的 md/td 两行共享 same login_key，MD 用 terminal 1、TD 用 2..99，互不踢线）。
+- **租约域改为物理登录**：`provider_session_slot(login_key, provider, role, terminal_id, ...)`，PK=`(login_key, provider, role, terminal_id)`；`login_key`=**稳定物理身份**（`provider + account_key`；account_key 缺失时回落 `provider + code`）——**禁含凭证/密文摘要**，否则凭证轮换会让权限锚与 slot 变值（孤儿租约）。同券商同账号的 md/td 共享 login_key，MD 用 terminal 1、TD 用 2..99，互不踢线。
 
 ### 4.3 迁移与回滚
 
 - M1 在维护窗内完成**全部** schema 切换（建表/回填/改列/重建 PK/UK/触发器/FK/删旧表旧列），旧代码回滚不再支持。
 - 回滚唯一路径 = 快照恢复；发布前演练一次，窗口内保留快照直到冒烟通过。
-- 基线重置判据（写入 M1 方案）：迁移超时 > 窗口预算 或 校验失败且无法 30 分钟内修复；决策人=用户；重置后需重录凭证、清 Redis 键、重建 slot。
+- 基线重置判据：**数值唯一真源=`批189-总体实施架构.md` §5**（迁移预算 40 min / 修复窗 15 min / 观察窗 10 min，2026-11-18 用户确认）；决策人=用户；重置副作用清单见同节。
 
 ## 5. 决策记录
 
@@ -147,9 +147,9 @@
 | C1 身份 | code | `varchar(32) COLLATE "C"`；正则 `^[a-z][a-z0-9-]{1,30}$`；前缀 CHECK（md-/td-/ds-）；不可改 |
 | C2 数据 | 三表+映射+租约 | 三表 code PK + 列归属表（见 §6.1）；`quote_account_id` 由 `td_md_map` 取代（M1 删）；业务表 `account_code` TEXT FK→trade_interface；`account_permission` 锚 `login_key`（物理账号权限，不随 TD 行）；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
 | C3 运行 | 状态机 | `待接入(无载体)/运行中·空闲/运行中·工作中/已停止(异常)/已退役`；配置轮询 ≤5s；注册有载体即拉起并 enable；删除=软删+先停 |
-| C4 键与流 | unit/Redis | **唯一键族**：unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working/subs/bars/reset_cnt`，替代 `quant:hb:md-hub:*` 与 `td:exec:*`）；`hub:latest_tick:<md_code>:<sym>`、`hub:latest_tick:pub:<sym>`（公共快照，跨接口共享故不带 code）、`hub:bars:<md_code>:<sym>`、`td:cmd:<td_code>`、`risk:cmd:result:<req_id>`；消息 account=MD code |
-| C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；错误码分四类不得混用：`MAPPING_MISSING`（无映射）/`NO_QUOTE`（有映射无行情）/`PROVIDER_UNSUPPORTED`（无载体）/`IFACE_IDLE`（空闲下发）+`CODE_CONFLICT`/`IFACE_BUSY`；入参/出参 account 一律 code（旧 int 拒绝） |
-| C6 插件 | manifest | provider 可声明 md/td 双角色。**载体定义（M8 前）**=`registry` 插件 ∪ legacy `create_md_gateway`（`md_hub` 的 `_LegacyMdShim` 通路，现网 emt/binance/okx 行情走此）——否则 D8「币安/欧易行情启用」与 M4 两 bug 验收自相矛盾。无载体→不建进程、不可启用；M8/P7 销账后只认 registry |
+| C4 键与流 | unit/Redis | **唯一键族**：unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working/subs/bars/reset_cnt`，替代 `quant:hb:md-hub:*` 与 `td:exec:*`）；`hub:latest_tick:<md_code>:<sym>`、`hub:latest_tick:pub:<sym>`（公共快照，跨接口共享故不带 code）、`hub:bars:<md_code>:<sym>`、`td:cmd:<td_code>`、`risk:cmd:result:<req_id>[:final]`；**`td:exec:*` 退役**（在场判据=心跳键存在）；消息 account=MD code |
+| C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；错误码分四类不得混用：`MAPPING_MISSING`（无映射）/`NO_QUOTE`（有映射无行情，仅映射 `hub_quote._unavailable=no_tick`）/`PROVIDER_UNSUPPORTED`（无载体）/`IFACE_IDLE`（空闲下发）+`CODE_CONFLICT`/`IFACE_BUSY`；**后端不可用/坏数据不与 NO_QUOTE 合并**（`valkey_down`→503 `QUOTE_BACKEND_DOWN`、`bad_json`→`QUOTE_BAD_DATA`）；入参/出参 account 一律 code（旧 int 拒绝） |
+| C6 插件 | manifest | provider 可声明 md/td 双角色。**载体定义（M8 前）**=`registry` 插件 ∪ legacy `create_md_gateway`（`md_hub` 的 `_LegacyMdShim` 通路，现网 emt/binance/okx 行情走此）——否则 D8「币安/欧易行情启用」与 M4 两 bug 验收自相矛盾。无载体→不建进程、不可启用；**M8 验收=`registry` only 且 legacy 注册点为零** |
 | C7 部署 | 波次/wrapper | 波次取在跑实例；dbro/hbcheck **按 marker 二选一（新/旧），未知 rc=1**；破坏性门参数；pinned 覆盖 code 实例 |
 
 ### 6.1 列归属表（M1 建表/回填唯一依据）
@@ -172,25 +172,25 @@
 
 | 模块 | 范围 | 依赖 | 验收 | 不做什么 |
 |---|---|---|---|---|
-| M0 契约 | C1–C7 文档 + §6.1 列归属表 + 常量/正则单测 + 键名唯一性测试 | — | 常量/正则/键名测试当场绿；schema 内省断言移交 M1（同一套断言） | 不写业务 |
+| M0 契约 | C1–C7 文档 + §6.1 列归属表 + 常量/正则单测 + 键名唯一性测试；**钉死 M1 迁移=0192 单文件**（wrapper marker 依赖） | — | 常量/正则/键名测试当场绿；schema 内省断言移交 M1；需求 §6/§6.1 改纯指针（同提交） | 不写业务 |
 | M1 基线迁移 | 三表+映射+租约重建；8 处身份回填；PK/UK/触发器/FK 重建；删旧表旧列；`hub_transient_subs` 加 md_code/market；备份/恢复 runbook（路径/保留/命令/耗时/失败阈值） | M0 | 备份→迁移→冒烟；行数/FK/触发器断言；快照恢复演练（记录耗时） | 不做双写 |
-| M2 接口后端 | 三实体 CRUD、code 校验、映射、能力派生校验、审计、软删；**旧消费者改接**（`routes/{trading,risk,chat,mgmt}` 直读 `trading_account` 处 → code；`scheduler`/`strategy` 读点同步） | M1 | curl 全链 + 冲突码 + 软删隐藏；`grep -rn "FROM trading_account" server/src` 为零 | 不做 UI/进程 |
-| M3 进程与部署 | 期望=有载体接口；注册即 enable+start；enabled 干活/空转；**凭证/provider 变更检测（exit 9 重建）**；释放 slot；懒加载；删除先停；波次/wrapper | M2 | 四值状态可复现；停用无连接；改凭证后自动重建；code unit 正常；发布+恢复演练 | 不做订阅模型 |
+| M2 接口后端 | 三实体 CRUD、code 校验、映射、能力派生校验、审计、软删；**全部旧消费者改接**（不按文件枚举，按集合验收：`config_store/specs/paper_trade/broker/td_registry/monitor/routes{trading,risk,chat,mgmt}` 等，含 JOIN/UPDATE 形态） | M1 | curl 全链 + 冲突码 + 软删隐藏；`grep -rn '\btrading_account\b' server/src --include=*.py` 为零（排除 migrations） | 不做 UI/进程 |
+| M3 进程与部署 | 期望=有载体接口；注册即 enable+start；enabled 干活/空转；**凭证/provider 变更检测（exit 9 重建）**；释放 slot；懒加载；删除先停；波次/wrapper；**`td_exec` 登记 LAYER=3**；**回执/心跳写口下沉 `quant_common`**；**`td:exec`→`iface:hb:td` 三处读者改接**（`routes/risk.py:449`、`health_monitor/collector.py:249`、`monitor.py:148`）；**既有两条告警规则 code 化 + `evaluate` fail-loud** | M2 | 四值状态可复现；停用无连接；改凭证后自动重建；code unit 正常；停一个 hub 下一轮出 `hub_hb_lost`；发布+恢复演练 | 不做订阅模型 |
 | M4 MD 数据面 | 订阅按接口/provider/market；映射解析（`MAPPING_MISSING`/`NO_QUOTE` 分码）；bar 归属；data_license；**两 bug（含 `strategy_framework/md_gateway.py` 的 `_SWAP_OKX` 生成点）**；心跳加 `subs/bars/reset_cnt` | M3 | OKX/币安断言（reset_cnt/bars 可观测）；worker 正常收 bar；取价日志含 `quote_key` | 不做 TD 执行 |
-| M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working | M4 | 映射切换生效；空映射明确报错 | 不做 UI |
-| M6a 两页签（**并入原子单元**） | 集成中心两页签 + 类型化表单 + AccountsCard 落位 | M2 | CRUD/入口计数 + build 门 | 不含映射编辑（M6b） |
+| M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working；**三处 `td:cmd` 直写点改 code**（`strategy.py` / `scheduler/tasks.py` / `routes/risk.py`）；**dispatch 入口判 enabled/连接态 → `IFACE_IDLE` 短路且不写 order_log**；`hub_quote` 入参由 account_id 改 md_code（三种 `_unavailable` 不合并） | M4 | 映射切换生效；空映射/无行情/空闲下发三码分清；策略单/定时急停/手工单三路可消费 | 不做 UI |
+| M6a 两页签（**并入原子单元**） | 集成中心两页签 + 类型化表单 + AccountsCard 落位 + **映射只读列表** + 状态只读卡 | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期按 runbook SQL，见总体架构 §3） |
 | M6b 映射与状态 | 映射编辑器 + 四值状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
-| M7 观测 | 接口卡片 + 三条告警 | M4/M5 | 停进程/无映射/订阅失败各出一次告警 | 不新建框架 |
-| M8 收口 | wrapper code-only、删残留键读、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版 + 旧键零读 | 不改语义 |
+| M7 观测 | 接口卡片 + 新增三条告警（`subscription_fail`/`mapping_missing`/`iface_idle_dispatch`） | M4/M5 | 各出一次告警 | 不新建框架；既有两条规则已在原子单元 code 化 |
+| M8 收口 | wrapper code-only、删残留键读、**legacy 载体销账（registry only）**、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版 + `grep -rn 'quant:hb:md-hub:\|td:exec:\|hub:bars:[0-9]' server/src deploy/wrappers` 为零 + registry-only | 不改语义 |
 
 ### 7.4 开发顺序与上线单元
 - 开发顺序：M0 → M1 → M2 → M3 →（M4 → M5）→ M6a → M6b → M7 → M8；M6a 可与 M5 并行。
-- **上线单元（重要）**：身份/schema 变更不可拆分——**M1–M5 + M2 旧消费者改接 + wrapper 装位 + collector/readyz 新键可读 + M6a 最小两页签，同一次维护窗同一 release**。M6b 映射编辑器 / M7 告警规则 / M8 收口可后续分批。开发仍是小步，发布是原子的；不存在「先上 M1 再上 M2」。
+- **上线单元（重要）**：身份/schema 变更不可拆分——**M1–M5 + M2 全量旧消费者改接 + M3 告警规则 code 化 + wrapper 装位 + M6a（两页签+映射只读+状态只读），同一次维护窗同一 release（仅盘后窗）**。M6b 映射编辑表单 / M7 新增告警 / M8 收口可后续分批。开发仍是小步，发布是原子的；不存在「先上 M1 再上 M2」。
 
 ## 8. 状态
 - 需求冻结 v5；无待确认项。
 - 文档树已按本需求同步修订（A02/D25/D26 v6/D32/A05/A06/CLAUDE/D12/模块契约），旧口径不再保留。
-- 方案阶段细化：迁移窗口预算/锁/超时、备份恢复 runbook、基线重置判据与决策人、login_key 派生规则、wrapper 装位顺序、无载体行 UI 文案。
+- 方案阶段细化：迁移锁模式与 `statement_timeout`、备份恢复 runbook、`login_key` 派生规则、wrapper 装位顺序、无载体行 UI 文案。（时间阈值已定，见总体架构 §5）
 - 跨模块约定（不变式/边界/上线单元/E2E/失败判据）：`flow/方案/批189-总体实施架构.md`。
 - 下一步：M0 契约 + 可执行断言（C1–C7 唯一真源在 M0，本文件只引用）。
 
