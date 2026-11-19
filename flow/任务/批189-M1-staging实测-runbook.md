@@ -10,18 +10,24 @@
 | michael（prod root/postgres） | §1 查容量 → §2 建 scratch → §3 跑基线脚本 → 回传 §4 三项输出 |
 | bernard | 拿到输出后：校准 40 min、更新 M1 预算、必要时改走基线重置 |
 
-## 1. 容量前置（必须 ≥ 2× 库大小，否则中止）
+## 1. 容量前置（**实测：库 9522 MB，/ 仅剩 12 GB —— 全库 restore 不可行**）
 
 ```
 sudo -u postgres psql -d postgres -tAc "select pg_size_pretty(pg_database_size('quant'))"
 df -h /var/lib/pgsql /data 2>/dev/null | tail -3
 ```
 
+**判据改为**：只测**迁移会碰的表**（下面 `-t` 清单）——行情/日线大表不在迁移范围内，全库 restore 既装不下也没必要。要求：子集 dump 解压后 ×2 ≤ 剩余空间。
+
 ## 2. 建 scratch 库并导入（**不动 quant 库**）
 
 ```
-# dump（一致性快照，不锁业务表；约 930MB 量级）
-sudo -u postgres pg_dump -Fc -d quant -f /var/lib/pgsql/quant_189_base.dump
+# 只 dump 迁移涉及的 11 张表（行情大表不含，体积通常 <1GB）
+sudo -u postgres pg_dump -Fc -d quant \
+  -t trading_account -t data_source -t data_source_usage \
+  -t live_task -t position_snapshot -t position_refresh -t account_snapshot \
+  -t order_log -t trade_log -t account_permission -t provider_session_slot \
+  -f /var/lib/pgsql/quant_189_base.dump
 
 # 建空库 + restore（**不加 -C**：防止误写回 quant 本体），并计时
 sudo -u postgres dropdb --if-exists quant_189_scratch
