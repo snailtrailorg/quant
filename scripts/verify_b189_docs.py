@@ -35,7 +35,7 @@ NEED_KEYS = {
 }
 
 NEED_CODES = ['MAPPING_MISSING', 'NO_QUOTE', 'IFACE_IDLE', 'CODE_CONFLICT',
-              'IFACE_BUSY', 'PROVIDER_UNSUPPORTED', 'QUOTE_BACKEND_DOWN', 'QUOTE_BAD_DATA']
+              'IFACE_BUSY', 'PROVIDER_UNSUPPORTED', 'CREDENTIALS_INCOMPLETE']
 
 NEED_ENDPOINTS = ['/api/md-interfaces', '/api/td-interfaces', '/api/data-sources',
                   '/api/trades', '/api/health/components']
@@ -52,6 +52,13 @@ NEED_TOKENS = {
 FORBIDDEN = [
     ('auto_rollback_disabled=true', '不得作为可传开关（playbook 派生）'),
     ('hub:bars:{account_id}', '旧键形状只允许出现在「旧/退役」语境'),
+]
+
+# 零容忍（任何语境都不许出现）
+FORBIDDEN_ZERO = [
+    ('retired_at', 'D11 已改物理删除（2026-11-19 用户裁定）'),
+    ('QUOTE_BACKEND_DOWN', '基础设施故障走 503+detail，不进业务码'),
+    ('QUOTE_BAD_DATA', '同上'),
 ]
 
 
@@ -94,6 +101,9 @@ def collect():
             continue
         seen.add(rel)
         rows.append(('文件引用', rel, '文档引用的路径须存在', ref_exists(rel)))
+
+    for bad, why in FORBIDDEN_ZERO:
+        rows.append(('零容忍', bad, why, bad not in both))
 
     for bad, why in FORBIDDEN:
         hit = False
