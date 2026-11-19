@@ -24,7 +24,7 @@
 
 ### 2.2 身份与硬编码（拆分必须处理）
 
-- 数字 id 被当作身份硬编码（**这些是必须逐个改掉的改造点，不是保留数字身份的理据**）：`md_hub/main.py:168-175`（ACCOUNT_ID 非数字 exit 78）、`td_exec/main.py:382`、`scheduler/tasks.py:2344/2355`（只停数字实例）、`web_api/routes/system.py`（/readyz 心跳集数字过滤）、`deploy/wrappers/quant-hbcheck`（数字后缀）、`health_monitor/collector.py:249`（isdigit + int）。改法见 §4.2「双身份过渡」。
+- 数字 id 被当作身份硬编码（**这些是必须逐个改掉的改造点，不是保留数字身份的理据**）：`md_hub/main.py:168-175`（ACCOUNT_ID 非数字 exit 78）、`td_exec/main.py:382`、`scheduler/tasks.py:2344/2355`（只停数字实例）、`web_api/routes/system.py`（/readyz 心跳集数字过滤）、`deploy/wrappers/quant-hbcheck`（数字后缀）、`health_monitor/collector.py:249`（isdigit + int）。改法见 §4.2（停机窗口一次性切 code，无数字兜底）。
 - bar 数据面：`hub:bars:{account_id}:{symbol}`（`data_platform/databus.py:225`、`hub_worker.py:98`），消息内 `account_id` 与 worker 的 hub 心跳守卫同源校验（`hub_worker.py:108-116,378-382`）——MD 换 id 会导致 worker 拒收全部 bar、`buy_ok` 恒 False。
 - 订阅真相源四源（`md_hub/main.py::_desired_symbols`）：running live_task 全账号标的、`hub_shadow_symbols`（全局）、`hub_transient_subs`（全局）、持仓（仅按本行 id 过滤）→ **A 股标的灌进加密 hub**，即两个 bug 的根因。
 - `data_license` 授权门按本行 `trading_account.params` 读（`data_platform/subscription.py`）——MD 换 id 后查不到，异常被吞→白名单静默失效。
@@ -54,7 +54,7 @@
 | CLAUDE.md 核心约束 | 「行边界=账号」「能力集 5 token」「external_interface 模型」 | **修订**：改接口三类 + code 身份 + 常驻空转 | 收尾批次统一改，避免与代码脱节 |
 | D12 §2.11 | 取价「quote_account_id 同账号默认」 | **修订**：1:N 主备 + 空映射报错 | R4/M5 |
 
-**全覆盖判定**：上表每行的「保留语义」必须在 v3 正文有对应条目（已逐项核对）；退役文档在头注写指针，不删除历史内容。
+**全覆盖判定**：上表每行的「保留语义」必须在 v4 正文有对应条目（已逐项核对）；退役文档在头注写指针，不删除历史内容。
 
 ## 3. 目标需求（可验收）
 
@@ -98,7 +98,7 @@
 ### R8 部署与回滚（审查新增）
 - 发布/回滚波次必须覆盖 MD/TD 实例：由「在跑实例枚举」或 DB 新表派生，不再按旧表 id 拼接；
 - wrapper（dbro/hbcheck）需三态选表（旧表/新表/并存）并先装位后发布；回滚目标兼容矩阵进方案；
-- 验收：一次 staging 彩排 + prod 发布 + 回滚演练，pinned 单版。
+- 验收：一次 staging 彩排 + prod 发布 + **DB 快照恢复演练**（本批无自动 rollback），pinned 单版。
 
 ## 4. 影响范围
 
@@ -114,19 +114,24 @@
 | 旁路脚本 | `scripts/verify_p3_plugin_lifecycle.py`、`scripts/test_emt_cancel.py`、`server/scripts/verify_integration.py`、`data_platform/stock_detail.py` |
 | 部署 | `deploy/playbooks/{release,rollback-tasks}.yml`、`deploy/wrappers/{quant-dbro,quant-hbcheck}`、A06 |
 
-### 4.2 迁移形态（双身份三段，回滚可行）
+### 4.2 迁移形态（V4：离线窗口迁移，保留历史的默认路线）
 
-- **段1 expand｜双身份并存（unit 仍数字 id）**：建三表+映射；旧表双写；进程入口同时接受 `INTERFACE_CODE` 与 `ACCOUNT_ID`（前者优先）；心跳**双写** `…:<id>` 与 `…:<code>`；tick/bar 流**双写**旧 id 键与新 code 键；旧代码仍可回滚（读旧键/旧表）。
-- **段2 cutover｜code 成为唯一对外身份**：unit 改 `@<code>`；SA4/监控/前端/日志切 code；停止写旧键（保留读一版）；波次枚举改为「在跑实例」；此阶段的回滚目标=段1（已接受 code）→ 回滚安全。
-- **段3 contract**：删双写与旧键读、删旧表兼容、删数字兜底、wrapper 改 code-only；回滚目标=段2（code 已就绪）。
+> 前提：测试环境、当前 0 个 running live_task；允许短维护窗。**不需要在线双写**——停机迁移比 expand-contract 更简单、更干净。
 
-### 4.3 身份规划（v3，2026-11-18 定稿）
+- **步骤（维护窗）**：停 web/celery/hub/td-exec → 全库备份 → 迁移（建三表+registry、回填 code、业务表 `account_id`→`account_code`）→ 起服务 → 冒烟。
+- **配置与历史都保留**：接口行按 provider/market/能力映射成 `md-*/td-*/ds-*`；7 张业务表用 `UPDATE … FROM mapping` 回填 `account_code`（离线执行，允许百万行）；随后删旧列/旧 FK。
+- **回滚语义**：本批是 schema 破坏性变更——**自动 rollback 不支持**；回滚 = 恢复迁移前 DB 快照 + 部署旧版代码（人工，runbook 固化）。因此发布前必须做一次「快照→恢复」演练。
+- **兜底（用户已授权）**：若迁移超时/失败或历史数据无保留价值 → **基线重置**：TRUNCATE 业务表 + 重建 schema + 重新 seed 接口配置；同样要求备份先行。
+- **Redis**：`td:cmd/hub:latest_tick/hub:bars/心跳` 前缀/键名全变，旧键直接废弃（无需迁移；确认无进程读旧键）。
 
-- **code = 唯一对外身份**：systemd 实例名、Redis 键（tick/bars/cmd/exec/heartbeat）、API、日志、UI 一律用 code。
-- **bigint id = 仅 DB 内部主键/FK**：7 张业务表与 `provider_session_slot` 继续用 id，不重编号；进程入口 `code→id` 解析一次。
-- **不做数值分段**：分段对运维可读性无净收益，且与历史 id（1/3/4/5）和 CHECK 冲突；类型可读性由 `code` 前缀（`md-/td-/ds-`）表达。
-- code 规则：`^[a-z][a-z0-9-]{1,30}$`；全局唯一（DB unique）；不可改；`md-xtp` / `td-xtp`（多接口由用户加语义后缀）。
-- 为什么这不是硬伤：systemd 实例名/Redis 键本就接受字符串；真正需要处理的只是 6 处数字假设 + 2 个 root wrapper + 波次枚举，均可按 §4.2 三段执行；唯一约束是**回滚目标必须先具备 code 识别**（段1 解决），属时序而非架构缺陷。
+### 4.3 身份规划（V4，2026-11-18 定稿）
+
+- **code = 唯一身份**：接口表主键、7 张业务表外键、systemd 实例名、Redis 键、API、日志、UI 全部用 code。**不再保留 bigint 身份**。
+- **跨表唯一**：新增 `interface_registry(code TEXT PRIMARY KEY, kind)`；三张接口表 `code` FK→registry；7 张业务表 FK→`trade_interface(code)`。
+- **性能**：`varchar(24) COLLATE "C"` + btree；千万行量级开销可接受；点查/join 与 bigint 差异可忽略（详见评审讨论）。
+- **不做数值分段**：类型由 code 前缀表达；分段会与历史 id 冲突且无净收益。
+- code 规则：`^[a-z][a-z0-9-]{1,30}$`；全局唯一；不可改；多接口由用户加语义后缀（`md-xtp-test`）。
+
 
 ## 5. 决策记录
 
@@ -141,22 +146,23 @@
 | D7 | EMT 本期只拆行情，交易接口「待接入」（无载体→不建进程） |
 | D8 | 币安/欧易：行情启用；交易行停用待开户（无载体→不建进程） |
 | D9 | 进程常驻；enabled 只决定干活/空转；无载体不建进程；UI 三值 |
-| D10 | **code = 唯一对外身份**（unit/键/API/日志/UI）；bigint 仅内部 PK/FK；不做数值分段；三段双身份过渡（v3） |
+| D10 | **V4：code = 唯一身份**（接口 PK、7 表 FK、unit/键/API/日志/UI）；不保留 bigint 身份；离线窗口迁移 |
 | D11 | 删除=先停进程确认退出→删行；停不下来拒绝删除 |
 | D12 | 部署波次/wrapper/pinned 纳入本次范围，M1/M3 验收含真实发布 |
 | D13 | bar 流键与消息归属纳入 C4，M4 必须保证 worker 不断流 |
 | D14 | 存量行含 is_virtual；旧列一列不漏（C2 列映射表） |
 | D15 | expand 期旧表可写（双写/同步），不用可更新视图；M1+M2 同批 |
+| D16 | 迁移优先保留历史（离线窗口）；失败/无价值可**基线重置**（用户授权），两者均须备份+恢复演练；本批不支持自动 rollback |
 
 ## 6. 契约（C0 冻结物）
 
 | 编号 | 契约 | 内容 |
 |---|---|---|
-| C1 身份 | code | `^[a-z][a-z0-9-]{1,30}$`；全局唯一；不可改；前缀 md-/td-/ds-；**unit/键/API/日志/UI 全部用它** |
-| C1b 主键 | 数字 id | 三表各自 bigint；历史 TD 保留旧号；仅 DB 内部 FK 用，进程入口 code→id 解析 |
-| C2 数据 | 三表 + 映射 | 列=旧表全列映射（含 impl/account_key/position/quote_account_id/is_virtual/exchanges）；`td_md_map(td_id,md_id,priority)` 双 FK + ON DELETE；能力由 manifest 派生 |
+| C1 身份 | code | `^[a-z][a-z0-9-]{1,30}$`；全局唯一；不可改；前缀 md-/td-/ds-；**接口 PK + 业务表 FK + unit/键/API/日志/UI 全部用它** |
+| C1b 跨表唯一 | registry | `interface_registry(code PK, kind)`；三接口表 `code` FK→registry；业务表 FK→`trade_interface(code)` |
+| C2 数据 | 三表 + 映射 | 三表主键=`code`；列=旧表全列映射（含 impl/account_key/position/quote_account_id/is_virtual/exchanges）；业务表 `account_code` TEXT FK→trade_interface；`td_md_map(td_code,md_code,priority)` 双 FK + ON DELETE；能力由 manifest 派生 |
 | C3 运行 | 状态机 | `registered → running(idle) → working(enabled) → idle → deleting → stopped`；配置轮询 ≤5s；无载体不建进程；删除先停 |
-| C4 键与流 | unit/Redis | unit `@<code>`；心跳 `iface:hb:{md|td}:<code>` 字段含 `enabled/working`；数据键 `hub:latest_tick:<md_code>`、`hub:bars:<md_code>:<symbol>`、`td:cmd:<td_code>`、`td:exec:<td_code>`；消息 account_id=MD code；过渡期双写旧 id 键（§4.2 段1） |
+| C4 键与流 | unit/Redis | unit `@<code>`；心跳 `iface:hb:{md|td}:<code>` 字段含 `enabled/working`；数据键 `hub:latest_tick:<md_code>`、`hub:bars:<md_code>:<symbol>`、`td:cmd:<td_code>`、`td:exec:<td_code>`；消息 account_id=MD code；旧 id 键直接废弃（迁移窗内确认无进程读） |
 | C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；错误码 `MAPPING_MISSING/PROVIDER_UNSUPPORTED/CODE_CONFLICT/IFACE_BUSY` |
 | C6 插件 | manifest | 一 provider 可声明双角色（md/td 各一组 port_caps）；无角色声明→不建该类型进程 |
 | C7 部署 | 波次/wrapper | 波次取在跑实例（code 名）；dbro/hbcheck 三态选表 + 接受 code 键；pinned 覆盖新实例；wrapper 装位先于发布 |
@@ -166,15 +172,15 @@
 | 模块 | 范围 | 依赖 | 验收 | 不做什么 |
 |---|---|---|---|---|
 | M0 契约冻结 | C1–C7 文档 + 契约测试骨架 | — | 测试骨架红/绿可控 | 不写业务 |
-| M1 三表 expand | 迁移建三表+映射+双写/同步（旧表可写）；存量全量迁移（含虚拟账户） | M0 | 迁移往返 + 旧代码可建/改接口 + FK 计数断言 | 不切读路径 |
+| M1 基线迁移 | 三表（code PK）+registry+映射；离线窗口：回填 code、业务表改 `account_code`；保留历史（兜底：基线重置） | M0 | 备份→迁移→冒烟全绿；行数/外键计数断言；快照恢复演练 | 不做在线双写 |
 | M2 接口后端 | 三实体 CRUD、code 校验、映射 CRUD、能力派生校验、审计 | M1 | curl 建/改/查/删 + 冲突码 | 不做 UI/进程 |
-| M3 进程与部署 | 期望=已注册∩载体；enabled 干活/空转；空闲释放 slot；懒加载；删除先停；**双身份过渡（段1）**；code 入口解析；发布波次/wrapper 三态 | M2 | 切 enabled 5s 内 working 翻转；停用无券商连接；code/数字两种实例名都能起；一次发布+回滚演练 | 不做订阅模型 |
+| M3 进程与部署 | 期望=已注册∩载体；enabled 干活/空转；空闲释放 slot；懒加载；删除先停；code 入口解析（无数字兜底）；发布波次/wrapper 三态 | M2 | 切 enabled 5s 内 working 翻转；停用无券商连接；`quant-md-hub@md-xtp` 正常起；一次发布演练 + 快照恢复演练 | 不做订阅模型 |
 | M4 MD 数据面 | 订阅按「MD 接口+provider+market」隔离；持仓/live_task 经映射反查；bar 流归属；data_license 回落；两个 bug | M3 | OKX 1h 无错订阅；币安 10min 稳定且 bars 递增；worker 正常收 bar | 不做 TD |
 | M5 TD 执行面 | 映射解析 1:N、取价降级、MAPPING_MISSING、空闲不登录、心跳 working | M4 | 改映射后取价切到新 MD；空映射明确报错 | 不做 UI |
 | M6a 两页签 | 集成中心两页签 + 类型化表单（复用 InterfacesCard/ColumnSettings） | M2 | 两页签 CRUD 全通 + build 门绿 | 不含映射编辑 |
 | M6b 映射与状态 | 映射编辑器 + 三值状态卡 | M5/M7 | 页面配主备映射；状态三值正确 | 不含监控规则 |
 | M7 观测 | 接口维度卡片 + 三条告警规则 | M3 | 停进程一个周期内告警；working 可见 | 不新建框架 |
-| M8 contract | 删兼容/双写、清 slot、删数字兜底、wrapper 改 code-only、文档重写与归档 | M1–M7 | 全量绿 + prod pinned 单版 + 旧键无人读 | 不改语义 |
+| M8 收口 | 删旧列/旧键读残留、清 slot 租约、wrapper code-only、A02/D25/D26/D32/A06/CLAUDE 重写与 D26 归档 | M1–M7 | 全量绿 + prod pinned 单版 + 旧键无人读 | 不改语义 |
 
 ### 7.4 顺序与并行
 
@@ -183,8 +189,9 @@
 
 ## 8. 状态与后续
 
-- **需求已冻结（v3）**：无待确认项。D10 定为「code = 唯一对外身份」，数字 id 仅 DB 内部；三段双身份过渡保证回滚可行。
-- 旧方案处置见 §2.5：A02/D25/D32/A06/CLAUDE/D12 修订，**D26 退役**（头注加指向本文件的指针，历史内容保留）。
-- 方案阶段需细化（不阻塞 M0）：段1 双写窗口长度与旧键读保留版本数、wrapper 装位顺序、无载体行的 UI 文案、`login_ref` 归并键的列设计。
-- 下一步：**M0 契约文档 + 契约测试骨架**（C1–C7），验收后再开 M1 方案。
+- **需求已冻结（v4）**：无待确认项。D10=V4：code 是唯一身份（接口 PK、7 表 FK、unit/键/API/UI），不保留 bigint 身份。
+- 迁移路线（D16）：**停机窗口离线迁移，默认保留历史**；失败或历史无价值时按授权做基线重置。本批 schema 破坏性变更 → **不支持自动 rollback**，回滚=DB 快照恢复+旧版代码（runbook 固化，发布前演练）。
+- 旧方案处置见 §2.5：A02/D25/D32/A06/CLAUDE/D12 修订，**D26 退役**（头注加指针，历史内容保留）。
+- 方案阶段待细化：备份/恢复 runbook、迁移耗时与锁策略、wrapper 装位顺序、无载体行 UI 文案、`login_ref` 归并键。
+- 下一步：**M0 契约文档 + 契约测试骨架**（C1–C7），验收后开 M1 方案。
 
