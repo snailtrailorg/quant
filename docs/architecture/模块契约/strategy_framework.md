@@ -1,5 +1,6 @@
 # 模块契约 · strategy_framework（策略框架）
 
+> **批189 目标态**：接口三类 + code 身份（见 `flow/方案/批189-TD-MD接口拆分-现状与需求.md`）；本契约描述实施前的现行形态，实施后同步改写。
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件。
 > 配套：`docs/architecture/接口契约.md`（Signal/StrategyConfig/Order/Position/BacktestResult/live_task/parameter_defs 结构）。
 

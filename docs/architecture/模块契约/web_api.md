@@ -1,5 +1,6 @@
 # 模块契约 · web_api（Web 后端 API）
 
+> **批189 目标态**：`/api/md-interfaces` `/api/td-interfaces` + code 入参；本契约描述现行端点族，实施后改写。
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（6 大接口 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么端点"。
 

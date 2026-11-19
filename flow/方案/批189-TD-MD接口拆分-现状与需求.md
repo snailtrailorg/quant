@@ -49,7 +49,7 @@
 | D26 | 核心句「一账号=一行=一 hub+一套 TD，MD/TD 同凭证」 | **修订为 v6 接口级拓扑**（不退役，保引用链）；历史理由与 M5 退役保留 | 全文 |
 | D32 | manifest 单 domain | 修订：provider 可声明 md/td 双角色 | C6/D5 |
 | A06 | 波次按 DB id、wrapper 两态 | 修订：波次取在跑实例（code）、wrapper 三态 | C7/R8 |
-| CLAUDE.md | 行边界=账号、能力 5 token | 修订：三类接口 + code 身份 + 常驻空转 | 收尾统一改 |
+| CLAUDE.md | 行边界=账号、能力 5 token | **已修订**：三类接口 + code 身份 + 常驻空转 | 已同步 |
 | D12 §2.11 | quote 默认同账号 | 修订：1:N 主备 + 空映射报错 | R4/M5 |
 
 ## 3. 目标需求
@@ -65,7 +65,8 @@
 
 ### R3 进程与状态（四值）
 - 注册（有载体）→ 进程常驻 active；`enabled` 决定干活/空转；无载体不建进程。
-- 状态：**待接入（无载体）/ 运行中·空闲 / 运行中·工作中 / 已停止（异常）**。
+- 状态（展示四值）：**待接入（无载体）/ 运行中·空闲 / 运行中·工作中 / 已停止（异常）**；「已退役」为软删后的内部终态，不在列表展示。
+- 注册（有载体）后进程即常驻；`enabled` 只决定干活/空转，不决定 systemd 起停。
 - 停用验收：心跳 `working=false`、`ss` 无券商连接、`systemctl is-active` 仍 active。
 
 ### R4 TD→MD 映射
@@ -75,7 +76,7 @@
 
 ### R5 迁移（唯一路线：离线窗口）
 - 维护窗停服务→**全库备份**→迁移→起服务→冒烟。**不做在线双写**；不保留旧代码回滚（见 R8）。
-- 存量：接口行按 provider/market/能力映射成 `md-*/td-*/ds-*`；8 处身份引用全部回填/改列；业务表 PK/UK/触发器/FK 按新语义重建。
+- 存量：接口行按 provider/market/能力映射成 `md-*/td-*/ds-*`；**例外**：EMT 只建 `md-emt`（交易待接入不建行）；币安/欧易建 `md-*` + `td-*`（td 行 `enabled=false`，无凭证）；8 处身份引用全部回填/改列；业务表 PK/UK/触发器/FK 按新语义重建。
 - 兜底（用户授权）：失败或历史无价值 → 基线重置（清业务表+重建+seed 接口），同样先备份。
 - 迁移须给窗口预算、锁模式、`statement_timeout`、每步可重入点与校验点（行数/FK 计数）。
 
@@ -144,7 +145,7 @@
 | 编号 | 契约 | 内容 |
 |---|---|---|
 | C1 身份 | code | `varchar(32) COLLATE "C"`；正则 `^[a-z][a-z0-9-]{1,30}$`；前缀 CHECK（md-/td-/ds-）；不可改 |
-| C2 数据 | 三表+映射+租约 | 三表 code PK（列=旧表全列映射）；业务表 `account_code` TEXT FK；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
+| C2 数据 | 三表+映射+租约 | 三表 code PK（列=旧表全列映射；`quote_account_id` 由 `td_md_map` 取代，M1 删除）；业务表 `account_code` TEXT FK；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
 | C3 运行 | 状态机 | `待接入(无载体)/运行中·空闲/运行中·工作中/已停止(异常)/已退役`；配置轮询 ≤5s；注册有载体即拉起并 enable；删除=软删+先停 |
 | C4 键与流 | unit/Redis | unit `@<code>`；心跳 `iface:hb:{md|td}:<code>` 含 `enabled/working`；`hub:latest_tick:<md_code>`、`hub:bars:<md_code>:<symbol>`、`td:cmd:<td_code>`、`td:exec:<td_code>`；消息 account=MD code |
 | C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；`MAPPING_MISSING/PROVIDER_UNSUPPORTED/CODE_CONFLICT/IFACE_BUSY`；入参/出参 account 一律 code（旧 int 拒绝） |
@@ -162,9 +163,9 @@
 | M4 MD 数据面 | 订阅按接口/provider/market；live_task/持仓经映射反查；bar 归属；data_license；两个 bug | M3 | OKX/币安断言；worker 正常收 bar；无映射时告警 | 不做 TD |
 | M5 TD 执行面 | 映射 1:N、取价降级、MAPPING_MISSING（取价+订阅）、空闲不登录、working | M4 | 映射切换生效；空映射明确报错 | 不做 UI |
 | M6a 两页签 | 集成中心两页签 + 类型化表单 + AccountsCard 落位 | M2 | CRUD/入口计数 + build 门 | 不含映射编辑 |
-| M6b 映射与状态 | 映射编辑器 + 四值状态卡 | M5/M7 | 主备配置 + 状态正确 | 不含监控规则 |
+| M6b 映射与状态 | 映射编辑器 + 四值状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
 | M7 观测 | 接口卡片 + 三条告警 | M3 | 停进程/无映射/订阅失败各出一次告警 | 不新建框架 |
-| M8 收口 | wrapper code-only、删残留键读、文档同步（D26 v6/A02/D25/D32/A06/CLAUDE/D12） | M1–M7 | 全量绿 + pinned 单版 + 旧键零读 | 不改语义 |
+| M8 收口 | wrapper code-only、删残留键读、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版 + 旧键零读 | 不改语义 |
 
 ### 7.4 顺序
 - M0 → M1 → M2 → M3 →（M4 → M5）→ M6a → M6b → M7 → M8；M6a 可与 M5 并行。
