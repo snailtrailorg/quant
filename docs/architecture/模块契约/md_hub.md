@@ -116,7 +116,7 @@ vnpy（EventEngine/MdApi，经网关插件）· Valkey · PG（system_config/liv
 
 ## 读写表
 
-system_config（读）· live_task（读）· hub_transient_subs（读 + DELETE 过期行）· external_interface（读，凭证/接口行——row_id 解析 HUB_INTERFACE_ROW 过渡优先→ACCOUNT_ID，批 66a #6 缺省选行已退役）· ~~bar_hub（写，2026-09-23 迁移 0096 退役）~~ · ~~pools+pool_symbols（读，池源 2026-09-04 移除）~~ · ~~audit_log（写，switch.py 已随批 66a 删除）~~
+system_config（读）· live_task（读）· hub_transient_subs（读 + DELETE 过期行）· trading_account（读，凭证/接口行；0116 前为 external_interface——批189 后改 market_interface）· ~~bar_hub（写，2026-09-23 迁移 0096 退役）~~ · ~~pools+pool_symbols（读，池源 2026-09-04 移除）~~ · ~~audit_log（写，switch.py 已随批 66a 删除）~~
 
 ## 最近变更
 

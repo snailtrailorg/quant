@@ -48,7 +48,7 @@
 | D25 | 能力 token/域划分（以代码 CAPABILITIES/DOMAIN_CAPS 为准，不在本文写死数字） | 修订：三类接口各一域，互斥+并集守门保留 | R1/C6 |
 | D26 | 核心句「一账号=一行=一 hub+一套 TD，MD/TD 同凭证」 | **修订为 v6 接口级拓扑**（不退役，保引用链）；历史理由与 M5 退役保留 | 全文 |
 | D32 | manifest 单 domain | 修订：provider 可声明 md/td 双角色 | C6/D5 |
-| A06 | 波次按 DB id、wrapper 两态 | 修订：波次取在跑实例（code）、wrapper 三态 | C7/R8 |
+| A06 | 波次按 DB id、wrapper 两态 | 修订：波次取在跑实例（code）、wrapper 按 marker 二选一 | C7/R8 |
 | CLAUDE.md | 行边界=账号、能力 5 token | **已修订**：三类接口 + code 身份 + 常驻空转 | 已同步 |
 | D12 §2.11 | quote 默认同账号 | 修订：1:N 主备 + 空映射报错 | R4/M5 |
 
@@ -84,12 +84,12 @@
 - OKX 1h 无 `*_SWAP_OKX`；币安 10min 无 reset 且 bars 递增（或该接口停用不建会话）。
 
 ### R7 观测
-- 接口维度卡片；告警 `iface_down/subscription_fail/mapping_missing`；只对「有载体且 enabled」判活。
+- 接口维度卡片；告警 `iface_down/subscription_fail/mapping_missing`。**判活按「有载体」全部接口**（与常驻模型一致）；`working` 只作为工作态展示，不参与存活判定。
 
 ### R8 部署与回滚
 - 本批 schema 破坏性变更：发布需 `-e allow_contract=true` + `auto_rollback_disabled=true`；**自动 rollback 不支持**。
 - 回滚 = 恢复迁移前快照 + 旧版代码；发布前做一次「备份→恢复」演练并在窗口内验证。
-- 波次取「在跑实例」；wrapper 三态选表且先装位后发布；pinned 断言覆盖 code 实例。
+- 波次取「在跑实例」；wrapper 按 marker 二选一（新/旧，未知 rc=1）且先装位后发布；pinned 断言覆盖 code 实例。
 
 ## 4. 影响面
 
@@ -145,30 +145,47 @@
 | 编号 | 契约 | 内容 |
 |---|---|---|
 | C1 身份 | code | `varchar(32) COLLATE "C"`；正则 `^[a-z][a-z0-9-]{1,30}$`；前缀 CHECK（md-/td-/ds-）；不可改 |
-| C2 数据 | 三表+映射+租约 | 三表 code PK（列=旧表全列映射；`quote_account_id` 由 `td_md_map` 取代，M1 删除）；业务表 `account_code` TEXT FK；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
+| C2 数据 | 三表+映射+租约 | 三表 code PK + 列归属表（见 §6.1）；`quote_account_id` 由 `td_md_map` 取代（M1 删）；业务表 `account_code` TEXT FK→trade_interface；`account_permission` 锚 `login_key`（物理账号权限，不随 TD 行）；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
 | C3 运行 | 状态机 | `待接入(无载体)/运行中·空闲/运行中·工作中/已停止(异常)/已退役`；配置轮询 ≤5s；注册有载体即拉起并 enable；删除=软删+先停 |
-| C4 键与流 | unit/Redis | unit `@<code>`；心跳 `iface:hb:{md|td}:<code>` 含 `enabled/working`；`hub:latest_tick:<md_code>`、`hub:bars:<md_code>:<symbol>`、`td:cmd:<td_code>`、`td:exec:<td_code>`；消息 account=MD code |
-| C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；`MAPPING_MISSING/PROVIDER_UNSUPPORTED/CODE_CONFLICT/IFACE_BUSY`；入参/出参 account 一律 code（旧 int 拒绝） |
+| C4 键与流 | unit/Redis | **唯一键族**：unit `@<code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working`，**替代旧 `quant:hb:md-hub:*` 与 `td:exec:*`**）；`hub:latest_tick:<md_code>`、`hub:bars:<md_code>:<symbol>`、`td:cmd:<td_code>`；消息 account=MD code |
+| C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；`MAPPING_MISSING/PROVIDER_UNSUPPORTED/CODE_CONFLICT/IFACE_BUSY/IFACE_IDLE`；入参/出参 account 一律 code（旧 int 拒绝） |
 | C6 插件 | manifest | provider 可声明 md/td 双角色；无角色→不建进程、不可启用 |
-| C7 部署 | 波次/wrapper | 波次取在跑实例；dbro/hbcheck 三态+code 键；破坏性门参数；pinned 覆盖 code 实例 |
+| C7 部署 | 波次/wrapper | 波次取在跑实例；dbro/hbcheck **按 marker 二选一（新/旧），未知 rc=1**；破坏性门参数；pinned 覆盖 code 实例 |
 
+### 6.1 列归属表（M1 建表/回填唯一依据）
+
+| 旧 `trading_account` 列 | market_interface | trade_interface | data_source | 处置 |
+|---|---|---|---|---|
+| id | — | — | — | 不再作为身份；新表主键=code |
+| name/provider/market/params/credentials_encrypted/impl/enabled/position/created_at/updated_at | ✓ | ✓ | ✓ | 原样复制 |
+| account_key | ✓ | ✓ | 视原行 | 物理账号语义键；同物理账号 md/td 相同 |
+| login_key（新） | ✓ | ✓ | — | 凭证/账号指纹派生；租约与权限锚点 |
+| exchanges | ✓ | — | — | 行情侧市场范围 |
+| capabilities | — | — | — | **不落新表**：由接口类型+manifest 派生；迁移时仅用于分流 |
+| quote_account_id | — | — | — | 由 `td_md_map` 取代，M1 删除 |
+| is_virtual | — | ✓ | — | 纸交易虚拟账号属于交易接口 |
+
+**引用归属**：`live_task/position_snapshot/position_refresh/account_snapshot/order_log/trade_log` → `trade_interface(code)`；`account_permission` → `login_key`（物理账号权限，不随 TD 行增删）；`data_source_usage.interface_id` → `data_source(code)`。
+
+**订阅辅助表**：`hub_transient_subs` 增 `md_code`（+market）与 TTL 唯一键；`hub_shadow_symbols` 改为带 `md_code/market` 的表（或键带前缀），禁止全局符号键。
 ## 7. 模块
 
 | 模块 | 范围 | 依赖 | 验收 | 不做什么 |
 |---|---|---|---|---|
-| M0 契约 | C1–C7 文档 + 可执行断言（code 正则/长度/前缀、三表 CHECK、8 处 FK、键前缀） | — | 断言测试在 M1 后 schema 内省为绿；不 skip/xfail | 不写业务 |
-| M1 基线迁移 | 三表+映射+租约重建；8 处身份回填；PK/UK/触发器/FK 重建；删旧表旧列；备份/恢复 runbook | M0 | 备份→迁移→冒烟；行数/FK/触发器断言；快照恢复演练 | 不做双写 |
+| M0 契约 | C1–C7 文档 + §6.1 列归属表 + 常量/正则单测 + 键名唯一性测试 | — | 常量/正则/键名测试当场绿；schema 内省断言移交 M1（同一套断言） | 不写业务 |
+| M1 基线迁移 | 三表+映射+租约重建；8 处身份回填；PK/UK/触发器/FK 重建；删旧表旧列；`hub_transient_subs` 加 md_code/market；备份/恢复 runbook（路径/保留/命令/耗时/失败阈值） | M0 | 备份→迁移→冒烟；行数/FK/触发器断言；快照恢复演练（记录耗时） | 不做双写 |
 | M2 接口后端 | 三实体 CRUD、code 校验、映射、能力派生校验、审计、软删 | M1 | curl 全链 + 冲突码 + 软删后列表隐藏 | 不做 UI/进程 |
-| M3 进程与部署 | 期望=有载体接口；注册即 enable+start；enabled 干活/空转；释放 slot；懒加载；删除先停；波次/wrapper | M2 | 四值状态可复现；停用无连接；code unit 正常；发布+恢复演练 | 不做订阅模型 |
-| M4 MD 数据面 | 订阅按接口/provider/market；live_task/持仓经映射反查；bar 归属；data_license；两个 bug | M3 | OKX/币安断言；worker 正常收 bar；无映射时告警 | 不做 TD |
-| M5 TD 执行面 | 映射 1:N、取价降级、MAPPING_MISSING（取价+订阅）、空闲不登录、working | M4 | 映射切换生效；空映射明确报错 | 不做 UI |
+| M3 进程与部署 | 期望=有载体接口；注册即 enable+start；enabled 干活/空转；**凭证/provider 变更检测（exit 9 重建）**；释放 slot；懒加载；删除先停；波次/wrapper | M2 | 四值状态可复现；停用无连接；改凭证后自动重建；code unit 正常；发布+恢复演练 | 不做订阅模型 |
+| M4 MD 数据面 | 订阅按接口/provider/market；**td_md_map 解析+MAPPING_MISSING（订阅/取价共用）**；bar 归属；data_license；两个 bug | M3 | OKX/币安断言；worker 正常收 bar；无映射时告警 | 不做 TD 执行 |
+| M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working | M4 | 映射切换生效；空映射明确报错 | 不做 UI |
 | M6a 两页签 | 集成中心两页签 + 类型化表单 + AccountsCard 落位 | M2 | CRUD/入口计数 + build 门 | 不含映射编辑 |
 | M6b 映射与状态 | 映射编辑器 + 四值状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
-| M7 观测 | 接口卡片 + 三条告警 | M3 | 停进程/无映射/订阅失败各出一次告警 | 不新建框架 |
+| M7 观测 | 接口卡片 + 三条告警 | M4/M5 | 停进程/无映射/订阅失败各出一次告警 | 不新建框架 |
 | M8 收口 | wrapper code-only、删残留键读、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版 + 旧键零读 | 不改语义 |
 
-### 7.4 顺序
-- M0 → M1 → M2 → M3 →（M4 → M5）→ M6a → M6b → M7 → M8；M6a 可与 M5 并行。
+### 7.4 开发顺序与上线单元
+- 开发顺序：M0 → M1 → M2 → M3 →（M4 → M5）→ M6a → M6b → M7 → M8；M6a 可与 M5 并行。
+- **上线单元（重要）**：身份/schema 变更不可拆分——**M1–M5 必须在同一次维护窗、同一个 release 上产**（代码与 schema 同步切）。M6a/M6b/M7/M8 可在后续 release 分批。开发上仍是小步，但发布是原子的；不存在「先上 M1 再上 M2」。
 
 ## 8. 状态
 - 需求冻结 v5；无待确认项。

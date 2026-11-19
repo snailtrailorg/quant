@@ -1,9 +1,10 @@
 # 模块契约 · scheduler（调度层）
 
+> **批189 目标态**：期望集=有载体的接口行（不看 enabled），实例名=code；本契约描述现行形态（账号级/enabled 过滤），实施后改写。
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
-> **最近变更（批 66b，2026-09-27 上产）**：SA4/L3 hub 期望源=DB 行驱动全市场——`_desired_units` 读 `external_interface` trading 域 enabled 行（`quant-md-hub@{row.id}`；**去 crypto 过滤+builtin 常开条目+SA4_HUB_UNIT 常量退役**，provider 白名单保留防「拉起→78→告警」死循环）；source="hub" 统一+per-account 熔断键（`_sa4_hub_guards(r, account_id)`：lease/maintenance 键按 account 分键）；L3 停非期望账号 hub（实例名纯数字判定，@quant 非数字过渡实例不越权停——退役 stop/mask 由 deploy 波次承担）。
+> **最近变更（批 66b，2026-09-27 上产）**：SA4/L3 hub 期望源=DB 行驱动全市场——`_desired_units` 读 `trading_account` trading 域 enabled 行（`quant-md-hub@{row.id}`；0116 前为 external_interface；批189 后=有载体接口 code）**去 crypto 过滤+builtin 常开条目+SA4_HUB_UNIT 常量退役**，provider 白名单保留防「拉起→78→告警」死循环）；source="hub" 统一+per-account 熔断键（`_sa4_hub_guards(r, account_id)`：lease/maintenance 键按 account 分键）；L3 停非期望账号 hub（实例名纯数字判定，@quant 非数字过渡实例不越权停——退役 stop/mask 由 deploy 波次承担）。
 > 2026-09-24 D4/D6：资金对账现金口径（available_cash）+ 跨 account 反向识别（D4）；SA4 加密 per-account hub 期望态 + 停非期望（D6）。
 ## 最近变更
 - **批26（2026-09-15）**：自定义因子加载（`load_factors_from_db`）从 app.py **模块 import 期**挪进 `worker_process_init` 信号——根治 C6 exec 回染（import 期 exec 用户代码把重库拉进 beat/worker 父进程且终身不卸）。beat 只调度零因子；每 prefork 子进程各自加载（任务头 R-S4 lazy 重载仍是运行期兜底）。守门测 `test_beat_import_chain_heavy_free` 升级为哨兵法（import 期必不触碰因子加载）。
