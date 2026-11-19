@@ -91,7 +91,7 @@
 
 ### R8 部署与回滚
 - 本批 schema 破坏性变更：发布 `-e allow_contract=true -e contract_reason="批189 接口三表拆表"`；**`auto_rollback_disabled` 由 playbook 在「豁免生效」时自动置位，操作者不传**；迁移由 release 阶段 5 自动执行，**不手工跑 alembic**（手工会绕过 DDL 门与留痕）；自动 rollback 不支持。
-- 回滚 = 恢复迁移前快照 + 旧版代码；发布前做一次「备份→恢复」演练并在窗口内验证。
+- 回滚 = 恢复迁移前快照 + 旧版代码；**恢复路径已演练成功（2026-11-19 用户确认），窗口内由用户手动执行**；发布前只做备份产物校验（存在/大小/时间戳）。
 - 波次取「在跑实例」；wrapper 按 marker 二选一（新/旧，未知 rc=1）且先装位后发布；pinned 断言覆盖 code 实例。
 
 ## 4. 影响面
@@ -122,7 +122,7 @@
 ### 4.3 迁移与回滚
 
 - M1 在维护窗内完成**全部** schema 切换（建表/回填/改列/重建 PK/UK/触发器/FK/删旧表旧列），旧代码回滚不再支持。
-- 回滚唯一路径 = 快照恢复；发布前演练一次，窗口内保留快照直到冒烟通过。
+- 回滚唯一路径 = 快照恢复 + 旧代码；路径已演练（用户确认），窗口内保留快照直到冒烟通过。
 - 基线重置判据：**数值唯一真源=`批189-总体实施架构.md` §5**（迁移预算 40 min / 修复窗 15 min / 观察窗 10 min，2026-11-18 用户确认）；决策人=用户；重置副作用清单见同节。
 
 ## 5. 决策记录
@@ -167,9 +167,9 @@
 | 模块 | 范围 | 依赖 | 验收 | 不做什么 |
 |---|---|---|---|---|
 | M0 契约 | C1–C7 文档 + §6.1 列归属表 + 常量/正则单测 + 键名唯一性测试；**钉死 M1 迁移=0192 单文件**；**四项必决**：①code 生成与撞名（`binance_perp`→`md-binance-perp`？同 provider/market 两行如何消歧）②**存量 `account_key` 全空**的回填来源与 preflight 阻断清单（见 §4.2）③现存 `provider_session_slot` 行回填 login_key/role/terminal 规则 ④同 login_key 多 TD 接口的 terminal 2..99 分配器 | — | 常量/正则/键名测试当场绿；schema 内省断言移交 M1；需求 §6/§6.1 改纯指针（同提交） | 不写业务 |
-| M1 基线迁移 | 三表+映射+租约重建；8 处身份回填；PK/UK/触发器/FK 重建；删旧表旧列；`hub_transient_subs` 加 md_code/market；备份/恢复 runbook（路径/保留/命令/耗时/失败阈值） | M0 | 备份→迁移→冒烟；行数/FK/触发器断言；快照恢复演练（记录耗时） | 不做双写 |
+| M1 基线迁移 | 三表+映射+租约重建；8 处身份回填；PK/UK/触发器/FK 重建；删旧表旧列；`hub_transient_subs` 加 md_code/market；备份/恢复 runbook（路径/保留/命令/耗时/失败阈值） | M0 | 备份→迁移→冒烟；行数/FK/触发器断言；备份产物校验（存在/≥900MB/时间戳） | 不做双写 |
 | M2 接口后端 | 三实体 CRUD、code 校验、映射、能力派生校验、审计、**删除事务**（拒删有任务引用/清理派生数据/历史 SET NULL）；**全部 SQL 读写点改接**（不枚举文件）；`server/scripts`、`scripts/` 中真读写旧表的运维/回归脚本同步改（历史回放脚本显式豁免） | M1 | curl 全链 + 冲突码 + 删除后行消失且派生数据已清；`grep -rnE '(FROM|JOIN|INTO|UPDATE)[[:space:]]+trading_account\b' server/src server/scripts scripts --include=*.py` 为零（域词常量 `DOMAIN_TRADING` 另行在 M8 改名，不在本行验收） | 不做 UI/进程 |
-| M3 进程与部署 | 期望=有载体接口（不看 enabled）；注册即 enable+start；enabled 干活/空转（**`get_interface_row` 去掉 `enabled=true` 谓词**，否则停用即 exit 78 重启环）；凭证/provider 变更检测（exit 9）；释放 slot；懒加载；删除先停；波次/wrapper；`td_exec` 登记 LAYER=3；回执/心跳写口下沉 `quant_common`；**心跳读侧全量改接**（`td:exec`→`iface:hb:td`：`routes/risk.py`、`collector`、`monitor`；MD 侧 `quant:hb:md-hub`→`iface:hb:md`：`collector`、`readyz`、`hub_worker`、`run_hub_postverify`）；**删 `legacy_transition` 豁免**；既有两条告警规则 code 化 + `evaluate` fail-loud | M2 | 两轴可复现（运行/停止 + 配置完整度）；停用无连接；改凭证后自动重建；code unit 正常；停一个 hub 下一轮出 `hub_hb_lost`；readyz 在 code 键下为 200；发布+恢复演练 | 不做订阅模型 |
+| M3 进程与部署 | 期望=有载体接口（不看 enabled）；注册即 enable+start；enabled 干活/空转（**`get_interface_row` 去掉 `enabled=true` 谓词**，否则停用即 exit 78 重启环）；凭证/provider 变更检测（exit 9）；释放 slot；懒加载；删除先停；波次/wrapper；`td_exec` 登记 LAYER=3；回执/心跳写口下沉 `quant_common`；**心跳读侧全量改接**（`td:exec`→`iface:hb:td`：`routes/risk.py`、`collector`、`monitor`；MD 侧 `quant:hb:md-hub`→`iface:hb:md`：`collector`、`readyz`、`hub_worker`、`run_hub_postverify`）；**删 `legacy_transition` 豁免**；既有两条告警规则 code 化 + `evaluate` fail-loud | M2 | 两轴可复现（运行/停止 + 配置完整度）；停用无连接；改凭证后自动重建；code unit 正常；停一个 hub 下一轮出 `hub_hb_lost`；readyz 在 code 键下为 200；发布 + 备份校验 | 不做订阅模型 |
 | M4 MD 数据面 | 订阅按接口/provider/market；映射解析（`MAPPING_MISSING`/`NO_QUOTE` 分码）；bar 归属；data_license；**两 bug（含 `strategy_framework/md_gateway.py` 的 `_SWAP_OKX` 生成点）**；心跳加 `subs/bars/reset_cnt` | M3 | OKX/币安断言（reset_cnt/bars 可观测）；worker 正常收 bar；取价日志含 `quote_key` | 不做 TD 执行 |
 | M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working；**三处 `td:cmd` 直写点改 code**（`strategy.py` / `scheduler/tasks.py` / `routes/risk.py`）；**dispatch 入口判 enabled/连接态 → `IFACE_IDLE` 短路且不写 order_log**；`hub_quote` 入参由 account_id 改 md_code（三种 `_unavailable` 不合并） | M4 | 映射切换生效；空映射/无行情/空闲下发三码分清；策略单/定时急停/手工单三路可消费 | 不做 UI |
 | M6a 两页签（**并入原子单元**） | 集成中心两页签 + 类型化表单 + AccountsCard 落位 + **映射只读列表** + 状态只读卡 | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期走 M2 映射 API，见总体架构 §3） |
