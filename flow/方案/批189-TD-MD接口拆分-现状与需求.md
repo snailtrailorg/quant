@@ -26,7 +26,7 @@
 ### 2.2 身份硬编码（全部要改）
 
 - `md_hub/main.py:168-175`（ACCOUNT_ID 非数字 exit 78）、`td_exec/main.py:382`、`scheduler/tasks.py:2344/2355`（只停数字实例）、`web_api/routes/system.py`（readyz 数字过滤）、`deploy/wrappers/quant-hbcheck`、`health_monitor/collector.py:249`。
-- `hub:bars:{account_id}:{symbol}`（databus.py:225、hub_worker.py:98）+ 消息 `account_id` + worker hub 守卫（hub_worker.py:108-116,378-382）。
+- **现状（旧形状）**：`hub:bars:{account_id}:{symbol}`（databus.py:225、hub_worker.py:98）+ 消息 `account_id` + worker hub 守卫（hub_worker.py:108-116,378-382）。
 - 订阅源四源（md_hub `_desired_symbols`）：running live_task 全账号、`hub_shadow_symbols` 全局、`hub_transient_subs` 全局、持仓仅按本行 id → 两 bug 根因。
 - `data_license` 按本行 `trading_account.params` 读（subscription.py）；MD 换 id 后静默失效。
 - 部署：`quant-dbro`/`quant-hbcheck` 两态选表；hub/td 波次按 DB id 拼 unit；pinned 枚举全部 quant-*。
@@ -103,7 +103,7 @@
 | bar 流 | databus.py:225；hub_worker.py:98,108-116,378-382；回放 |
 | 订阅 | md_hub `_desired_symbols` 四源；data_platform/subscription.py；hub_transient_subs/hub_shadow_symbols |
 | 取价 | td_exec quote 解析；hub:latest_tick 读写方（15 文件，M4 清单化） |
-| Web/IM | routes/{trading,risk,strategy,mgmt,chat}.py 的 account_id 入参/出参；IM 工具参数 |
+| Web/IM | routes/{trading,risk,strategy,mgmt,chat}.py 的 account_id 入参/出参；`/api/trades`（trade_log 读口，account_id→code）；`/api/health/components`（td_execs/hubs 卡片读口）；IM 工具参数 |
 | 旁路脚本 | scripts/verify_p3_plugin_lifecycle.py、scripts/test_emt_cancel.py、server/scripts/verify_integration.py、data_platform/stock_detail.py |
 | 部署 | release.yml/rollback-tasks.yml 波次；quant-dbro/quant-hbcheck；A06 |
 
@@ -148,7 +148,7 @@
 | C1 身份 | code | `varchar(32) COLLATE "C"`；正则 `^[a-z][a-z0-9-]{1,30}$`；前缀 CHECK（md-/td-/ds-）；不可改 |
 | C2 数据 | 三表+映射+租约 | 三表 code PK + 列归属表（见 §6.1）；`quote_account_id` 由 `td_md_map` 取代（M1 删）；业务表 `account_code` TEXT FK→trade_interface；`account_permission` 锚 `login_key`（物理账号权限，不随 TD 行）；`data_source_usage.interface_id`→code；`td_md_map(td_code,md_code,priority)`；`provider_session_slot(login_key,provider,role,terminal_id)` |
 | C3 运行 | 状态机 | `待接入(无载体)/运行中·空闲/运行中·工作中/已停止(异常)/已退役`；配置轮询 ≤5s；注册有载体即拉起并 enable；删除=软删+先停 |
-| C4 键与流 | unit/Redis | **唯一键族**：unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working/subs/bars/reset_cnt`，替代 `quant:hb:md-hub:*` 与 `td:exec:*`）；`hub:latest_tick:<md_code>:<sym>`、`hub:latest_tick:pub:<sym>`（公共快照，跨接口共享故不带 code）、`hub:bars:<md_code>:<sym>`、`td:cmd:<td_code>`、`risk:cmd:result:<req_id>[:final]`；**`td:exec:*` 退役**（在场判据=心跳键存在）；消息 account=MD code |
+| C4 键与流 | unit/Redis | **唯一键族**：unit `quant-md-hub@<md_code>` / `quant-td-exec@<td_code>`；心跳 `iface:hb:<md|td>:<code>`（含 `enabled/working/subs/bars/reset_cnt`，替代 `quant:hb:md-hub:*` 与 `td:exec:*`）；`hub:latest_tick:<md_code>:<sym>`、`hub:latest_tick:pub:<sym>`（公共快照，跨接口共享故不带 code）、`hub:bars:<md_code>:<sym>`、`hub:worker:max_ts:<md_code>:<sym>`、`td:cmd:<td_code>`、`risk:cmd:result:<req_id>[:final]`；**`td:exec:*` 退役**（在场判据=心跳键存在）；消息 account=MD code |
 | C5 API | 端点/错误码 | `/api/md-interfaces`、`/api/td-interfaces`、`/{code}/mappings`；错误码分四类不得混用：`MAPPING_MISSING`（无映射）/`NO_QUOTE`（有映射无行情，仅映射 `hub_quote._unavailable=no_tick`）/`PROVIDER_UNSUPPORTED`（无载体）/`IFACE_IDLE`（空闲下发）+`CODE_CONFLICT`/`IFACE_BUSY`；**后端不可用/坏数据不与 NO_QUOTE 合并**（`valkey_down`→503 `QUOTE_BACKEND_DOWN`、`bad_json`→`QUOTE_BAD_DATA`）；入参/出参 account 一律 code（旧 int 拒绝） |
 | C6 插件 | manifest | provider 可声明 md/td 双角色。**载体定义（M8 前）**=`registry` 插件 ∪ legacy `create_md_gateway`（`md_hub` 的 `_LegacyMdShim` 通路，现网 emt/binance/okx 行情走此）——否则 D8「币安/欧易行情启用」与 M4 两 bug 验收自相矛盾。无载体→不建进程、不可启用；**M8 验收=`registry` only 且 legacy 注册点为零** |
 | C7 部署 | 波次/wrapper | 波次取在跑实例；dbro/hbcheck **按 marker 二选一（新/旧），未知 rc=1**；破坏性门参数；pinned 覆盖 code 实例 |
