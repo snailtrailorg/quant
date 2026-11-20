@@ -16,3 +16,18 @@
 4. **P1 部署路径零覆盖**：沙箱三份 fixture 均无 OFFLINE_ATOMIC（0 处）、无 offline 场景 ⇒ 新通道只在 pytest 里证明过。
 
 结论：**NEEDS-REWORK**——P0 已闭、无新 P0；N1/N2/N3 各一行级修＋把两项延后项登记进 `flow/待办.md` 即可再判 PASS。
+
+---
+
+## 终审（2026-11-20，基线 72fd76a）
+
+- **NEW-P1① 零 op 误报**：RESOLVED —— :493 加 `and scan_unsafe_lines(text)`；实测 create_table 文件 rc=0（新用例双钉）。
+- **NEW-P1② rc=1 无钉**：RESOLVED —— `test_check_release_offline_atomic_rc` 同时钉 rc==1（破坏）/rc==0（零 op）。
+- **NEW-P1③ 0192 假指针**：RESOLVED —— backup 改为「备份任务产出…」，不再指向 release.yml 不存在的步骤（仍属散文，门不可验，接受）。
+- **P1-4 空 backup**：RESOLVED（0207_e 用例）。
+- **P1-3 docstring**：RESOLVED（:282 六键）；**规范 §3 / A06 UNRESOLVED 但已进 `flow/待办.md` §五 行4** ⇒ 同批延后，可接受。
+- **P0-1 / rollback 恢复门**：UNRESOLVED（部署链未动），已登记 `flow/待办.md` §五 行1/2 ⇒ 延后可接受（明示上产前 blocker）。
+- **新发现 P1**：ruff 红 —— E702×3（`tests/test_migration_policy.py:721,733,734` 分号并用），仓库收工四件套必绿项；修：半行拆两条语句。
+
+**结论：NEEDS-REWORK（仅此一条机械项，修完即 PASS）**。治理面（名单/仅新文件/互斥/rc=1/attestation/文档/待办）全部闭合。
+

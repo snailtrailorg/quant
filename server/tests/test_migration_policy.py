@@ -718,7 +718,8 @@ def test_offline_atomic_requires_attestation(tmp_path, monkeypatch) -> None:
     ok, why = mp.evaluate(eb, tmp_path)
     assert not ok and "attestation" in why, why
     # 仅限全新迁移：同名存在于 prev_dir ⇒ 拒（不得改造已部署迁移）
-    prev = tmp_path / "prev"; prev.mkdir()
+    prev = tmp_path / "prev"
+    prev.mkdir()
     (prev / "0206_prev.py").write_text(body, encoding="utf-8")
     pv = tmp_path / "0206_prev.py"
     pv.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
@@ -730,8 +731,10 @@ def test_check_release_offline_atomic_rc(tmp_path, monkeypatch) -> None:
     名单内但零破坏 op 的文件不误报（rc=0）。"""
     import src.data_platform.migration_policy as mp
     monkeypatch.setattr(mp, "OFFLINE_ATOMIC_FROZEN", frozenset({"0300_x.py"}))
-    new = tmp_path / "new"; new.mkdir()
-    prev = tmp_path / "prev"; prev.mkdir()
+    new = tmp_path / "new"
+    new.mkdir()
+    prev = tmp_path / "prev"
+    prev.mkdir()
     hdr = '# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n'
     (new / "0300_x.py").write_text(hdr + '"""x"""\ndef upgrade():\n    op.drop_table("t")\n', encoding="utf-8")
     rc, _ = mp.check_release(new, prev)
