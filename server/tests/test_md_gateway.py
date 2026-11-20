@@ -58,7 +58,7 @@ def test_get_interface_row_row_id_required():
     """批 66a 钉（D26 #6）：row_id 必填——缺省选行退役，None raise（无主路径静默绑首行=禁区）。"""
     from src.strategy_framework.broker import get_interface_row
     with pytest.raises(ValueError):
-        get_interface_row(row_id=None)
+        get_interface_row(code=None)
 
 
 def test_get_interface_row_missing_required_field_raises():
@@ -69,7 +69,7 @@ def test_get_interface_row_missing_required_field_raises():
          patch("src.quant_common.crypto.decrypt",
                return_value=json.dumps({"app_secret": "S"})):   # 缺 app_id
         with pytest.raises(RuntimeError):
-            get_interface_row(row_id=1)
+            get_interface_row(code=1)
 
 
 def test_get_interface_row_decrypt_failure_raises():
@@ -79,7 +79,7 @@ def test_get_interface_row_decrypt_failure_raises():
                return_value=_conn([_xtp_row()])), \
          patch("src.quant_common.crypto.decrypt", side_effect=Exception("bad key")):
         with pytest.raises(RuntimeError):
-            get_interface_row(row_id=1)
+            get_interface_row(code=1)
 
 
 def test_get_interface_row_complete_credentials_ok():
@@ -89,7 +89,7 @@ def test_get_interface_row_complete_credentials_ok():
                return_value=_conn([_xtp_row()])), \
          patch("src.quant_common.crypto.decrypt",
                return_value=json.dumps({"app_id": "A", "app_secret": "S"})):
-        row = get_interface_row(row_id=1)
+        row = get_interface_row(code=1)
     assert row["provider"] == "xtp" and row["credentials"]["app_id"] == "A"
 
 

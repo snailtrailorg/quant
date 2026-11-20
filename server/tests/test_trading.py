@@ -56,11 +56,11 @@ class TestFlushPositions:
         conn = self._run([_pos()])
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        assert any("ON CONFLICT (account_id)" in s for s in sqls)   # refresh upsert
+        assert any("ON CONFLICT (account_code)" in s for s in sqls)   # refresh upsert
         # O-F1：executemany 走 cursor（池化连接无此方法——F 审同款坑的回归锁）
         cur = conn.cursor.return_value.__enter__.return_value
         cur.executemany.assert_called_once()
-        assert "ON CONFLICT (account_id, symbol, direction)" in cur.executemany.call_args.args[0]
+        assert "ON CONFLICT (account_code, symbol, direction)" in cur.executemany.call_args.args[0]
         conn.commit.assert_called_once()   # 单事务
 
     def test_empty_batch_clears_state_and_writes_heartbeat(self):
@@ -69,7 +69,7 @@ class TestFlushPositions:
         conn.cursor.assert_not_called()   # 空批不 INSERT
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (account_id)" in c.args[0]]
+        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (account_code)" in c.args[0]]
         assert upsert and upsert[0].args[1] == (1, 0, "8", 0, "8")
 
     def test_account_id_passed_directly(self):
@@ -220,7 +220,7 @@ class TestSnapshotCycle:
              patch.object(trading, "_flush_positions"):   # 持仓批自持连接/自有事务，单测隔离（挂点另有锁）
             trading.snapshot_cycle(adapter, 1, 8, {"baseline": None})
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        assert any("SELECT total_value FROM account_snapshot WHERE account_id=%s" in s for s in sqls)
+        assert any("SELECT total_value FROM account_snapshot WHERE account_code=%s" in s for s in sqls)
         insert = [c for c in conn.execute.call_args_list
                   if "INSERT INTO account_snapshot" in c.args[0]][0]
         assert insert.args[1] == (1, 150.0, 30.0, 1.0, 120.0)   # account_id/total/daily_pnl/基线/available
@@ -483,6 +483,6 @@ class TestRealConnectionSmoke:
                 assert cur.fetchone()[0] == 0
         finally:
             with db.get_conn() as conn:
-                conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (vid,))
+                conn.execute("DELETE FROM position_snapshot WHERE account_code=%s", (vid,))
                 conn.execute("DELETE FROM position_refresh WHERE account_id=%s", (vid,))
                 conn.commit()
