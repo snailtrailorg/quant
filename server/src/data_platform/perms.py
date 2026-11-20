@@ -103,12 +103,14 @@ def account_allows(account_id: int, symbol: str) -> bool:
         return False
     if attr is None:
         return False                       # 标的无档 → fail-closed（SM 未回填 ≠ 可交易）
+    from src.data_platform.iface_store import resolve_login_key
+    _lk = resolve_login_key(account_id)
     try:
         with _gc() as conn:
             cur = conn.execute(
                 "SELECT allowed_categories, allowed_exchanges, allowed_boards, "
                 "is_st_allowed, convertible_allowed "
-                "FROM account_permission WHERE account_id=%s", (account_id,))
+                "FROM account_permission WHERE login_key=%s", (_lk,))
             row = cur.fetchone()
     except Exception as e:
         _logger.warning("account_permission 读取失败（fail-closed 拒）: %s", e)

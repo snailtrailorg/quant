@@ -80,12 +80,11 @@ _REGISTRY: dict[str, type[Broker]] = {
 }
 
 
-def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
-    """从 DB trading_account 表实例化通道（批 83a 拆表——原 external_interface 交易域行）。
+def get_broker(provider: str, td_code: str | None = None) -> Broker | None:
+    """从 DB trade_interface 表实例化通道（批189 M5：code 唯一身份，旧 trading_account 已删）。
 
-    row_id 指定行（M5：B 实例 HUB_INTERFACE_ROW 选账号，按 id 直取）；
-    缺省=表内 position 序首行（勘察 #4：确定性排序防多账号选行漂移）。
-    83a 拆表后表内行恒为交易账号（原 `'trading' = ANY(capabilities)` 域谓词在表层面退役）。
+    td_code 指定行（接口 code）；缺省=表内 position 序首行（dev/test 与告警探针零参路径）。
+    物理资金账号解析在券商会话层（build_xtp_setting）内部，不在此暴露。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
@@ -93,22 +92,21 @@ def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            if row_id is not None:
+            if td_code is not None:
                 cur = conn.execute(
-                    "SELECT credentials_encrypted, params FROM trading_account "
-                    "WHERE id=%s AND provider=%s AND enabled=true", (row_id, provider))
+                    "SELECT credentials_encrypted, params FROM trade_interface "
+                    "WHERE code=%s AND provider=%s", (td_code, provider))
             else:
                 cur = conn.execute(
-                    "SELECT credentials_encrypted, params FROM trading_account "
-                    "WHERE provider=%s AND enabled=true "
-                    "ORDER BY position, id LIMIT 1", (provider,))
+                    "SELECT credentials_encrypted, params FROM trade_interface "
+                    "WHERE provider=%s ORDER BY position, code LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
             return None
-        params_str = json.dumps(r[1]) if isinstance(r[1], dict) else r[1]   # jsonb→str 喂 __init__ 契约
+        params_str = json.dumps(r[1]) if isinstance(r[1], dict) else r[1]
         return cls(credentials_encrypted=r[0], params=params_str)
     except Exception as e:
-        logger.warning(f"读 trading_account({provider}) 失败: {e}")
+        logger.warning(f"读 trade_interface({provider}) 失败: {e}")
         return None
 
 
@@ -173,7 +171,7 @@ def xtp_setting_from(cred: dict, params: dict) -> dict:
     }
 
 
-def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -> dict:
+def build_xtp_setting(client_id: int | None = None, td_code: str | None = None) -> dict:
     """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
 
     2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
@@ -190,7 +188,7 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
     import logging
     logger = logging.getLogger("strategy_framework")
     try:
-        broker = get_broker("xtp", row_id)
+        broker = get_broker("xtp", td_code)
         if broker:
             cred = broker.get_credentials()
             params = broker._params or {}
@@ -199,11 +197,11 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
                 if client_id:
                     setting["客户号"] = int(client_id)
                 return setting
-        if row_id is not None:
-            # M5：指定 B 行但取数失败/凭证不完整 → fail-fast，禁 .env fallback
-            raise RuntimeError(f"trading_account 行 id={row_id} 无 XTP 凭证或凭证不完整")
+        if td_code is not None:
+            # M5：指定接口但取数失败/凭证不完整 → fail-fast，禁 .env fallback
+            raise RuntimeError(f"trade_interface code={td_code} 无 XTP 凭证或凭证不完整")
     except Exception as e:
-        if row_id is not None:
+        if td_code is not None:
             raise   # fail-fast 上抛（消费方捕获 → exit 78）
         logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
 
@@ -213,30 +211,32 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
     return setting
 
 
-def get_interface_row(row_id: int, md_only: bool = False) -> dict:
-    """读 trading_account 行（批 63 二：hub 网关按行 provider 选插件；批 83a 拆表）。
+def get_interface_row(code: str, md_only: bool = False) -> dict:
+    """读接口行（批189 M5：code 唯一身份；旧 trading_account 已删，改读 trade_interface /
+    market_interface）。返回 {provider, credentials(解密 dict), params, market, capabilities}。
 
-    返回 {provider, credentials(解密 dict), params, market, capabilities}。
-    - **row_id 必填**（批 66a，D26 #6）：缺省选行分支退役——None raise ValueError
-      （hub 绑死账号行 fail-fast 哲学；无主路径会静默绑首行账号）。
-    - row_id 指定：直取该行；**解密失败/缺配置面 required_fields 必填字段即 raise**
-      （M5 B 实例 fail-fast——禁 .env fallback 防 B 静默跑 A 账号，双盲审 P0-1/P2-1）。
-      md_only=True（MD 数据面，加密 MD 网关空凭证）跳过 required_fields 校验（盲审 B P0）。
-    无可用行/DB 异常 raise（消费方 exit 78）。
+    code 必填（接口 code）；缺省 raise（绑死行 fail-fast）。凭证解密失败/缺 required_fields raise
+    （fail-fast，禁 .env fallback）。md_only=True（MD 数据面加密网关空凭证）跳过 required_fields。
+    capabilities 由接口类型派生（M0 §2.1 不落表）。
     """
-    if row_id is None:
-        raise ValueError("row_id required——缺省选行已退役（批 66a，D26 #6）：调用方须显式传接口行 id")
+    if not code:
+        raise ValueError("code required：调用方须显式传接口 code（批189 M5）")
     try:
         from src.strategy_framework.md_gateway import list_md_gateway_providers
         gw_providers = list_md_gateway_providers()
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT provider, credentials_encrypted, params, market, capabilities "
-                "FROM trading_account WHERE id=%s AND enabled=true", (row_id,))
+            if md_only:
+                cur = conn.execute(
+                    "SELECT provider, credentials_encrypted, params, market "
+                    "FROM market_interface WHERE code=%s", (code,))
+            else:
+                cur = conn.execute(
+                    "SELECT provider, credentials_encrypted, params, market "
+                    "FROM trade_interface WHERE code=%s", (code,))
             r = cur.fetchone()
         if not r:
-            raise RuntimeError(f"trading_account 无可用行（row_id={row_id}，网关 providers={gw_providers}）")
+            raise RuntimeError(f"接口行 code={code} 不存在（网关 providers={gw_providers}）")
         cred = {}
         if r[1]:
             try:
@@ -244,22 +244,18 @@ def get_interface_row(row_id: int, md_only: bool = False) -> dict:
                 raw = decrypt(r[1])
                 cred = json.loads(raw) if raw else {}
             except Exception as e:
-                # 解密失败 fail-fast 非 .env 静默（密钥错配要炸出来——盲审 P2-1）
                 raise RuntimeError(f"接口行凭证解密失败（密钥错配？）: {e}")
         params = r[2] if isinstance(r[2], dict) else (json.loads(r[2]) if r[2] else {})
-        if row_id is not None and not md_only:
-            # M5 fail-fast（双盲审 P0-1）：指定行按配置面 required_fields 校验——
-            # 凭证非空但缺必填字段（如只有 app_secret 没 app_id）禁 .env fallback。
-            # md_only=True（MD 数据面空凭证）跳过（盲审 B P0）
+        if not md_only:
             from src.data_platform.interfaces import get_interface_provider
             inst = get_interface_provider(r[0])
             missing = [f for f in (inst.required_fields if inst else set()) if not cred.get(f)]
             if missing:
-                raise RuntimeError(f"行 id={row_id}（{r[0]}）凭证缺必填字段 {missing}——禁 .env fallback")
+                raise RuntimeError(f"接口 code={code}（{r[0]}）凭证缺必填字段 {missing}——禁 .env fallback")
         return {"provider": r[0], "credentials": cred, "params": params,
-                "market": r[3], "capabilities": list(r[4] or [])}
+                "market": r[3], "capabilities": ["rt_quote"] if md_only else ["trading"]}
     except Exception as e:
-        logger.warning("读 trading_account 失败: %s", e)
+        logger.warning("读接口行 code=%s 失败: %s", code, e)
         raise
 
 

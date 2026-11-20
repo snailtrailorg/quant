@@ -35,7 +35,7 @@ logger = logging.getLogger("td_exec")
 EX_CONFIG = 78  # 永久配置错误 → RestartPreventExitStatus=78（对齐既有单元语义）
 
 CMD_KEY = "td:cmd:{account}"
-ALIVE_KEY = "td:exec:{account}"
+ALIVE_KEY = "iface:hb:td:{account}"
 
 
 def _redis(decode: bool = True):
@@ -67,15 +67,15 @@ def _parse_cmd(raw) -> dict | None:
 class TdExec:
     """账号级 TD 执行进程主体。"""
 
-    def __init__(self, account_id: int):
-        self.account_id = int(account_id)
+    def __init__(self, td_code: str):
+        self.td_code = td_code
         self._stop = threading.Event()
         self.worker = None          # EmergencyWorker（复用执行逻辑）
         self.dispatch_closing = threading.Event()   # close 进行中（主循环分流用）
         self._r = _redis()
         self._close_thread: threading.Thread | None = None
         self._hb = None
-        self._quote_account = self.account_id
+        self._quote_md_code = td_code   # 取价主 MD code（M5：td_md_map 反查，见 _load_account）
         self._row: dict = {}
         self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
@@ -84,18 +84,17 @@ class TdExec:
         self._baseline_cache: dict = {}                  # _account_baseline_capital 缓存（每进程一份）
 
     def _load_account(self) -> dict:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, provider, enabled, quote_account_id, impl "
-                "FROM trading_account WHERE id=%s", (self.account_id,)).fetchone()
-        if not row:
-            raise RuntimeError(f"trading_account {self.account_id} 不存在——拒绝启动")
-        row = dict(zip(("id", "provider", "enabled", "quote_account_id", "impl"), row))
-        if not row.get("enabled"):
-            raise RuntimeError(f"trading_account {self.account_id} 未启用——拒绝启动")
-        self._quote_account = int(row.get("quote_account_id") or self.account_id)
-        if row.get("provider") == "xtp":
+        from src.data_platform.iface_store import get_td_identity, list_mappings
+        ident = get_td_identity(self.td_code)
+        if not ident:
+            raise RuntimeError(f"trade_interface {self.td_code} 不存在——拒绝启动")
+        if not ident.get("enabled"):
+            raise RuntimeError(f"trade_interface {self.td_code} 未启用——拒绝启动")
+        # I6/E1：取价主 MD code 由 td_md_map 派生（quote_account_id 已退役）
+        maps = list_mappings("td", self.td_code)
+        self._quote_md_code = maps[0]["md_code"] if maps else ""
+        self._row = ident
+        if ident.get("provider") == "xtp":
             # 与 live_task 同源（hub_worker._td_connect_due）：启动时读一次，改动重启生效
             from src.providers.xtp.session import load_xtp_window_cfg
             self._td_window = load_xtp_window_cfg()
@@ -106,28 +105,29 @@ class TdExec:
         from src.strategy_runner.td_registry import build_td_runtime
         from src.strategy_runner import trading
 
+        from src.strategy_runner.td_registry import code_terminal
         provider = self._row.get("provider")
         impl = self._row.get("impl") or "plugin"
         if impl != "plugin":
             raise RuntimeError(
-                f"账号 {self.account_id} impl={impl!r}：legacy TD 路径已删，须 impl=plugin")
+                f"接口 {self.td_code} impl={impl!r}：legacy TD 路径已删，须 impl=plugin")
         ee = make_event_engine()
         ee.start()
         self._ee = ee
         boot_epoch = int(time.time())
-        # 账号级号段注入：client_id 固定 2（每进程单连接，账号内唯一即可）；order_prefix 带 account+epoch。
-        # tid 传 int：session_slot._terminal_for 做 (tid-1)%98+2 算术（str 会 TypeError）
-        rt = build_td_runtime(provider, ee, self.account_id, self.account_id, boot_epoch,
-                              client_id=2, order_prefix=f"a{self.account_id}:e{boot_epoch}:")
+        # 接口级号段：client_id 固定 2；order_prefix 带 code+epoch；tid 用 code 字典序稳定整数。
+        _tid = code_terminal(self.td_code)
+        rt = build_td_runtime(provider, ee, _tid, self.td_code, boot_epoch,
+                              client_id=2, order_prefix=f"a{self.td_code}:e{boot_epoch}:")
         if rt is None:
-            raise RuntimeError(f"TD builder {provider} 未注册（账号 {self.account_id}）")
+            raise RuntimeError(f"TD builder {provider} 未注册（接口 {self.td_code}）")
         self._adapter = rt["adapter"]
         self._td_api = rt["td_api"]
         self._gw = rt.get("gw")
         self._exec_port = rt.get("exec_port")
-        self._adapter.account_id = self.account_id   # write_trade_log per-account 真源
+        self._adapter.account_id = self.td_code   # write_trade_log 归属真源（现为 code）
         if self._exec_port is None:
-            raise RuntimeError(f"账号 {self.account_id} 无 exec_port（plugin 端口缺失）——拒绝启动")
+            raise RuntimeError(f"接口 {self.td_code} 无 exec_port（plugin 端口缺失）——拒绝启动")
 
         def on_order(d):
             _err = ""
@@ -166,8 +166,9 @@ class TdExec:
         # 复用 EmergencyWorker 执行逻辑（queue/daemon 不用，由本模块驱动 _handle）
         from src.strategy_runner.hub_worker import EmergencyWorker
         self.worker = EmergencyWorker(
-            adapter=self._adapter, td_api=self._td_api, account_id=self.account_id,
-            tid=str(self.account_id), closing=threading.Event())
+            adapter=self._adapter, td_api=self._td_api, account_id=self.td_code,
+            tid=str(code_terminal(self.td_code)), closing=threading.Event(),
+            quote_md_code=self._quote_md_code)
 
     def _maybe_connect(self) -> None:
         """窗开沿建连 + 连上沿对账（与 live_task 同一纯函数语义：交易日门 + 60s 节流）。
@@ -187,7 +188,7 @@ class TdExec:
         if connected:
             if not self._conn_announced:
                 self._conn_announced = True
-                logger.info("TD 会话就绪 account=%s", self.account_id)
+                logger.info("TD 会话就绪 td_code=%s", self.td_code)
                 try:
                     from src.strategy_runner import trading
                     trading.reconcile_orders(self._adapter, "", "")
@@ -227,17 +228,17 @@ class TdExec:
         self._last_flush = now
         try:
             from src.strategy_runner import trading
-            trading.snapshot_cycle(self._adapter, self.account_id, None, self._baseline_cache)
+            trading.snapshot_cycle(self._adapter, self.td_code, None, self._baseline_cache)
         except Exception as e:  # noqa: BLE001
             logger.warning("账户/持仓快照刷新失败: %s", e)
 
     def _start_heartbeat(self):
         from src.strategy_framework.runtime.pulse import HeartbeatWriter
         self._hb = HeartbeatWriter(
-            self._r, ALIVE_KEY.format(account=self.account_id), ttl=90,
-            base=lambda: {"account_id": self.account_id,
+            self._r, ALIVE_KEY.format(account=self.td_code), ttl=90,
+            base=lambda: {"account_code": self.td_code,
                           "provider": self._row.get("provider") or "",
-                          "quote_account_id": self._quote_account})
+                          "quote_md_code": self._quote_md_code})
         self._hb.beat()
 
     def _reject(self, cmd: dict) -> None:
@@ -254,10 +255,10 @@ class TdExec:
                 with get_conn() as conn:
                     conn.execute(
                         "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,"
-                        "status,account_id,bar_fingerprint) "
+                        "status,account_code,bar_fingerprint) "
                         "SELECT strategy_id,symbol,action,volume,price,id,'rejected',%s,%s "
                         "FROM signal_log WHERE id=%s",
-                        (self.account_id, jsonb(bf) if bf else None, sig_id))
+                        (self.td_code, jsonb(bf) if bf else None, sig_id))
                     conn.commit()
             except Exception as e:  # noqa: BLE001
                 logger.warning("reject 信号账回写失败 sig=%s: %s", sig_id, e)
@@ -279,7 +280,7 @@ class TdExec:
         req_id = cmd.get("req_id") or ""
         o = cmd.get("order") or {}
         result = trading.execute_place_order(
-            self._adapter, account_id=self.account_id, order=o,
+            self._adapter, account_id=self.td_code, order=o,
             signal_id=cmd.get("signal_id"), bar_fingerprint=cmd.get("bar_fingerprint"),
             req_id=req_id)
         trading.write_cmd_result(req_id, {"req_id": req_id, "verb": "place-order",
@@ -291,7 +292,7 @@ class TdExec:
         if verb == "close-all":
             self.dispatch_closing.set()
             self._close_thread = threading.Thread(
-                target=self._run_close, args=(cmd,), name=f"td-close-{self.account_id}", daemon=True)
+                target=self._run_close, args=(cmd,), name=f"td-close-{self.td_code}", daemon=True)
             self._close_thread.start()
         elif self.dispatch_closing.is_set():
             self._reject(cmd)
@@ -310,9 +311,9 @@ class TdExec:
         self._row = self._load_account()
         self._build()
         self._start_heartbeat()
-        key = CMD_KEY.format(account=self.account_id)
-        logger.info("td_exec 启动 account=%s provider=%s quote=%s",
-                    self.account_id, self._row.get("provider"), self._quote_account)
+        key = CMD_KEY.format(account=self.td_code)
+        logger.info("td_exec 启动 td_code=%s provider=%s quote_md=%s",
+                    self.td_code, self._row.get("provider"), self._quote_md_code)
         last_hb = time.time()
         while not self._stop.is_set():
             try:
@@ -342,13 +343,13 @@ class TdExec:
         self._shutdown()
 
     def _shutdown(self) -> None:
-        logger.info("td_exec 停机 account=%s", self.account_id)
+        logger.info("td_exec 停机 td_code=%s", self.td_code)
         if self._close_thread and self._close_thread.is_alive():
             self._close_thread.join(timeout=10)
             if self._close_thread.is_alive():
                 logger.warning("close 线程未在 10s 内结束（systemd 兜底强杀）")
         try:
-            self._r.delete(ALIVE_KEY.format(account=self.account_id))
+            self._r.delete(ALIVE_KEY.format(account=self.td_code))
         except Exception:  # noqa: S110
             pass
         # 硬退出（md_hub 同款）：vnpy EventEngine 线程非 daemon、XTP SDK 自带线程，
@@ -379,11 +380,14 @@ def _install_signal(stop: threading.Event) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    acc = os.environ.get("ACCOUNT_ID") or os.environ.get("INSTANCE_NAME") or ""
-    if not acc.isdigit():
-        logger.error("ACCOUNT_ID 缺失/非法: %r", acc)
+    code = os.environ.get("TD_CODE") or ""
+    # 防复活守门：legacy @quant concrete unit 无 TD_CODE（或 ACCOUNT_ID=quant）→ exit 78 Prevent。
+    # code 形如 td-xtp；quant 无 td- 前缀自然拒绝。
+    import re as _re
+    if not _re.match(r"^td-[a-z0-9-]+$", code or ""):
+        logger.error("TD_CODE 缺失/非法: %r（须 ^td-[a-z0-9-]+$）", code)
         sys.exit(EX_CONFIG)
-    ex = TdExec(int(acc))
+    ex = TdExec(code)
     _install_signal(ex._stop)
     try:
         ex.run()

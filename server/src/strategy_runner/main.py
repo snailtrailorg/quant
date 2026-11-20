@@ -341,7 +341,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     # D5：读 account 行 → provider（行=account_id，禁硬编码 XTP）。取数失败（禁用/凭证缺/DB 异常）
     # raise → 永久配置错误，单次干净 exit 78（RestartPreventExitStatus 豁免，防 on-failure 重启风暴）
     try:
-        iface = get_interface_row(row_id=account_id)
+        iface = get_interface_row(code=account_id)
     except Exception as e:
         logger.error("读 account 行失败（id=%s），拒绝启动: %s", account_id, e)
         sys.exit(EX_CONFIG)
@@ -370,7 +370,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     try:
         from src.data_platform.db import get_conn as _gc
         with _gc() as _c:
-            _r = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+            _r = _c.execute("SELECT impl FROM trade_interface WHERE code=%s", (account_id,)).fetchone()
         _impl = (_r[0] if _r else "legacy")
     except Exception:   # noqa: BLE001 —— 读不到按 legacy（不阻断启动）
         pass

@@ -84,6 +84,37 @@ def get_interface(kind: str, code: str) -> dict:
     return dict(zip(("code",) + keys, r))
 
 
+def get_td_identity(td_code: str) -> dict | None:
+    """M5 身份解析：按 td_code 取交易接口身份字段（含 login_key/凭证/impl）。
+
+    供 TD 执行链路在平台层只用 code、把物理账号解析留在券商会话层。
+    凭证密文在此返回（调用方按 impl 决定是否解密），**不回显 UI**。缺行 None。
+    """
+    with get_conn() as conn:
+        r = conn.execute(
+            "SELECT code,provider,account_key,login_key,credentials_encrypted,params,impl,is_virtual "
+            "FROM trade_interface WHERE code=%s", (td_code,)).fetchone()
+    if not r:
+        return None
+    return dict(zip(("code", "provider", "account_key", "login_key",
+                     "credentials_encrypted", "params", "impl", "is_virtual"), r))
+
+
+def resolve_login_key(account: str) -> str:
+    """code → login_key（account_permission 归属键）；非 code（已是 login_key）原样返回。"""
+    ident = get_td_identity(account)
+    return ident["login_key"] if ident else account
+
+
+def td_sibling_codes(login_key: str) -> list[str]:
+    """D-M0-6：同 login_key 的所有 TD code（字典序）——供终端号稳定分配。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT code FROM trade_interface WHERE login_key=%s ORDER BY code",
+            (login_key,)).fetchall()
+    return [r[0] for r in rows]
+
+
 def _login_key(kind: str, provider: str, account_key: str | None, creds: str | None,
                is_virtual: bool = False) -> str:
     if is_virtual:

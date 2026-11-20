@@ -30,7 +30,18 @@ def register_td_builder(provider: str):
 _RT_KEYS = ("gw", "td_api", "adapter", "setting", "td_open", "lead", "lag", "cfg_adapter")
 
 
-def build_td_runtime(provider, ee, tid, account_id, boot_epoch,
+def code_terminal(td_code: str) -> int:
+    """D-M0-6：同 login_key 多 TD 按 code 字典序稳定分配终端号 2..99。"""
+    from src.data_platform.iface_store import get_td_identity, td_sibling_codes
+    ident = get_td_identity(td_code)
+    if ident is None:
+        raise RuntimeError(f"td_code={td_code} 不存在，无法分配终端号")
+    siblings = td_sibling_codes(ident["login_key"])
+    idx = siblings.index(td_code) if td_code in siblings else 0
+    return idx % 98 + 2
+
+
+def build_td_runtime(provider, ee, tid, td_code: str, boot_epoch,
                      *, client_id=None, order_prefix=None) -> dict | None:
     """单入口分发：未注册返 None（调用方走 stub 硬闸分支）。
 
@@ -43,7 +54,7 @@ def build_td_runtime(provider, ee, tid, account_id, boot_epoch,
     builder = TD_BUILDERS.get(provider)
     if builder is None:
         return None
-    rt = builder(ee, tid, account_id, boot_epoch, client_id=client_id, order_prefix=order_prefix)
+    rt = builder(ee, tid, td_code, boot_epoch, client_id=client_id, order_prefix=order_prefix)
     if rt is None:
         raise RuntimeError(f"TD builder {provider} 返回 None（契约须八键 dict）")
     missing = [k for k in _RT_KEYS if k not in rt]
@@ -53,7 +64,7 @@ def build_td_runtime(provider, ee, tid, account_id, boot_epoch,
 
 
 @register_td_builder("xtp")
-def _build_xtp_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
+def _build_xtp_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
     """XTP TD 运行时组装（P3 收口：唯一路径=providers/xtp 插件端口）。
 
     旧 ThinTdGateway + XtpTdApi + XTPAdapter 组装已于批 172d 删除；
@@ -61,17 +72,14 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order
     返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter, exec_port, session_slot}。
     row_id=account_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
     """
-    # 实现形态门先判：legacy 已删，取数/建连之前就拒（否则错误信息被下游覆盖）
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as _c:
-            _row = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (account_id,)).fetchone()
-        _impl = (_row[0] if _row else "legacy")
-    except Exception:
-        _impl = "legacy"
+    # 实现形态门 + login_key 取自接口行（legacy 已删，取数/建连之前就拒）
+    from src.data_platform.iface_store import get_td_identity
+    ident = get_td_identity(td_code)
+    _impl = (ident or {}).get("impl") or "legacy"
+    _login_key = (ident or {}).get("login_key") or td_code
     if _impl != "plugin":
         raise RuntimeError(
-            f"XTP 账号 {account_id} impl={_impl!r}：legacy TD 路径已于 P3 删除，须切 impl=plugin"
+            f"XTP 接口 {td_code} impl={_impl!r}：legacy TD 路径已于 P3 删除，须切 impl=plugin"
         )
 
     from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
@@ -83,14 +91,15 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order
     from src.strategy_runner.session_slot import SessionSlotAllocator
 
     _cid = client_id if client_id is not None else runner_client_id(tid)
-    setting = build_xtp_setting(client_id=_cid, row_id=account_id)
+    setting = build_xtp_setting(client_id=_cid, td_code=td_code)
 
     # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
     # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
     _lead, _lag = load_xtp_window_cfg()
     _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
 
-    slot = SessionSlotAllocator.acquire(account_id, "xtp", "td", tid, boot_epoch, _td_open)
+    slot = SessionSlotAllocator.acquire(_login_key, "xtp", "td", tid, boot_epoch, _td_open,
+                                        terminal_id=code_terminal(td_code))
     _alert = make_alert()
     gw = _td.make_gateway(ee)
     td_api = _td._transport.td_api_cls()(gw)
@@ -99,15 +108,15 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order
                                 lambda n: make_guard(n, _alert), setting)
     if _td_open:
         gw.connect(setting)
-    adapter = _td._LegacyCompat(port, account_id)
-    logger.info("XTP 账号 %s 走插件端口（terminal_id=%s）", account_id, slot.terminal_id)
+    adapter = _td._LegacyCompat(port, td_code)
+    logger.info("XTP 接口 %s 走插件端口（terminal_id=%s）", td_code, slot.terminal_id)
     return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
             "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp",
             "exec_port": port, "session_slot": slot}
 
 
 @register_td_builder("emt_emq")
-def _build_emt_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
+def _build_emt_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
     """批 63 P4：EMT 极速柜台 TD 运行时（TD_BUILDERS 第二实例——D26-A 框架第一消费者）。
 
     EmtAdapter 兼任 gw/td_api（薄壳：connect(setting)=Login；connect_status 属性——
@@ -122,7 +131,7 @@ def _build_emt_runtime(ee, tid, account_id, boot_epoch, *, client_id=None, order
     from src.strategy_framework.broker import get_interface_row
     from src.providers.xtp.session import is_trading_day, load_xtp_window_cfg, xtp_session_window_open
 
-    row = get_interface_row(row_id=account_id)
+    row = get_interface_row(code=td_code)
     cred = row.get("credentials") or {}
     params = row.get("params") or {}
     from src.strategy_framework.md_gateway import _parse_host_port

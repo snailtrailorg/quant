@@ -106,7 +106,7 @@ def _hub_expected_ids() -> list[str]:
         from src.strategy_framework.md_gateway import list_md_gateway_providers
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT id FROM trading_account "
+                "SELECT code FROM market_interface "
                 "WHERE enabled=true "
                 "AND provider = ANY(%s)", (list(list_md_gateway_providers()),))
             return [str(x[0]) for x in cur.fetchall()]

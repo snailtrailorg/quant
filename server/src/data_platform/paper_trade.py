@@ -24,8 +24,8 @@ def list_paper_task_rows(status: str | None = None) -> list[tuple]:
     """
     from src.data_platform.db import get_conn
     _base = ("SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-             "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
-             "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id "
+             "lt.account_code, lt.initial_capital, lt.created_at, ti.name "
+             "FROM live_task lt LEFT JOIN trade_interface ti ON ti.code=lt.account_code "
              "WHERE lt.mode='paper' ")
     with get_conn() as conn:
         if status:
@@ -35,7 +35,7 @@ def list_paper_task_rows(status: str | None = None) -> list[tuple]:
         return cur.fetchall()
 
 
-def get_virtual_account_id() -> int | None:
+def get_virtual_account_id() -> str | None:
     """系统虚拟账户 id（`trading_account.is_virtual=true`，0127 建）。
 
     None=虚拟账户不存在（0127 未执行）——调用方须 500 显式报错，**不得**静默
@@ -44,7 +44,7 @@ def get_virtual_account_id() -> int | None:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM trading_account WHERE is_virtual = true LIMIT 1").fetchone()
+            "SELECT code FROM trade_interface WHERE is_virtual = true ORDER BY code LIMIT 1").fetchone()
     return row[0] if row else None
 
 

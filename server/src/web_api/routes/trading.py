@@ -44,8 +44,8 @@ def list_live_tasks(status: str | None = None,
     """
     with get_conn() as conn:
         _base = ("SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                 "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
-                 "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id ")
+                 "lt.account_code, lt.initial_capital, lt.created_at, ti.name "
+                 "FROM live_task lt LEFT JOIN trade_interface ti ON ti.code=lt.account_code ")
         _filter = "lt.mode='live'"
         if status:
             cur = conn.execute(
@@ -171,7 +171,7 @@ def create_live_task(body: dict = Body(...),
         # 只在列表侧隐藏，创建路径此前漏了这道闸（可构造出「实盘任务挂虚拟账户 ⇒ 风控预算
         # 落在空账户 ⇒ 风控形同关闭」）。DB 侧另有 0174 触发器兜底（任何写入路径都拦）。
         cur = conn.execute(
-            "SELECT id, is_virtual FROM trading_account WHERE id=%s", (account_id,))
+            "SELECT code, is_virtual FROM trade_interface WHERE code=%s", (account_id,))
         _acc = cur.fetchone()
         if _acc is None:
             raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
@@ -516,10 +516,10 @@ def _account_state(conn):
         "FROM account_snapshot ORDER BY account_id, ts DESC")
     latest = cur.fetchall()
     cur = conn.execute(
-        "SELECT DISTINCT ON (account_id) account_id, total_value "
-        "FROM account_snapshot ORDER BY account_id, ts ASC")
+        "SELECT DISTINCT ON (account_code) account_code, total_value "
+        "FROM account_snapshot ORDER BY account_code, ts ASC")
     first_map = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
-    cur = conn.execute("SELECT id, name FROM trading_account")
+    cur = conn.execute("SELECT code, name FROM trade_interface")
     name_map = {r[0]: r[1] for r in cur.fetchall()}
     out = []
     for r in latest:
@@ -658,14 +658,14 @@ def list_trades(limit: int = Query(200, ge=1, le=1000),
     """
     from src.data_platform.db import get_conn
     sql = ("SELECT ts, symbol, action, volume, price, commission, strategy_id, "
-           "order_id, account_id, trade_ref FROM trade_log WHERE 1=1")
+           "order_id, account_code, trade_ref FROM trade_log WHERE 1=1")
     args: list = []
     if symbol:
         sql += " AND symbol=%s"
         args.append(symbol)
     if account_id is not None:
-        sql += " AND account_id=%s"
-        args.append(int(account_id))
+        sql += " AND account_code=%s"
+        args.append(account_id)
     if since:
         sql += " AND ts >= %s::timestamptz"
         args.append(since)

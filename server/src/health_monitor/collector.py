@@ -226,10 +226,10 @@ def collect(now: float | None = None) -> dict:
     snap["units"] = systemctl_units(CORE_UNITS)
     # 批188：td_exec 期望集（enabled ∩ execution 能力域；与 SA4 同源）+ 在场集（TTL 心跳键）
     try:
-        from src.data_platform.config_store import enabled_exec_accounts
+        from src.data_platform.config_store import exec_interface_codes
         import src.providers as _providers   # 冷启动注册（否则期望集恒空 → td_exec_down 永不触发）
         _providers.ensure_registered()
-        _exec_expected = {int(r[0]) for r in enabled_exec_accounts()}
+        _exec_expected = set(exec_interface_codes())
     except Exception:
         _exec_expected = set()
     snap["td_execs"] = {"expected": sorted(_exec_expected), "alive": [], "details": {}}
@@ -246,17 +246,17 @@ def collect(now: float | None = None) -> dict:
         try:
             _alive = []
             _details = {}
-            for _k in r.scan_iter("td:exec:*", count=100):
+            for _k in r.scan_iter("iface:hb:td:*", count=100):
                 _a = _k.rsplit(":", 1)[-1]
-                if not _a.isdigit():
+                if not _a:
                     continue
-                _alive.append(int(_a))
+                _alive.append(_a)
                 try:
                     _h = r.hgetall(_k) or {}
                 except Exception:  # noqa: BLE001
                     _h = {}
                 _details[_a] = {"provider": _h.get("provider", ""),
-                                "quote_account_id": _h.get("quote_account_id", ""),
+                                "quote_md_code": _h.get("quote_md_code", ""),
                                 "ts": _h.get("ts")}
             snap["td_execs"]["alive"] = sorted(_alive)
             snap["td_execs"]["details"] = _details

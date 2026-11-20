@@ -148,15 +148,16 @@ def trading_accounts_with_flags() -> list[tuple]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         return conn.execute(
-            "SELECT id, name, provider, enabled, is_virtual FROM trading_account "
-            "ORDER BY enabled DESC, id").fetchall()
+            "SELECT code, name, provider, enabled, is_virtual FROM trade_interface "
+            "ORDER BY enabled DESC, code").fetchall()
 
 
-def enabled_exec_accounts() -> list[tuple]:
-    """批188：enabled ∩ execution 能力域的 (id, quote_account_id)。
+def exec_interface_codes() -> list[str]:
+    """批189 M5：有 execution 载体的交易接口 code 集（D9——不看 enabled）。
 
-    与 SA4 第四源（scheduler._desired_units）同源（都走 registry.exec_capable_providers），
-    保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」，杜绝静默丢单。
+    与 SA4 第四源同源（registry.exec_capable_providers），保证「下发覆盖的接口 = SA4 拉起
+    td_exec 的接口」。enabled 只决定干活/空转（进程常驻），停用接口仍在集内——下发命中后由
+    td_exec 按 IFACE_IDLE 明确拒（I7）。返回 code（平台唯一身份），非 int id。
     """
     from src.registry import exec_capable_providers
     provs = sorted(exec_capable_providers())
@@ -164,9 +165,9 @@ def enabled_exec_accounts() -> list[tuple]:
         return []
     from src.data_platform.db import get_conn
     with get_conn() as conn:
-        return conn.execute(
-            "SELECT id, quote_account_id FROM trading_account "
-            "WHERE enabled=true AND provider = ANY(%s) ORDER BY id", (provs,)).fetchall()
+        return [r[0] for r in conn.execute(
+            "SELECT code FROM trade_interface WHERE provider = ANY(%s) ORDER BY code",
+            (provs,)).fetchall()]
 
 
 def exposure_snapshots() -> dict:
@@ -176,11 +177,11 @@ def exposure_snapshots() -> dict:
     out: dict = {}
     with get_conn() as conn:
         for acct_id, ts in conn.execute(
-                "SELECT DISTINCT ON (account_id) account_id, ts FROM position_snapshot "
-                "ORDER BY account_id, ts DESC").fetchall():
+                "SELECT DISTINCT ON (account_code) account_code, ts FROM position_snapshot "
+                "ORDER BY account_code, ts DESC").fetchall():
             out.setdefault(acct_id, {})["pos_ts"] = ts
         for acct_id, val in conn.execute(
-                "SELECT account_id, sum(volume*cost_price) FROM position_snapshot "
+                "SELECT account_code, sum(volume*cost_price) FROM position_snapshot "
                 "GROUP BY 1").fetchall():
             out.setdefault(acct_id, {})["pos_value"] = float(val or 0)
         for acct_id, tv, pnl, ts in conn.execute(
@@ -397,28 +398,32 @@ def save_provider_params(row_id: int, params: dict) -> None:
 
 # --- account_permission（D1：account 侧品种权限） ---
 
-_PERM_COLS = ("account_id, allowed_categories, allowed_exchanges, allowed_boards, "
+_PERM_COLS = ("login_key, allowed_categories, allowed_exchanges, allowed_boards, "
               "is_st_allowed, convertible_allowed")
 
 
-def get_account_permission(account_id: int) -> tuple | None:
-    """权限读（无行=None——权限人工配置，未配置不猜默认）。"""
+def get_account_permission(account: str) -> tuple | None:
+    """权限读（无行=None——权限人工配置，未配置不猜默认）。account=接口 code，内部解析 login_key。"""
+    from src.data_platform.iface_store import resolve_login_key
+    lk = resolve_login_key(account)
     with get_conn() as conn:
         cur = conn.execute(
-            f"SELECT {_PERM_COLS} FROM account_permission WHERE account_id=%s", (account_id,))
+            f"SELECT {_PERM_COLS} FROM account_permission WHERE login_key=%s", (lk,))
         return cur.fetchone()
 
 
-def upsert_account_permission(account_id: int, categories, exchanges, boards,
+def upsert_account_permission(account: str, categories, exchanges, boards,
                               is_st_allowed: bool, convertible_allowed: bool) -> None:
-    """权限写（upsert）。account 存在性由调用方先验（须为 trading_account 行）。"""
+    """权限写（upsert）。account=接口 code，内部解析 login_key（account_permission 归属键）。"""
+    from src.data_platform.iface_store import resolve_login_key
+    account_id = resolve_login_key(account)
     with get_conn() as conn:
         try:
             conn.execute(
-                "INSERT INTO account_permission (account_id, allowed_categories, allowed_exchanges, "
+                "INSERT INTO account_permission (login_key, allowed_categories, allowed_exchanges, "
                 "allowed_boards, is_st_allowed, convertible_allowed) "
                 "VALUES (%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT (account_id) DO UPDATE SET "
+                "ON CONFLICT (login_key) DO UPDATE SET "
                 "allowed_categories=EXCLUDED.allowed_categories, "
                 "allowed_exchanges=EXCLUDED.allowed_exchanges, "
                 "allowed_boards=EXCLUDED.allowed_boards, "

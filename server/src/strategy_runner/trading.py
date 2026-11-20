@@ -176,7 +176,7 @@ def write_trade_log(d: Trade, adapter, sid: str, symbol: str) -> None:
                 if row:
                     order_db_id, strategy_of = row[0], row[1] or sid
             cur = conn.execute(
-                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref, account_id) "
+                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref, account_code) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
                 (as_utc(getattr(d, "datetime", None)) if getattr(d, "datetime", None) is not None else None,
                  strategy_of, order_db_id, getattr(d, "symbol", symbol),
@@ -219,21 +219,21 @@ def _flush_positions(adapter, account_id, task_id) -> None:
                          float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
                          str(task_id) if task_id is not None else None))
         with get_conn() as conn:
-            conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (account_id,))
+            conn.execute("DELETE FROM position_snapshot WHERE account_code=%s", (account_id,))
             if positions:
                 # O-F1：池化连接无 executemany（F 审同款坑）——走 cursor；
                 # O-S8：ON CONFLICT 幂等——两任务同 account 同拍写时 last-write-wins 而非互崩
                 with conn.cursor() as cur:
                     cur.executemany(
-                        "INSERT INTO position_snapshot (account_id, symbol, direction, volume, frozen, "
+                        "INSERT INTO position_snapshot (account_code, symbol, direction, volume, frozen, "
                         "cost_price, pnl, yd_volume, task_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                        "ON CONFLICT (account_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
+                        "ON CONFLICT (account_code, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
                         "frozen=EXCLUDED.frozen, cost_price=EXCLUDED.cost_price, pnl=EXCLUDED.pnl, "
                         "yd_volume=EXCLUDED.yd_volume, task_id=EXCLUDED.task_id",
                         rows)
             conn.execute(
-                "INSERT INTO position_refresh (account_id, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
-                "ON CONFLICT (account_id) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
+                "INSERT INTO position_refresh (account_code, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
+                "ON CONFLICT (account_code) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
                 (account_id, len(rows), str(task_id) if task_id is not None else None,
                  len(rows), str(task_id) if task_id is not None else None))
             conn.commit()
@@ -264,7 +264,7 @@ def _account_baseline_capital(total: float, cache: dict, account_id) -> float:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
                 cur = conn.execute(
-                    "SELECT total_value FROM account_snapshot WHERE account_id=%s ORDER BY ts ASC LIMIT 1",
+                    "SELECT total_value FROM account_snapshot WHERE account_code=%s ORDER BY ts ASC LIMIT 1",
                     (account_id,))
                 row = cur.fetchone()
             cache["baseline"] = float(row[0]) if row and row[0] else total
@@ -301,11 +301,11 @@ def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
             import datetime as _dt2
             today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE account_id=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY ts ASC LIMIT 1", (account_id, today_str))
+                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE account_code=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY ts ASC LIMIT 1", (account_id, today_str))
                 first_row = cur.fetchone()
                 daily_base = float(first_row[0]) if first_row else total
                 daily_pnl = total - daily_base
-                conn.execute("INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s, %s)",
+                conn.execute("INSERT INTO account_snapshot (account_code, total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s, %s)",
                              (account_id, total, daily_pnl, _account_baseline_capital(total, baseline_cache, account_id), avail))
                 # ST2：同拍写持仓真相批（N-v2：取返回值单事务覆盖，非 EVENT_POSITION handler）
                 _flush_positions(adapter, account_id, tid)
@@ -389,7 +389,7 @@ RISK_RESULT_TTL_S = 10 * 60
 RISK_FINAL_TTL_S = 30 * 60        # 件五：终局键不随 web 5s 回执窗删除
 
 
-def _quote_price(sym: str, account_id) -> tuple[dict, str]:
+def _quote_price(sym: str, quote_code) -> tuple[dict, str]:
     """同源 hub tick 取价封装（件一 get_hub_tick 的调用层，批 171s 新建）。
 
     返回 (tick, reason)：reason="" 表示 tick 可用（行情 dict 直接喂
@@ -399,11 +399,14 @@ def _quote_price(sym: str, account_id) -> tuple[dict, str]:
     本批全部退役（用户裁定 #1）。never-throw（get_hub_tick account_id=None 硬拒也收口
     成 no_tick + warning 留痕，绝不静默降级）。
     """
+    if not quote_code:
+        logger.warning("全平取价无映射（td_md_map 空）%s", sym)
+        return {}, "mapping_missing"
     try:
         from src.data_platform.hub_quote import get_hub_tick
-        tick = get_hub_tick(account_id, sym)
+        tick = get_hub_tick(quote_code, sym)
     except Exception as e:
-        logger.warning("全平同源取价失败 %s account=%s: %s", sym, account_id, e)
+        logger.warning("全平同源取价失败 %s md_code=%s: %s", sym, quote_code, e)
         return {}, "no_tick"
     if not isinstance(tick, dict):
         return {}, "bad_json"
@@ -436,7 +439,7 @@ def _close_order_open(sym: str, volume, price: float, account_id, operator: str,
         with get_conn() as conn:
             oid = conn.execute(
                 "INSERT INTO order_log (strategy_id, symbol, action, volume, price, status, "
-                "account_id, client_order_id) "
+                "account_code, client_order_id) "
                 "VALUES ('emergency-close', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
                 (sym, action, volume, price, account_id, cid)).fetchone()[0]
             conn.commit()
@@ -499,7 +502,7 @@ def manual_order_open(sym: str, volume, price: float, account_id, operator: str,
         with get_conn() as conn:
             oid = conn.execute(
                 "INSERT INTO order_log (strategy_id, symbol, action, volume, price, status, "
-                "account_id, client_order_id) "
+                "account_code, client_order_id) "
                 "VALUES ('manual', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
                 (sym, action, volume, price, account_id, cid)).fetchone()[0]
             conn.commit()
@@ -583,7 +586,7 @@ def _wal_insert_order(account_id, order, signal_id, bar_fingerprint, status: str
         with get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,"
-                "account_id,bar_fingerprint) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                "account_code,bar_fingerprint) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                 (order.get("strategy_id"), order.get("symbol"), order.get("action"),
                  int(order.get("volume", 0) or 0), float(order.get("price", 0) or 0),
                  signal_id, status, account_id,
@@ -807,7 +810,8 @@ def bump(entry: dict, *, no_quote: bool, systemic_down: bool,
 
 def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                          req_id: str = "", deadline_ts: float = 0.0,
-                         td_api=None, skipped_accounts: list | None = None) -> dict:
+                         td_api=None, skipped_accounts: list | None = None,
+                         quote_code: str | None = None) -> dict:
     """一键全平（股灾急停）整轮编排——一轮全平 + 无限重取价循环（批187 v11 方向反转）。
 
     **终止仅三态**：成功（pending 清空）、用户取消（risk:cmd:cancel:{req_id}）、
@@ -899,7 +903,7 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                     out["skipped_t1"].append(sym)
                 logger.warning("全平 skip %s：T+1 冻结不可平（volume=%d frozen=%d）", sym, vol, frozen)
                 continue
-            tick, reason = _quote_price(sym, account_id)
+            tick, reason = _quote_price(sym, quote_code)
             if reason == "valkey_down":
                 systemic_down = True
                 if not round_alerted:   # 本轮只告一次（每个标的都告=N 倍告警风暴）

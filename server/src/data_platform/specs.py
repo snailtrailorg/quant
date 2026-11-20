@@ -223,16 +223,18 @@ def _load_instrument(symbol: str) -> InstrumentSpec:
     )
 
 
-def _load_perm(account_id: int) -> AccountPermSpec:
+def _load_perm(account_id: str) -> AccountPermSpec:
+    from src.data_platform.iface_store import resolve_login_key
+    lk = resolve_login_key(account_id)
     with get_conn() as c:
         acc = c.execute(
-            "SELECT market, params FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+            "SELECT market, params FROM trade_interface WHERE code=%s", (account_id,)).fetchone()
         if not acc:
-            raise KeyError(f"AccountPermSpec: trading_account 无行 {account_id}")
+            raise KeyError(f"AccountPermSpec: trade_interface 无行 {account_id}")
         perm = c.execute(
             "SELECT allowed_categories, allowed_exchanges, allowed_boards, "
-            "is_st_allowed, convertible_allowed FROM account_permission WHERE account_id=%s",
-            (account_id,)).fetchone()
+            "is_st_allowed, convertible_allowed FROM account_permission WHERE login_key=%s",
+            (lk,)).fetchone()
     params = acc[1] or {}
     if isinstance(params, str):
         params = json.loads(params)
@@ -257,7 +259,7 @@ def _load_snapshot(account_id: int) -> AccountSnapshot:
         with get_conn() as c:
             row = c.execute(
                 "SELECT ts, available_cash, total_value, margin_used, equity "
-                "FROM account_snapshot WHERE account_id=%s ORDER BY ts DESC LIMIT 1",
+                "FROM account_snapshot WHERE account_code=%s ORDER BY ts DESC LIMIT 1",
                 (account_id,)).fetchone()
     except Exception:
         row = None
@@ -353,10 +355,10 @@ def update_band_rule(exchange: str, board: str, fields: dict) -> dict:
     return get_band_rule(exchange, board) or {}
 
 
-def _get_params(c, account_id: int) -> dict:
-    row = c.execute("SELECT params FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+def _get_params(c, account_id: str) -> dict:
+    row = c.execute("SELECT params FROM trade_interface WHERE code=%s", (account_id,)).fetchone()
     if not row:
-        raise KeyError(f"trading_account 无行 {account_id}")
+        raise KeyError(f"trade_interface 无行 {account_id}")
     params = row[0] or {}
     return json.loads(params) if isinstance(params, str) else dict(params)
 
@@ -391,7 +393,7 @@ def update_close_policy(account_id: int, policy: dict) -> dict:
         params = _get_params(c, account_id)
         params["close_policy"] = {"opponent_depth": depth, "aggression": aggression,
                                   "max_order_qty": max_qty}
-        c.execute("UPDATE trading_account SET params=%s::jsonb, updated_at=now() WHERE id=%s",
+        c.execute("UPDATE trade_interface SET params=%s::jsonb, updated_at=now() WHERE code=%s",
                   (json.dumps(params, ensure_ascii=False), account_id))
         c.commit()
     invalidate()
@@ -404,10 +406,10 @@ def update_impl(account_id: int, impl: str) -> str:
     if value not in ("legacy", "plugin"):
         raise ValueError("impl 只能是 legacy 或 plugin")
     with get_conn() as c:
-        row = c.execute("SELECT 1 FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+        row = c.execute("SELECT 1 FROM trade_interface WHERE code=%s", (account_id,)).fetchone()
         if not row:
-            raise KeyError(f"trading_account 无行 {account_id}")
-        c.execute("UPDATE trading_account SET impl=%s, updated_at=now() WHERE id=%s",
+            raise KeyError(f"trade_interface 无行 {account_id}")
+        c.execute("UPDATE trade_interface SET impl=%s, updated_at=now() WHERE code=%s",
                   (value, account_id))
         c.commit()
     invalidate()
@@ -423,7 +425,7 @@ def update_data_license(account_id: int, value: str) -> str:
     with get_conn() as c:
         params = _get_params(c, account_id)
         params["data_license"] = str(value or "")
-        c.execute("UPDATE trading_account SET params=%s::jsonb, updated_at=now() WHERE id=%s",
+        c.execute("UPDATE trade_interface SET params=%s::jsonb, updated_at=now() WHERE code=%s",
                   (json.dumps(params, ensure_ascii=False), account_id))
         c.commit()
     invalidate()

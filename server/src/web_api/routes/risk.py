@@ -27,7 +27,7 @@ def risk_state(payload: dict = Depends(require_perm("read"))):
         # 旧 "" 无「读全局」语义（传空串按 account_id 过滤恒不命中→available=False 假「不可用」）
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT min(id) FROM trading_account"
+                "SELECT min(code) FROM trade_interface"
             ).fetchone()
             vid = row[0] if row else None
         st = rc._get_global_state(vid)
@@ -300,7 +300,7 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
     import time as _t
     import uuid as _uuid
     from src.quant_common.redis_client import business_redis
-    from src.data_platform.config_store import enabled_exec_accounts
+    from src.data_platform.config_store import exec_interface_codes
     # 批188 上产实录：web 进程冷启动 registry 为空 → exec_capable_providers() 空集 →
     # 下方 targets=[] → 200 done/dispatched=0（界面「成功」但零命令，持仓未动）。
     # 入口层（4）→ providers（2）方向合法；幂等，SA4 侧（tasks._desired_units）同款。
@@ -317,11 +317,10 @@ def _dispatch_risk_cmd(verb: str, payload: dict | None, accounts: list[int] | No
     # 原 409/400/skipped/RISK_NO_ACTIVE_RUNNER 判活链全部退役（判活是「任务生灭」时代产物）。
     # 账号集 = SA4 同源 enabled_exec_accounts()（enabled ∩ execution 能力域），
     # 保证「下发覆盖的账号 = SA4 拉起 td_exec 的账号」，杜绝静默丢单。
-    accounts_set = None if accounts is None else set(int(a) for a in accounts)
+    accounts_set = None if accounts is None else set(str(a) for a in accounts)
     _dedup = set()
     targets = []
-    for row in enabled_exec_accounts():
-        aid = int(row[0])
+    for aid in exec_interface_codes():
         if accounts_set is not None and aid not in accounts_set:
             continue
         if aid in _dedup:
@@ -451,7 +450,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         _exec_alive = False
         if r is not None:
             try:
-                _exec_alive = bool(r.exists(f"td:exec:{acct_id}"))
+                _exec_alive = bool(r.exists(f"iface:hb:td:{acct_id}"))
             except Exception:
                 _exec_alive = False
         items.append({
@@ -688,13 +687,13 @@ def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
     import uuid as _uuid
     from src.web_api.errors import ApiError
     from src.quant_common.redis_client import business_redis
-    account_id = int(body["account_id"])
+    account_id = str(body["account_id"])
     # 批188：下发零判活，但手工单是**单账号指定**——必须确认该账号有 td_exec 载体
     # （enabled ∩ execution 能力域，与 SA4 同源），否则写进无人消费队列=静默丢单。
-    from src.data_platform.config_store import enabled_exec_accounts
+    from src.data_platform.config_store import exec_interface_codes
     import src.providers as _providers   # 冷启动注册（同 _dispatch_risk_cmd；否则恒判「无执行能力」）
     _providers.ensure_registered()
-    _ok = {int(r[0]) for r in enabled_exec_accounts()}
+    _ok = set(exec_interface_codes())
     if account_id not in _ok:
         audit_log(payload["username"], "manual_order",
                   detail=f"account {account_id} not exec-capable (400)")

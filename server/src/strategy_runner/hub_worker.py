@@ -132,11 +132,13 @@ class EmergencyWorker:
     （process_batch），保证同账号全部 adapter 写归本线程、零竞态。
     """
 
-    def __init__(self, *, adapter, td_api, account_id, tid, closing: threading.Event):
+    def __init__(self, *, adapter, td_api, account_id, tid, closing: threading.Event,
+                 quote_md_code: str = ""):
         self._q: queue.Queue = queue.Queue()
         self._adapter = adapter
         self._td_api = td_api
         self._account_id = account_id
+        self._quote_md_code = quote_md_code
         self._tid = tid
         self._closing = closing
         self._current_req_id = ""
@@ -222,7 +224,7 @@ class EmergencyWorker:
             self._adapter, account_id=self._account_id,
             operator=cmd.get("operator") or "manual",
             req_id=cmd.get("req_id") or "", deadline_ts=deadline_ts,
-            td_api=self._td_api,
+            td_api=self._td_api, quote_code=self._quote_md_code,
             skipped_accounts=cmd.get("skipped_accounts") or [])
 
     def _manual_order(self, cmd) -> dict:

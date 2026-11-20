@@ -41,7 +41,7 @@ class SessionLost(Exception):
 
 @dataclass(frozen=True)
 class SessionSlot:
-    account_id: int
+    login_key: str
     provider: str
     role: str            # md | td
     terminal_id: int
@@ -71,7 +71,7 @@ def _terminal_for(role: str, tid: int, terminal_id: int | None) -> int:
 
 class SessionSlotAllocator:
     @classmethod
-    def acquire(cls, account_id: int, provider: str, role: str, tid: int,
+    def acquire(cls, login_key: str, provider: str, role: str, tid: int,
                 boot_epoch: int, window_open: bool = False,
                 terminal_id: int | None = None, holder: str | None = None) -> SessionSlot:
         terminal = _terminal_for(role, tid, terminal_id)
@@ -81,20 +81,20 @@ class SessionSlotAllocator:
             with get_conn() as conn:
                 row = conn.execute(
                     "INSERT INTO provider_session_slot "
-                    "(account_id, provider, terminal_id, holder, boot_epoch, heartbeat) "
-                    "VALUES (%s,%s,%s,%s,%s,now()) "
-                    "ON CONFLICT (account_id, provider, terminal_id) DO UPDATE "
+                    "(login_key, provider, role, terminal_id, holder, boot_epoch, heartbeat) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,now()) "
+                    "ON CONFLICT (login_key, provider, role, terminal_id) DO UPDATE "
                     "SET holder=EXCLUDED.holder, boot_epoch=EXCLUDED.boot_epoch, heartbeat=now() "
                     "WHERE provider_session_slot.heartbeat < now() - interval '45 seconds' "
                     "RETURNING holder",
-                    (account_id, provider, terminal, holder, boot_epoch)).fetchone()
+                    (login_key, provider, role, terminal, holder, boot_epoch)).fetchone()
                 conn.commit()
         except Exception as e:   # noqa: BLE001 —— DB 不可用必须退避，禁止裸跑
             raise SessionUnavailable(f"session slot DB 不可用: {e}") from e
         if not row or row[0] != holder:
-            raise SessionBusy(f"terminal_id={terminal} 有主（account={account_id} provider={provider}）")
+            raise SessionBusy(f"terminal_id={terminal} 有主（login_key={login_key} provider={provider}）")
         return SessionSlot(
-            account_id=account_id, provider=provider, role=role,
+            login_key=login_key, provider=provider, role=role,
             terminal_id=terminal, order_prefix=f"t{tid}:e{boot_epoch}:",
             window_open=window_open, tid=tid, holder=holder, boot_epoch=boot_epoch,
         )
@@ -107,9 +107,9 @@ class SessionSlotAllocator:
             with get_conn() as conn:
                 row = conn.execute(
                     "UPDATE provider_session_slot SET heartbeat=now() "
-                    "WHERE account_id=%s AND provider=%s AND terminal_id=%s AND holder=%s "
+                    "WHERE login_key=%s AND provider=%s AND role=%s AND terminal_id=%s AND holder=%s "
                     "AND heartbeat > now() - interval '45 seconds' RETURNING 1",
-                    (slot.account_id, slot.provider, slot.terminal_id, slot.holder)).fetchone()
+                    (slot.login_key, slot.provider, slot.role, slot.terminal_id, slot.holder)).fetchone()
                 conn.commit()
         except Exception as e:   # noqa: BLE001
             raise SessionUnavailable(f"session slot 续租失败: {e}") from e
@@ -124,8 +124,8 @@ class SessionSlotAllocator:
             with get_conn() as conn:
                 conn.execute(
                     "DELETE FROM provider_session_slot "
-                    "WHERE account_id=%s AND provider=%s AND terminal_id=%s AND holder=%s",
-                    (slot.account_id, slot.provider, slot.terminal_id, slot.holder))
+                    "WHERE login_key=%s AND provider=%s AND role=%s AND terminal_id=%s AND holder=%s",
+                    (slot.login_key, slot.provider, slot.role, slot.terminal_id, slot.holder))
                 conn.commit()
         except Exception as e:   # noqa: BLE001 —— 退出路径不因清理失败阻断
             logger.warning("session slot 释放失败（忽略）: %s", e)

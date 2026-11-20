@@ -125,7 +125,7 @@ def halt_dispatch():
     """
     import uuid as _uuid
     import time as _t
-    from src.data_platform.config_store import enabled_exec_accounts
+    from src.data_platform.config_store import exec_interface_codes
     raw = None
     try:
         raw = business_redis().lpop(_HALT_TRIGGER_LIST)
@@ -157,8 +157,7 @@ def halt_dispatch():
         logger.warning("halt_dispatch 去重键写失败（继续下发）: %s", e)
     # 批188：下发零判活——枚举 exec-capable 账号（与 web/SA4 同源），写账号队列 td:cmd:{account}
     _seen, targets = set(), []
-    for row in enabled_exec_accounts():
-        acct = int(row[0])
+    for acct in exec_interface_codes():
         if acct not in _seen:
             _seen.add(acct)
             targets.append(acct)
@@ -368,7 +367,7 @@ def reconcile_three_books():
             try:
                 # O-F2：两侧符号命名空间不同（快照=vt_symbol "600000.SSE" vs trade_log=裸 "600000"）
                 # ——join 前必须归一，否则永不命中→每小时误报
-                cur = conn.execute("SELECT id, name FROM trading_account")
+                cur = conn.execute("SELECT code, name FROM trade_interface")
                 account_names = {r[0]: r[1] for r in cur.fetchall()}
                 # 批176：比对键仍用裸码（trade_log 历史行可能不带后缀），但**落库键**取 canonical：
                 # position 侧快照已 vt（min(symbol)）；trade_log-only 行用 LATERAL 查主档补 vt
@@ -2078,15 +2077,15 @@ def _desired_units(conn) -> list[tuple[str, str]]:
             except UnsupportedCapability:
                 pass
     cur = conn.execute(
-        "SELECT id FROM trading_account "
+        "SELECT code FROM market_interface "
         "WHERE enabled=true "
         "AND provider = ANY(%s)", (sorted(md_providers),))
     for row in cur.fetchall():
         desired.append((f"quant-md-hub@{row[0]}.service", "hub"))
     # 批188：账号级 TD 执行进程（enabled ∩ execution 能力域；与 web 下发同源 enabled_exec_accounts）
-    from src.data_platform.config_store import enabled_exec_accounts as _enabled_exec
-    for row in _enabled_exec():
-        desired.append((f"quant-td-exec@{row[0]}.service", "td_exec"))
+    from src.data_platform.config_store import exec_interface_codes as _exec_codes
+    for code in _exec_codes():
+        desired.append((f"quant-td-exec@{code}.service", "td_exec"))
     return desired
 
 

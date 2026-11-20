@@ -25,18 +25,18 @@ logger = logging.getLogger(__name__)
 
 # ── 件一：同源行情读取 ──
 
-def get_hub_tick(account_id: int, symbol: str) -> dict:
+def get_hub_tick(md_code: str, symbol: str) -> dict:
     """读同源 hub tick；成功返回行情 dict（last/pre_close/upper_limit/lower_limit/bid/ask/ts…）。
 
     失败返回 `{"_unavailable": code}`（code ∈ valkey_down / bad_json / no_tick）并 warning 留痕，
     never-throw。`account_id is None` 硬拒（防 `hub:latest_tick:None:*` 全仓 no_quote）——
     这是唯一允许抛出的形态（显式 ValueError，属调用方契约错误而非运行期降级）。
     """
-    if account_id is None:
-        raise ValueError("get_hub_tick: account_id 必填（防 hub:latest_tick:None:* 全仓 no_quote）")
+    if not md_code:
+        raise ValueError("get_hub_tick: md_code 必填（防 hub:latest_tick:None:* 全仓 no_quote）")
     try:
         from src.data_platform.schema import to_vt_symbol
-        key = f"hub:latest_tick:{account_id}:{to_vt_symbol(symbol)}"
+        key = f"hub:latest_tick:{md_code}:{to_vt_symbol(symbol)}"
     except Exception as e:
         logger.warning("get_hub_tick symbol=%r 归一失败 unusable=no_tick: %s", symbol, e)
         return {"_unavailable": "no_tick"}

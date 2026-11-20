@@ -12,7 +12,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
-Environment=ACCOUNT_ID=%i
+Environment=TD_CODE=%i
 Environment=QT_QPA_PLATFORM=offscreen
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.td_exec.main
 # 看门狗：td_exec 主循环每 10s 喂狗（sd_notify WATCHDOG=1），挂死 90s 强杀重启

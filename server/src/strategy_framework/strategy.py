@@ -562,8 +562,8 @@ class Strategy:
         try:
             from ..quant_common.redis_client import business_redis
             r = business_redis(socket_timeout=3)
-            r.lpush(f"td:cmd:{int(aid)}", _json.dumps(cmd))
-            r.expire(f"td:cmd:{int(aid)}", 10 * 60)
+            r.lpush(f"td:cmd:{aid}", _json.dumps(cmd))
+            r.expire(f"td:cmd:{aid}", 10 * 60)
         except Exception as e:
             logger.error("下单命令入队失败: %s %s: %s", self.symbol, sig.action.name, e)
             return
@@ -649,7 +649,7 @@ class Strategy:
                      _src, _fat, _ver))
                 sig_id = cur.fetchone()[0]
                 cur = conn.execute(
-                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_id,bar_fingerprint) "
+                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_code,bar_fingerprint) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, final_order.get("action", sig.action.name),
                      final_order.get("volume", 100), final_order.get("price", 0), sig_id, status,
