@@ -226,7 +226,7 @@ class TestEndpoints:
         """批188：无 exec-capable 账号 → dispatched=0（不 409，判活退役）。"""
         from src.web_api.routes import risk as R
         r = MagicMock()
-        with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+        with patch("src.data_platform.config_store.exec_interface_codes", return_value=[]), \
              patch("src.quant_common.redis_client.business_redis", return_value=r), \
              patch.object(R, "audit_log"):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"}, wait_ack=False)
@@ -242,11 +242,11 @@ class TestEndpoints:
             json.dumps({"verb": "cancel-all",
                         "result": {"requested": 3, "failed": 0}})
             if "risk:cmd:result:" in k else None)
-        # 批188：下发零判活，账号集 = enabled_exec_accounts；results 以 account 为 key
-        with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
+        # 批188：下发零判活，账号集 = exec_interface_codes；results 以 account 为 key
+        with patch("src.data_platform.config_store.exec_interface_codes", return_value=["1"]), \
              patch("src.quant_common.redis_client.business_redis", return_value=r):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"})
-        assert out["status"] == "done" and out["results"][1]["result"]["requested"] == 3
+        assert out["status"] == "done" and out["results"]["1"]["result"]["requested"] == 3
 
     def test_close_all_confirm_gate(self):
         from src.web_api.errors import ApiError

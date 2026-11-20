@@ -19,6 +19,24 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+def _pre_0192() -> bool:
+    """批189 M6a：本文件钉的旧 config-plane（config_store 两族/data_source.id/trading_account）
+    在 0192 起被 interfaces_api（/api/md|td-interfaces + /api/data-sources，code 身份）取代。
+    0191 及以前库照旧跑（dev 仍 0191）；0192+ 库跳过并由 test_batch189_m2 覆盖新 API。
+    这不是删除覆盖——是显式交接（M6a 前旧面仍在 prod），见 flow/任务/批189-M5-TD执行面身份切换.md §10。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as c:
+            return c.execute("SELECT to_regclass('trading_account')").fetchone()[0] is not None
+    except Exception:
+        return True   # 无库：沿用各用例自身 skip
+
+
+if not _pre_0192():
+    pytestmark = pytest.mark.skip(
+        reason="批189 M6a：旧 config-plane 已被 interfaces_api 取代（见 test_batch189_m2）；0192+ 库跳过")
+
+
 class _FakeConn:
     """可编程假连接：应答 fetchone/fetchall，记录全部执行；raise_on 模拟 DB 错误码。
 

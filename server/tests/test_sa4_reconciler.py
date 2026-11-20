@@ -20,7 +20,7 @@ from src.strategy_runner.main import EX_OK, EX_TEMPFAIL, EX_CONFIG
 def _no_td_exec(monkeypatch):
     """批188：td_exec 第四源由 test_batch188 覆盖；本文件关注 live_task/strategy/hub 三源，
     mock 掉避免第四源条目干扰精确期望列表。"""
-    monkeypatch.setattr("src.data_platform.config_store.enabled_exec_accounts", lambda: [])
+    monkeypatch.setattr("src.data_platform.config_store.exec_interface_codes", lambda: [])
 
 
 def _cp(returncode=0, stdout="", stderr=""):

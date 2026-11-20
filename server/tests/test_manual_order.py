@@ -46,7 +46,7 @@ def test_invalid_params_never_dispatch(bad, code):
 
 def test_account_not_exec_400():
     """批188：账号不在 exec-capable 集合 → 400 MANUAL_ACCOUNT_NOT_EXEC（防静默丢单）。"""
-    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=[]), \
          patch.object(risk_routes, "audit_log"):
         with pytest.raises(ApiError) as e:
             risk_routes._dispatch_manual_cmd(GOOD, _payload())
@@ -58,7 +58,7 @@ def test_account_not_exec_400():
 def test_dispatch_writes_cmd():
     fake_r = MagicMock()
     fake_r.get.return_value = None
-    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["1"]), \
          patch.object(risk_routes, "audit_log") as al, \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r):
         out = risk_routes._dispatch_manual_cmd(GOOD, _payload())
@@ -80,7 +80,7 @@ def test_duplicate_cid_400():
     fake_r = MagicMock()
     fake_r.set.return_value = False   # nx 失败
     body = {**GOOD, "client_order_id": "mo-fixed-1"}
-    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(1, None)]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["1"]), \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r), \
          patch.object(risk_routes, "audit_log"):
         with pytest.raises(ApiError) as e:

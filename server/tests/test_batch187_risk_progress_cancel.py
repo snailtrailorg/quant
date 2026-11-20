@@ -16,8 +16,8 @@ def test_no_judgment_dispatches_to_queue():
     from src.web_api.routes import risk as R
     r = MagicMock()
     r.get.side_effect = lambda k, **kw: None
-    with patch("src.data_platform.config_store.enabled_exec_accounts",
-               return_value=[(1, None), (999, None)]), \
+    with patch("src.data_platform.config_store.exec_interface_codes",
+               return_value=["1", "999"]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         out = R._dispatch_risk_cmd("cancel-all", {"username": "u"},
                                    accounts=[1, 999], wait_ack=False,
@@ -31,8 +31,8 @@ def test_dispatch_without_any_running_task():
     """批188：无 live_task running 也照常下发（执行载体=常驻 td_exec，非 live_task）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    with patch("src.data_platform.config_store.enabled_exec_accounts",
-               return_value=[(5, None)]), \
+    with patch("src.data_platform.config_store.exec_interface_codes",
+               return_value=["5"]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         out = R._dispatch_risk_cmd("cancel-all", None, wait_ack=False,
                                    username="飞书:张三", operator_uid=None)
@@ -43,7 +43,7 @@ def test_empty_exec_account_set_returns_zero():
     """批188：无 exec-capable 账号 → 返回 dispatched=0（不 400/409，判活退役）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    with patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=[]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r), \
          patch.object(R, "audit_log"):
         out = R._dispatch_risk_cmd("cancel-all", None, username="u", wait_ack=False)
@@ -56,8 +56,8 @@ def test_dispatch_accepts_explicit_identity_without_payload():
     """非 web 源无 payload，靠显式 username/operator_uid 也能下发（方案 A 核心）。"""
     from src.web_api.routes import risk as R
     r = MagicMock()
-    with patch("src.data_platform.config_store.enabled_exec_accounts",
-               return_value=[(1, None)]), \
+    with patch("src.data_platform.config_store.exec_interface_codes",
+               return_value=["1"]), \
          patch("src.quant_common.redis_client.business_redis", return_value=r):
         R._dispatch_risk_cmd("cancel-all", None, wait_ack=False,
                              username="飞书:张三", operator_uid=None)
@@ -173,8 +173,8 @@ def test_halt_dispatch_dedup_and_dispatch():
                                       "operator_uid": 9})
     r.set.return_value = True   # SETNX 成功
     with patch("src.scheduler.tasks.business_redis", return_value=r), \
-         patch("src.data_platform.config_store.enabled_exec_accounts",
-               return_value=[(1, None)]):
+         patch("src.data_platform.config_store.exec_interface_codes",
+               return_value=["1"]):
         out = halt_dispatch()
     assert out["status"] == "dispatched" and out["runners"] == 1, "单账号下发"
     # 批188：命令走 LPUSH td:cmd:{account}（账号队列）

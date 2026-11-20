@@ -51,8 +51,8 @@ class TestDispatchAccounts:
         r = MagicMock()
         r.get.side_effect = lambda k, **kw: None
         with patch("src.quant_common.redis_client.business_redis", return_value=r), \
-             patch("src.data_platform.config_store.enabled_exec_accounts",
-                   return_value=[(4, None), (51, None)]):
+             patch("src.data_platform.config_store.exec_interface_codes",
+                   return_value=["4", "51"]):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"},
                                        accounts=[4], wait_ack=False)
         keys = [str(c.args[0]) for c in r.lpush.call_args_list if c.args]
@@ -63,8 +63,8 @@ class TestDispatchAccounts:
         """批188：勾选账号不在 exec-capable 集合 → dispatched=0（不 400，判活退役）。"""
         r = MagicMock()
         with patch("src.quant_common.redis_client.business_redis", return_value=r), \
-             patch("src.data_platform.config_store.enabled_exec_accounts",
-                   return_value=[(4, None)]), \
+             patch("src.data_platform.config_store.exec_interface_codes",
+                   return_value=["4"]), \
              patch.object(R, "audit_log"):
             out = R._dispatch_risk_cmd("cancel-all", {"username": "t"},
                                        accounts=[999], wait_ack=False)
