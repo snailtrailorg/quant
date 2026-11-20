@@ -35,11 +35,29 @@ dumps」，而**记错的失败模式是静默的**（见下）。
 参照 `tests/test_config_plane.TestRealDbRoundTrip` 的真库钉惯例（`_db_up()` + `skipif`）。
 """
 from __future__ import annotations
+import pytest
 
 import ast
 import json
 import logging
 import uuid
+
+
+def _pre_0192() -> bool:
+    """批189 M6a：本文件钉 config_store 两族(含 trading_account.id/data_source.id) params 契约，
+    0192 起被 interfaces_api(code 身份/jsonb 统一)取代。0191 库照旧；0192+ 跳过（交接见 §10）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as c:
+            return c.execute("SELECT to_regclass('trading_account')").fetchone()[0] is not None
+    except Exception:
+        return True
+
+
+if not _pre_0192():
+    pytestmark = pytest.mark.skip(
+        reason="批189 M6a：旧 config_store 契约已被 interfaces_api 取代；0192+ 库跳过")
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -483,4 +501,3 @@ class TestStorageGuard:
                     f"SELECT count(*) FROM {tbl} WHERE jsonb_typeof(params) = 'string'"
                 ).fetchone()[0]
                 assert n == 0, f"{tbl} 又有 {n} 行 params 被存成 jsonb 字符串"
-
