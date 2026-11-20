@@ -134,7 +134,7 @@
 | D3 | 映射可空，运行时报错 |
 | D4 | 数据源独立页签 |
 | D5 | 三类全插件化；无载体不可启用 |
-| D6 | 两页签共用 `system_config` |
+| D6 | 两页签**共用权限键、按读写分键**：**GET = `read`**（全项目既有约定，如 mgmt.py:333/380 的旧 data-sources/trading-accounts 列表均 `read`）、**写 = `system_config`**；**不按接口类型拆 md_config/td_config**（原"两页签共用 `system_config`"是简写歧义，非"读写都用 system_config"）。读响应须脱敏（凭证只回 `has_credentials`），故 `read` 安全（2026-11-20 用户裁定，从设计优劣而非成本出发） |
 | D7 | EMT 本期只拆行情；交易接口**可建行但无载体**，启用时回 `PROVIDER_UNSUPPORTED`（不建进程） |
 | D8 | 币安/欧易行情启用；交易接口可建行但无凭证，启用时回 `CREDENTIALS_INCOMPLETE`（开户后补凭证再启用） |
 | D9 | 进程常驻；enabled 只决定干活/空转；无载体不建进程 |

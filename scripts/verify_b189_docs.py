@@ -92,7 +92,10 @@ def collect():
         rows.append(('端点', e, 'API 面', e in both))
     for t, why in NEED_TOKENS.items():
         rows.append(('符号', t, why, t in both))
-    rows.append(('权限键', 'system_config', 'D6 两页签共用', 'system_config' in both))
+    rows.append(('权限键', 'system_config', 'D6 写侧', 'system_config' in both))
+    # D6 澄清（2026-11-20）：读写分键，读=read、写=system_config，不按接口类型拆键。
+    rows.append(('冻结裁定', 'D6 读=read/写=system_config', '两页签共用但读写分键',
+                 'GET = `read`' in req and 'system_config' in req))
 
     # 文档引用的 .py 路径必须存在（防文档漂移）
     pat = re.compile(r'((?:[a-z_]+/)*[a-z_0-9]+\.py)(?::\d+)?')
