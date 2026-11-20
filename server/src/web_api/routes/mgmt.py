@@ -624,7 +624,8 @@ def put_account_permission(account_id: int, req: AccountPermissionReq, payload: 
     if bad_cats or bad_exch or bad_brds:
         raise ApiError(400, "ACCOUNT_PERM_BAD_VALUE",
                        f"非法值：category={sorted(bad_cats)} exchange={sorted(bad_exch)} board={sorted(bad_brds)}")
-    if not config_store.row_exists(KIND_TRADING, account_id):
+    from src.data_platform.iface_store import get_td_identity
+    if not get_td_identity(account_id):
         raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易账号")
     config_store.upsert_account_permission(
         account_id, req.allowed_categories, req.allowed_exchanges, req.allowed_boards,

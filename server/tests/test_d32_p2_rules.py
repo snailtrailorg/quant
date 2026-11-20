@@ -127,7 +127,7 @@ def test_round_price_follows_security_master_tick():
 def test_adapter_uses_account_close_policy():
     from src.data_platform import specs
     with get_conn() as c:
-        acc_id, prev = c.execute("SELECT id, params FROM trading_account ORDER BY id LIMIT 1").fetchone()
+        acc_id, prev = c.execute("SELECT code, params FROM trade_interface ORDER BY code LIMIT 1").fetchone()
     try:
         specs.update_close_policy(acc_id, {"opponent_depth": 1, "aggression": 0.20, "max_order_qty": 500})
         a = _A()
@@ -137,7 +137,7 @@ def test_adapter_uses_account_close_policy():
         assert a.max_close_order_qty("600000.XSHG") == 500
     finally:
         with get_conn() as c:
-            c.execute("UPDATE trading_account SET params=%s::jsonb WHERE id=%s",
+            c.execute("UPDATE trade_interface SET params=%s::jsonb WHERE code=%s",
                       (json.dumps(prev or {}, ensure_ascii=False), acc_id))
             c.commit()
         specs.invalidate()

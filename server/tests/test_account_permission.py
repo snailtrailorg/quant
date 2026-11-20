@@ -126,7 +126,7 @@ class TestAccountPermissionSeed:
         with get_conn() as conn:
             n = conn.execute(
                 "SELECT count(*) FROM account_permission vp "
-                "JOIN trading_account e ON e.id = vp.account_id "
+                "JOIN trade_interface e ON e.login_key = vp.login_key "
                 "WHERE e.market='astock'").fetchone()[0]
         assert n >= 1
 
@@ -135,13 +135,13 @@ class TestAccountPermissionSeed:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             vid = conn.execute(
-                "SELECT id FROM trading_account t WHERE provider='xtp' "
-                "AND EXISTS (SELECT 1 FROM account_permission p WHERE p.account_id=t.id) "
-                "ORDER BY id LIMIT 1").fetchone()
+                "SELECT code FROM trade_interface t WHERE provider='xtp' "
+                "AND EXISTS (SELECT 1 FROM account_permission p WHERE p.login_key=t.login_key) "
+                "ORDER BY code LIMIT 1").fetchone()
         if vid is None:
             pytest.skip("无 xtp 交易 account")
         assert account_allows(vid[0], "600000.XSHG") is True
-        assert account_allows(999999, "600000.XSHG") is False   # 不存在 account fail-closed
+        assert account_allows("td-nonexistent", "600000.XSHG") is False   # 不存在 account fail-closed
 
 
 class TestAccountPermissionEndpoint:

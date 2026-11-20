@@ -349,16 +349,17 @@ def test_window_connected_skips_and_throttles():
 
 # ——— td→quote 迁移列 ———
 
-def test_quote_account_column_exists():
+def test_quote_account_via_td_md_map():
+    """M5：取价映射由 td_md_map 承载（quote_account_id 列已退役）。"""
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cols = {r[0] for r in conn.execute(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name='trading_account'").fetchall()}
+                "WHERE table_name='td_md_map'").fetchall()}
     except Exception:
         pytest.skip("无 dev 库")
-    assert "quote_account_id" in cols
+    assert {"td_code", "md_code", "priority"} <= cols
 
 
 # ——— td_exec_down 监控 ———

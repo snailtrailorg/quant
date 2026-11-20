@@ -93,7 +93,7 @@ def get_td_identity(td_code: str) -> dict | None:
     with get_conn() as conn:
         r = conn.execute(
             "SELECT code,provider,account_key,login_key,credentials_encrypted,params,impl,is_virtual "
-            "FROM trade_interface WHERE code=%s", (td_code,)).fetchone()
+            "FROM trade_interface WHERE code=%s", (str(td_code),)).fetchone()
     if not r:
         return None
     return dict(zip(("code", "provider", "account_key", "login_key",
@@ -103,7 +103,7 @@ def get_td_identity(td_code: str) -> dict | None:
 def resolve_login_key(account: str) -> str:
     """code → login_key（account_permission 归属键）；非 code（已是 login_key）原样返回。"""
     ident = get_td_identity(account)
-    return ident["login_key"] if ident else account
+    return ident["login_key"] if ident else str(account)
 
 
 def td_sibling_codes(login_key: str) -> list[str]:

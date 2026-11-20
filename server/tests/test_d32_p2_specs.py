@@ -57,7 +57,7 @@ def test_missing_instrument_raises():
 
 def test_account_perm_normalizes_etf():
     with get_conn() as c:
-        row = c.execute("SELECT id FROM trading_account ORDER BY id LIMIT 1").fetchone()
+        row = c.execute("SELECT code FROM trade_interface ORDER BY code LIMIT 1").fetchone()
     perm = AccountPermSpec.of(row[0])
     assert "etf" not in perm.allowed_categories
     assert "listed_fund" in perm.allowed_categories or perm.allowed_categories == set()
@@ -82,7 +82,7 @@ def test_tick_normalized_in_db():
 def test_close_policy_backfilled_to_account_params():
     with get_conn() as c:
         rows = c.execute(
-            "SELECT provider, params->'close_policy' FROM trading_account "
+            "SELECT provider, params->'close_policy' FROM trade_interface "
             "WHERE params ? 'close_policy'").fetchall()
     assert rows
     for _provider, cp in rows:
