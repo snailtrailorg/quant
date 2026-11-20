@@ -168,6 +168,7 @@ from .routes.stock import router as stock_router  # /api/stock/* /api/kline /api
 from .routes.strategy import router as strategy_router  # /api/strategy* /api/factors* /api/live-task
 from .routes.sync import router as sync_router  # /api/sync/* /api/data-source-usage
 from .routes.system import router as system_router  # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-providers 等
+from .routes.interfaces_api import router as interfaces_router  # 批189：md/td/ds 三实体
 from .routes.trading import router as trading_router  # /api/position /api/pnl /api/orders /api/account /api/dashboard
 
 app.include_router(quality_router)   # 批 62b：M7 对账
@@ -175,6 +176,7 @@ app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(screen_router)   # 批 164b
 app.include_router(strategy_router)
+app.include_router(interfaces_router)   # 批189
 app.include_router(trading_router)
 app.include_router(sync_router)
 app.include_router(security_router)   # 批 120：/api/security/snapshot|history——须先于 stock 注册（其 /api/security/{vt_symbol} 通配先挂即吞两字面量路由）
