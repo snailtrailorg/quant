@@ -810,3 +810,11 @@
 - **推翻**：批175 的「canonical 保持 vt」作废；旧写法（`SHSE/SZSE/BSE/SSE/SH/SZ/BJ/BINANCE/OKX`）降为**入站别名**。
 - **代价与纪律**：17 张表 + 91 行代码 + 567 行测试夹具；`bar_1d` 1780 万行全表重写；迁移与代码**同一次 release**，回滚须代码+数据同批。
 - **结果（2026-11-14 晚）**：0183/0184/0185 三次上产（`202611141758-f129b3c`、`202611141856-0aca8dd`、`202611141905-887c345`），prod `alembic=0185`；持仓/委托/选股/对账零旧后缀；全量 3407 绿。**过程中的两个真漏**：① 0183 手写表清单漏 `position_snapshot`（上产后才发现，0184 补）；② 滚动发布窗口期旧进程写旧口径（0185 幂等清扫）。已加全库扫描守门防再漏。
+
+## 2026-11-20 · 批189 D-M0-7 券商会话身份解析边界（用户授权）
+
+- **裁定**（用户）：「按照你的建议，继续」——采纳助手建议：`build_td_runtime`/`build_xtp_setting`/`SessionSlotAllocator` 的平台入参改为 `td_code`；`login_key`→物理资金账号/凭证的解析在 plugin 内部完成；平台层（DB/API/队列/日志/UI/unit 实例名）无 int 身份。**已写入 M0 §8 D-M0-7**。
+- **理由**：D10/V4「code 唯一身份」在券商会话层遇到真实边界——券商 API/租约/订单号要物理账号，但这正是 `login_key` 的职责。由 plugin 内部解析可让平台层彻底没有 int 身份，符合 V4；若由 exec 层在调用前解析，则 int 身份泄漏回平台层。
+- **开工前实证的隐藏 P0**（此前未识别）：M3 部署链已把 unit 实例名改为 `@<code>`（dbro 输出 `code|provider`、波次拉 code 实例、停旧数字实例），但 unit 仍 `Environment=ACCOUNT_ID=%i`，且 `td_exec/main.py:383` 强制 `acc.isdigit()`→否则 exit 78；`session_slot.py` 仍 SQL 读写 `provider_session_slot.account_id`，而 0192 已 DROP 该列（PK 改 `login_key`）。**原子发布体若不改进程入口与租约，code 实例一启即 exit 78、租约 SQL 直接报错**——M5 必须连同修掉，不能只切数据层。
+- **影响面**：13 源文件 + 22 测试（M2 §3 表）+ unit 模板×2 + td_exec/main + session_slot；按「身份流」分组（下发方+消费方+数据面+入口同批），禁止按文件拆批造成半切换。
+- **Scope**：M5（TD 执行面）实施；所有改动在 M1–M5 同一原子发布体，不可分批上产。
