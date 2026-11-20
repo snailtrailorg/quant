@@ -282,6 +282,17 @@ def upgrade() -> None:
       PRIMARY KEY (login_key, provider, role, terminal_id));
     """)
 
+    # 11b. jsonb 类型守卫 CHECK（保持 0191 data_source 的 ck_*_params_object 语义；新表同款）
+    #      —— test_jsonb_columns_guarded 守门：jsonb 静默降级(json.dumps 双重编码)须被 23514 拦。
+    _sql("""
+    ALTER TABLE data_source      ADD CONSTRAINT ck_data_source_params_object
+      CHECK (params IS NULL OR jsonb_typeof(params)='object');
+    ALTER TABLE market_interface ADD CONSTRAINT ck_market_interface_params_object
+      CHECK (params IS NULL OR jsonb_typeof(params)='object');
+    ALTER TABLE trade_interface  ADD CONSTRAINT ck_trade_interface_params_object
+      CHECK (params IS NULL OR jsonb_typeof(params)='object');
+    """)
+
     # 12. 删旧
     _sql("""
     ALTER TABLE live_task         DROP COLUMN account_id;
