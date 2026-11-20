@@ -49,6 +49,7 @@ llm_model_config :: id,name,provider,model,api_key_encrypted,base_url,context_wi
 llm_usage :: id,ts,provider,model,input_tokens,output_tokens,latency_ms,success,error_type,caller
 margin_detail :: trade_date,ts_code,rzye,rqye,rzmre,rqyl,rzche,rqchl,rqmcl,rzrqye
 market_hours :: session_id,tz,calendar,anchor,sessions
+market_interface :: code,name,provider,market,account_key,login_key,credentials_encrypted,params,impl,position,enabled,exchanges,created_at,updated_at
 market_session :: id,name,calendar,session_rules,tz,created_at,updated_at
 moneyflow :: ts_code,trade_date,buy_sm_vol,buy_sm_amount,sell_sm_vol,sell_sm_amount,buy_md_vol,buy_md_amount,sell_md_vol,sell_md_amount,buy_lg_vol,buy_lg_amount,sell_lg_vol,sell_lg_amount,buy_elg_vol,buy_elg_amount,sell_elg_vol,sell_elg_amount,net_mf_vol,net_mf_amount
 namechange :: ts_code,name,start_date,end_date,ann_date,change_reason
@@ -63,6 +64,7 @@ pool_symbols :: id,pool_id,symbol
 pools :: id,name,category,description,created_at
 position_refresh :: ts,rows,task_id,account_id
 position_snapshot :: symbol,direction,volume,frozen,cost_price,pnl,yd_volume,task_id,ts,account_id
+provider_session_slot :: login_key,provider,role,terminal_id,holder,boot_epoch,heartbeat
 proxy_binding :: consumer,proxy_enabled,proxy_name,endpoint_override,updated_at
 proxy_config :: name,url,notes,enabled,created_at,updated_at
 reconcile_issue :: id,symbol,issue_type,detail,broker_qty,derived_qty,status,first_seen,updated_at,handled_by,note,exempt_qty,exempt_until
@@ -81,11 +83,11 @@ signal_log :: id,ts,strategy_id,symbol,action,score,price,source,fetched_at,data
 sms_provider :: id,name,provider,access_key_id,access_key_secret,sign_name,alert_template_code,verify_template_code,position,enabled,created_at,updated_at,vendor
 smtp_provider :: id,name,host,port,security,username,password,from_addr,position,enabled,created_at,updated_at,vendor
 st_list :: trade_date,ts_code,name,type,type_name
-suspend_calendar :: ts_code,trade_date,suspend_type,full_day,updated_at
 static_symbols :: ts_code,name,industry,list_status,delisted,updated_at
 stk_holdernumber :: ts_code,ann_date,end_date,holder_num
 stk_limit :: trade_date,ts_code,pre_close,up_limit,down_limit
 strategy_config :: id,name,type,symbol,adapter,enabled,factors,aggregator,risk,params,backtest_verified,updated_at
+suspend_calendar :: ts_code,trade_date,suspend_type,full_day,updated_at
 sync_config :: id,name,tushare_api,pg_table,sync_mode,schedule,enabled,last_sync_date,last_sync_ts,last_sync_count,last_status,description,created_at,trade_day_filter,provider,supports_backfill,start_floor,retention
 sync_gap :: id,sync_id,symbol,gap_start,gap_end,state,reason,pull_count,first_seen,last_seen,closed_at,hit_rounds,last_hit_round
 sync_kind_config :: sync_id,kind,sub_kind,pg_table,pk_cols,float_cols,text_cols,rebuild,overlap_days,lag_trade_days
@@ -95,11 +97,12 @@ system_log :: id,ts,level,source,module,message
 system_metric :: ts,mem_total,mem_used,swap_total,swap_used,disk_total,disk_used,cpu_used,mem_used_avg,swap_used_avg,disk_used_avg,cpu_used_avg
 task_logs :: id,task_id,level,message,step_name,sql_or_api,resource_usage,created_at
 tasks :: id,name,type,trigger_type,trigger_user,status,progress,params,last_heartbeat,pid,error_message,start_time,end_time,created_at,updated_at
+td_md_map :: td_code,md_code,priority
 top10_holders :: ts_code,ann_date,end_date,holder_name,hold_amount,hold_ratio,hold_float_ratio,hold_change,holder_type
 top_list :: trade_date,ts_code,name,close,pct_change,turnover_rate,amount,l_sell,l_buy,l_amount,net_amount,net_rate,amount_rate,float_values,reason
 trade_cal :: exchange,cal_date,is_open,pretrade_date
+trade_interface :: code,name,provider,market,account_key,login_key,credentials_encrypted,params,impl,position,enabled,is_virtual,created_at,updated_at
 trade_log :: id,ts,order_id,symbol,action,volume,price,commission,strategy_id,trade_ref,account_id
-trading_account :: id,name,provider,market,exchanges,account_key,credentials_encrypted,params,capabilities,position,enabled,created_at,updated_at,is_virtual
 user_group :: id,name,description,builtin,created_at
 user_tokens :: id,user_id,email,token,type,created_at,expires_at,used,revoked
 users :: id,username,password_hash,role,enabled,created_at,email,last_login_at,last_login_ip,nickname,avatar_url,avatar_updated_at,deleted_at,phone

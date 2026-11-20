@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # quant-hbcheck —— hub 心跳健康检查（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
 #
+# TRANSITION-0189:收口=0192 全环境上产后，重装位并删除本文件 0189 块（新态 market_interface
+#   期望集 + iface:hb:md:<code> 键 + 新字段集）与 0115 两态块，回到单态新键检查。
+#
 # 属主约束（3b bootstrap 落实）: quant:quant 755（本体以 quant 跑才能读 shared/.env 与
 # 执行 shared venv——deploy 无权直跑 venv，七跑实锤 EACCES）。
 #
@@ -142,25 +145,37 @@ select_trading_table() {
 # TRANSITION-0115:END
 
 # 期望集：交易域 enabled 行 id 清单（quant 属主 psql peer 免密，连接封装同 dbro）
-TRADING_TBL=$(select_trading_table) || exit 1
-if [ "$TRADING_TBL" = trading_account ]; then
-  expect_sql="SELECT id FROM trading_account WHERE enabled"
+# 批189（0189）：新态期望集=market_interface 的 code；老态沿用交易域 id。
+# TRANSITION-0189:BEGIN（本块含退役表名 trading_account——闸门据此放行；收口=0192 全环境上产）
+HAS_MARKET=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
+  "SELECT (to_regclass('market_interface') IS NOT NULL)::int::text")
+if [ "$HAS_MARKET" = "1" ]; then
+  expect_sql="SELECT code FROM market_interface WHERE enabled"
+  HB_PREFIX="iface:hb:md"
+  NEED_FIELDS="enabled,working,subs,bars,sess_ticks,last_tick_ts,ts,pid,gen"
 else
-  expect_sql="SELECT id FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"  # TRANSITION-0115
+  TRADING_TBL=$(select_trading_table) || exit 1
+  if [ "$TRADING_TBL" = trading_account ]; then
+    expect_sql="SELECT id FROM trading_account WHERE enabled"  # TRANSITION-0189
+  else
+    expect_sql="SELECT id FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"  # TRANSITION-0115
+  fi
+  HB_PREFIX="quant:hb:md-hub"
+  NEED_FIELDS="pid,gen,subs,ticks,bars,sess_ticks,last_tick_ts,dropped_pg"
 fi
+# TRANSITION-0189:END
 EXPECT=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc "$expect_sql")
 
-"$ROOT/shared/venv/bin/python" - "$URL" "$EXPECT" <<'PYEOF'
+"$ROOT/shared/venv/bin/python" - "$URL" "$EXPECT" "$HB_PREFIX" "$NEED_FIELDS" <<'PYEOF'
 import sys
 import time
 import redis
 
 url, expect_raw = sys.argv[1], sys.argv[2]
+HB_PREFIX = sys.argv[3]
+NEED = set(sys.argv[4].split(","))
 ids = [x.strip() for x in expect_raw.splitlines() if x.strip()]
 r = redis.Redis.from_url(url, socket_timeout=3, decode_responses=True)
-
-HB_PREFIX = "quant:hb:md-hub"
-NEED = {"pid", "gen", "subs", "ticks", "bars", "sess_ticks", "last_tick_ts", "dropped_pg"}
 
 
 def check_key(key: str) -> tuple[bool, str]:

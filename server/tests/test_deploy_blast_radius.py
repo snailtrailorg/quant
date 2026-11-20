@@ -84,12 +84,19 @@ _RETIRED = {
     "ANY(capabilities)": "退役的域谓词——拆表后「表本身即域」，勿再按 capabilities 过滤域",
 }
 
-# ---- 第 4 段：过渡期哨兵（双态兼容分支）----
-_TRANSITION_SENTINEL = "TRANSITION-0115"
-# 文件头声明形态：`TRANSITION-0115:收口=<非空条件>`
-_TRANSITION_DECL_RE = re.compile(r"TRANSITION-0115:收口=(\S+)")
-# 哨兵行上唯一允许引用的「非 schema 表」（即已知旧名——写错别的表名照样红）
-_SENTINEL_ALLOWED_TABLES = frozenset({"external_interface"})
+# ---- 第 4 段：过渡期哨兵（双态兼容分支；支持多代并存）----
+# 每代哨兵声明：allowed=该块允许引用的旧表名；new_form=该块的「新态」表名（成对检查用）。
+# 0115（批83a）：external_interface → trading_account
+# 0189（批189）：trading_account → market_interface / trade_interface（0192 后 trading_account 退役）
+_TRANSITIONS: dict[str, dict] = {
+    "TRANSITION-0115": {"allowed": frozenset({"external_interface"}),
+                        "new_form": "trading_account"},
+    "TRANSITION-0189": {"allowed": frozenset({"trading_account", "external_interface"}),
+                        "new_form": "market_interface"},
+}
+_SENTINEL_ALLOWED_TABLES = frozenset().union(*(t["allowed"] for t in _TRANSITIONS.values()))
+# 文件头声明形态：`<哨兵>:收口=<非空条件>`（逐哨兵参数化）
+_TRANSITION_DECL_RE = re.compile(r"(TRANSITION-\d+):收口=(\S+)")
 
 # 扫描时跳过的目录（第三方/缓存/日志）
 _SKIP_PARTS = {".venv", "__pycache__", "node_modules", ".git"}
@@ -132,28 +139,30 @@ def _sql_lines(path: Path):
 def _sentinel_marked_lines(path: Path) -> tuple[set[int], list[str]]:
     """产出 (带哨兵的行号集合, 纪律错误)。
 
-    哨兵两形态：**行内**（该行文本含 `TRANSITION-0115`）或**域内**（处于
-    `TRANSITION-0115:BEGIN` … `TRANSITION-0115:END` 之间——跨行 SQL 串用）。
+    哨兵两形态：**行内**（该行文本含任一 TRANSITION-*）或**域内**（处于
+    `<哨兵>:BEGIN` … `<哨兵>:END` 之间——跨行 SQL 串用）。
     域不成对（`END` 无 `BEGIN` / `BEGIN` 未闭合 / `BEGIN` 嵌套）即报错。
     """
     marked: set[int] = set()
     errs: list[str] = []
     depth = 0
     for i, raw in enumerate(_read(path).splitlines(), 1):
-        if f"{_TRANSITION_SENTINEL}:BEGIN" in raw:
-            if depth:
+        begins = [s for s in _TRANSITIONS if f"{s}:BEGIN" in raw]
+        ends = [s for s in _TRANSITIONS if f"{s}:END" in raw]
+        if begins:
+            if depth or len(begins) > 1:
                 errs.append(f"{path.name}:{i}: 哨兵 BEGIN 嵌套/重复")
             depth += 1
             marked.add(i)
             continue
-        if f"{_TRANSITION_SENTINEL}:END" in raw:
+        if ends:
             depth -= 1
             if depth < 0:
                 errs.append(f"{path.name}:{i}: 哨兵 END 无匹配的 BEGIN")
                 depth = 0
             marked.add(i)
             continue
-        if _TRANSITION_SENTINEL in raw or depth > 0:
+        if any(s in raw for s in _TRANSITIONS) or depth > 0:
             marked.add(i)
     if depth > 0:
         errs.append(f"{path.name}: 哨兵 BEGIN 未闭合")
@@ -216,32 +225,36 @@ def test_schema_expectations_source_is_alive():
 
 
 def test_transition_sentinel_is_declared_and_paired():
-    """第 4 段：哨兵须**声明 + 成对**，且收口后残留的声明同样报错（逼闭环）。"""
+    """第 4 段：每代哨兵须**声明 + 成对**，收口后残留声明同样报错（逼闭环）。"""
     errs: list[str] = []
 
     for path in _iter_files(_WRAPPERS):
         text = _read(path)
         rel = path.relative_to(_REPO)
-        decls = _TRANSITION_DECL_RE.findall(text)
+        decls = dict(_TRANSITION_DECL_RE.findall(text))  # 哨兵 -> 收口条件
         marked_lines, span_errs = _sentinel_marked_lines(path)
         errs.extend(span_errs)
         marked = [(ln, line) for ln, line in _sql_lines(path) if ln in marked_lines]
-
-        if marked and not decls:
-            errs.append(
-                f"{rel}: {len(marked)} 行带哨兵 `{_TRANSITION_SENTINEL}` 但缺文件头声明 "
-                f"`{_TRANSITION_SENTINEL}:收口=<条件>`（→ 须写明收口条件）"
-            )
-        if decls and not marked:
-            errs.append(
-                f"{rel}: 声明 `{_TRANSITION_SENTINEL}:收口=` 仍在但已无哨兵行 —— "
-                "收口后残留的过期声明，须删除（stale declaration）"
-            )
-        if marked and "trading_account" not in text:
-            errs.append(
-                f"{rel}: 有旧态哨兵行但文件内无新表形态 `trading_account` —— 兼容分支不成对"
-                "（只留旧分支＝把兼容当常态）"
-            )
+        # 逐哨兵：该块标记行（行内含此哨兵 或 处于其 BEGIN/END 域内）
+        for sent, spec in _TRANSITIONS.items():
+            sent_lines = [ln for ln, line in marked if sent in line]
+            # 域内行不带哨兵名——用「本文件是否有该哨兵的 BEGIN 块」近似判定
+            in_span = bool(re.search(rf"{sent}:BEGIN", text)) and bool(marked)
+            has_mark = bool(sent_lines) or in_span
+            has_decl = sent in decls
+            if has_mark and not has_decl:
+                errs.append(
+                    f"{rel}: 有 `{sent}` 哨兵行但缺文件头声明 `{sent}:收口=<条件>`"
+                )
+            if has_decl and not has_mark:
+                errs.append(
+                    f"{rel}: 声明 `{sent}:收口=` 仍在但已无哨兵行 —— 收口后过期声明须删除"
+                )
+            if has_mark and spec["new_form"] not in text:
+                errs.append(
+                    f"{rel}: 有 `{sent}` 旧态哨兵行但文件内无新表形态 `{spec['new_form']}` —— "
+                    "兼容分支不成对（只留旧分支＝把兼容当常态）"
+                )
 
     # 哨兵只许出现在装位件目录（deploy/wrappers/），不得扩散到其它部署链文件
     for root in (_DEPLOY, _SERVER_SCRIPTS):
@@ -250,10 +263,11 @@ def test_transition_sentinel_is_declared_and_paired():
         for path in _iter_files(root):
             if _WRAPPERS in path.parents:
                 continue
-            if _TRANSITION_SENTINEL in _read(path):
+            found = [s for s in _TRANSITIONS if s in _read(path)]
+            if found:
                 errs.append(
-                    f"{path.relative_to(_REPO)}: 哨兵 `{_TRANSITION_SENTINEL}` 只允许出现在 "
-                    "deploy/wrappers/（装位件）——其它位置的旧表名引用一律按回归处理"
+                    f"{path.relative_to(_REPO)}: 哨兵 {found} 只允许出现在 deploy/wrappers/"
+                    "（装位件）——其它位置的旧表名引用一律按回归处理"
                 )
 
     assert not errs, "过渡期哨兵纪律违规:\n  " + "\n  ".join(errs)

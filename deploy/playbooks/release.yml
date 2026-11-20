@@ -605,6 +605,33 @@
           when: not (server_changed | bool) and (stale_procs.stdout | default('false')) != 'true'
 
 
+        # 批189（0189）：旧 @<id> 数字实例退役。新 code 实例已由阶段 7 波次拉起（dbro 输出 code），
+        # 此处停旧数字实例——反序（先停旧）会让 code 实例起来前空窗；故置于 7.6、在波次之后。
+        - name: 阶段 7.6 —— 旧 @<id> hub/td 数字实例退役（0189：停+disable，不 mask）
+          block:
+            - name: 旧数字实例枚举（@<id>——排除 @quant 单例与新 code 实例）
+              ansible.builtin.shell: |
+                { systemctl list-units --all 'quant-md-hub@*.service' --no-legend --plain 2>/dev/null;
+                  systemctl list-units --all 'quant-td-exec@*.service' --no-legend --plain 2>/dev/null; } \
+                | awk '{print $1}' | grep -E '@[0-9]+\.service$' | sort -u || true
+              register: legacy_numeric_units
+              changed_when: false
+              failed_when: false
+
+            - name: 旧数字实例 stop
+              ansible.builtin.command: "{{ quant_svc_cmd }} stop {{ item }}"
+              failed_when: false
+              changed_when: true
+              loop: "{{ legacy_numeric_units.stdout_lines | default([]) }}"
+              when: server_changed | bool
+
+            - name: 旧数字实例 disable（stop+disable 收敛，不 mask）
+              ansible.builtin.command: "{{ quant_svc_cmd }} disable {{ item }}"
+              failed_when: false
+              changed_when: true
+              loop: "{{ legacy_numeric_units.stdout_lines | default([]) }}"
+              when: server_changed | bool
+
         - name: 阶段 7.6 —— 旧 @quant hub 退役（批 66b D26：stop+disable——mask 弃用；新 unit 已由 hub 波拉起稳定）
           block:
             - name: 旧 @quant 停止（已停/未载入幂等）
