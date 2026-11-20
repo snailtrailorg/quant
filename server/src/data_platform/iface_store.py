@@ -44,9 +44,23 @@ def check_code(kind: str, code: str) -> None:
         raise IfaceError("CODE_INVALID", 400, f"code 必须以 {prefix} 开头")
 
 
+def _read_projection(cols: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    """读取投影：凭证列只回 has_credentials 布尔（沿用 config_store 口径，永不回显密文）。"""
+    exprs, keys = [], []
+    for c in cols:
+        if c == "credentials_encrypted":
+            exprs.append("credentials_encrypted IS NOT NULL AS has_credentials")
+            keys.append("has_credentials")
+        else:
+            exprs.append(c)
+            keys.append(c)
+    return ",".join(exprs), tuple(keys)
+
+
 def list_interfaces(kind: str, *, enabled: bool | None = None, market: str | None = None) -> list[dict]:
     t, _, cols = _tbl(kind)
-    sql = f"SELECT code,{','.join(cols)} FROM {t} WHERE 1=1"
+    proj, keys = _read_projection(cols)
+    sql = f"SELECT code,{proj} FROM {t} WHERE 1=1"
     args: list[Any] = []
     if enabled is not None:
         sql += " AND enabled=%s"
@@ -57,16 +71,17 @@ def list_interfaces(kind: str, *, enabled: bool | None = None, market: str | Non
     sql += " ORDER BY position, code"
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(args)).fetchall()
-    return [dict(zip(("code",) + cols, r)) for r in rows]
+    return [dict(zip(("code",) + keys, r)) for r in rows]
 
 
 def get_interface(kind: str, code: str) -> dict:
     t, _, cols = _tbl(kind)
+    proj, keys = _read_projection(cols)
     with get_conn() as conn:
-        r = conn.execute(f"SELECT code,{','.join(cols)} FROM {t} WHERE code=%s", (code,)).fetchone()
+        r = conn.execute(f"SELECT code,{proj} FROM {t} WHERE code=%s", (code,)).fetchone()
     if not r:
         raise IfaceError("IFACE_NOT_FOUND", 404, code)
-    return dict(zip(("code",) + cols, r))
+    return dict(zip(("code",) + keys, r))
 
 
 def _login_key(kind: str, provider: str, account_key: str | None, creds: str | None,
@@ -112,9 +127,9 @@ def update_interface(kind: str, code: str, patch: dict,
         raise IfaceError("CODE_IMMUTABLE", 400, "code 不可修改")
     upd = {c: patch[c] for c in cols if c in patch}
     merged = {**cur, **upd}
-    if kind != "ds" and any(k in upd for k in ("provider", "account_key", "credentials_encrypted", "is_virtual")):
+    if kind != "ds":
         upd["login_key"] = _login_key(kind, merged.get("provider", ""), merged.get("account_key"),
-                                       merged.get("credentials_encrypted"), bool(merged.get("is_virtual")))
+                                      merged.get("credentials_encrypted"), bool(merged.get("is_virtual")))
         merged["login_key"] = upd["login_key"]
     if merged.get("enabled"):
         validate_payload(kind, merged, carrier_probe)
@@ -136,8 +151,11 @@ def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], b
     if kind != "ds" and not row.get("is_virtual"):
         if not row.get("credentials_encrypted") and kind == "td":
             raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "交易接口缺凭证")
-        if not row.get("login_key"):
-            raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "login_key 缺失")
+    if not row.get("login_key"):
+        raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "login_key 缺失")
+    # |legacy 只允许迁移期产生；运行期启用必须有稳定物理账号键
+    if not row.get("account_key") and not (kind == "md" and not row.get("credentials_encrypted")):
+        raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "account_key 为空（仅迁移期允许 legacy）")
 
 
 def delete_interface(kind: str, code: str, stop_unit: Callable[[str], None],

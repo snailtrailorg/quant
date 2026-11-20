@@ -35,7 +35,8 @@ NEED_KEYS = {
 }
 
 NEED_CODES = ['MAPPING_MISSING', 'NO_QUOTE', 'IFACE_IDLE', 'CODE_CONFLICT',
-              'IFACE_BUSY', 'PROVIDER_UNSUPPORTED', 'CREDENTIALS_INCOMPLETE']
+              'IFACE_BUSY', 'PROVIDER_UNSUPPORTED', 'CREDENTIALS_INCOMPLETE',
+              'PARAM_DEPRECATED']
 
 NEED_ENDPOINTS = ['/api/md-interfaces', '/api/td-interfaces', '/api/data-sources',
                   '/api/trades', '/api/health/components']
