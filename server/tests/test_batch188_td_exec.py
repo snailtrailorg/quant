@@ -33,7 +33,7 @@ def test_reject_writes_receipt_and_order_log():
     """分流 reject 必须写主回执 + order_log(rejected)（信号账不留孤儿）。"""
     from src.td_exec import main as M
     ex = M.TdExec.__new__(M.TdExec)
-    ex.account_id = 1
+    ex.td_code = "td-xtp"
     ex._r = MagicMock()
     nm = []
     with patch("src.strategy_runner.trading.write_cmd_result", side_effect=lambda rid, d, **k: nm.append((rid, d))) as wcr, \
@@ -53,7 +53,7 @@ def test_dispatch_routes_close_to_thread_and_place_to_main():
     """close-all 起线程（dispatch_closing 置位）；close 期 place 走 reject。"""
     from src.td_exec import main as M
     ex = M.TdExec.__new__(M.TdExec)
-    ex.account_id = 1
+    ex.td_code = "td-xtp"
     ex.dispatch_closing = __import__("threading").Event()
     ex.worker = MagicMock()
     started = []
@@ -159,9 +159,9 @@ def test_sa4_desired_includes_td_exec():
     cur.fetchall.return_value = []
     conn.execute.return_value = cur
     with patch.object(T, "_sa4_systemctl", return_value=None), \
-         patch("src.data_platform.config_store.enabled_exec_accounts", return_value=[(4, None)]):
+         patch("src.data_platform.config_store.exec_interface_codes", return_value=["td-xtp"]):
         desired = T._desired_units(conn)
-    assert ("quant-td-exec@4.service", "td_exec") in desired
+    assert ("quant-td-exec@td-xtp.service", "td_exec") in desired
 
 
 def test_sa4_units_scans_td_exec_pattern():
@@ -202,7 +202,7 @@ def test_sa4_stops_non_desired_td_exec():
 def test_shutdown_stops_engine_and_exits():
     from src.td_exec import main as M
     ex = M.TdExec.__new__(M.TdExec)
-    ex.account_id = 1
+    ex.td_code = "td-xtp"
     ex._r = MagicMock()
     ex._close_thread = None
     ex._ee = MagicMock()
@@ -222,8 +222,8 @@ def test_dispatch_paths_ensure_registry():
     for rel in ("web_api/routes/risk.py", "health_monitor/collector.py"):
         txt = (root / rel).read_text(encoding="utf-8")
         assert "ensure_registered()" in txt, f"{rel} 缺 ensure_registered（冷启动恒空账号集）"
-        # 同时确认不是死代码：注册调用必须与 enabled_exec_accounts 同现
-        assert "enabled_exec_accounts" in txt
+        # 同时确认不是死代码：注册调用必须与 exec_interface_codes 同现
+        assert "exec_interface_codes" in txt
 
 
 # ——— 持仓快照 60s 刷新 ——
@@ -255,25 +255,28 @@ def test_snapshot_cycle_cadence_and_gate():
 # （单测全绿也看不见——此处断言实际调用参数类型）。
 
 def test_build_passes_int_tid():
+    """M5：tid 现由 code_terminal(code) 派生稳定整数（session_slot 做 (tid-1)%98+2 算术）。"""
     from src.td_exec import main as M
     ex = M.TdExec.__new__(M.TdExec)
-    ex.account_id = 1
+    ex.td_code = "td-xtp"
+    ex._quote_md_code = "md-xtp"
     ex._row = {"provider": "xtp", "impl": "plugin"}
-    ex._quote_account = 1
     captured = {}
     rt = {"adapter": MagicMock(), "td_api": MagicMock(), "gw": MagicMock(),
           "exec_port": MagicMock()}
 
-    def _fake(provider, ee, tid, account_id, boot_epoch, **kw):
-        captured["tid"] = tid
+    def _fake(provider, ee, tid, td_code, boot_epoch, **kw):
+        captured["tid"] = tid; captured["code"] = td_code
         return rt
 
     with patch("src.strategy_runner.main.make_event_engine", return_value=MagicMock()), \
+         patch("src.strategy_runner.td_registry.code_terminal", return_value=2), \
          patch("src.strategy_runner.td_registry.build_td_runtime", side_effect=_fake), \
          patch("src.strategy_runner.trading.reconcile_orders"), \
          patch("src.strategy_runner.hub_worker.EmergencyWorker", return_value=MagicMock()):
         ex._build()
-    assert isinstance(captured["tid"], int) and captured["tid"] == 1
+    assert isinstance(captured["tid"], int) and captured["tid"] == 2
+    assert captured["code"] == "td-xtp"
 
 
 # ——— 每日连接窗：盘外启动必须窗开沿建连 ———
@@ -283,7 +286,7 @@ def test_build_passes_int_tid():
 def _mk_exec_for_window():
     from src.td_exec import main as M
     ex = M.TdExec.__new__(M.TdExec)
-    ex.account_id = 1
+    ex.td_code = "td-xtp"
     ex._td_window = (10, 10)
     ex._last_conn_ts = 0.0
     ex._exec_port = MagicMock(connected=False)

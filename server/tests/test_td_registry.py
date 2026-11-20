@@ -48,20 +48,15 @@ def test_key_domain_providers():
 
 
 def _patch_db_impl(impl: str):
-    """builder 内函数级 import db.get_conn —— patch 该符号注入账号 impl 值。"""
-    class _C:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def execute(self, *a, **k):
-            return self
-
-        def fetchone(self):
-            return (impl,)
-    return patch("src.data_platform.db.get_conn", return_value=_C())
+    """M5：builder 经 iface_store.get_td_identity 取 impl/login_key —— patch 该符号。"""
+    ident = {"code": "td-xtp", "provider": "xtp", "account_key": "acct",
+             "login_key": "xtp|acct", "credentials_encrypted": "enc", "params": {},
+             "impl": impl, "is_virtual": False}
+    return patch.multiple(
+        "src.data_platform.iface_store",
+        get_td_identity=MagicMock(return_value=ident),
+        td_sibling_codes=MagicMock(return_value=["td-xtp"]),
+    )
 
 
 def test_xtp_builder_requires_plugin_impl():
@@ -69,7 +64,7 @@ def test_xtp_builder_requires_plugin_impl():
     不得静默回落到已删除的组装路径。"""
     with _patch_db_impl("legacy"):
         with pytest.raises(RuntimeError, match="legacy TD 路径已于 P3 删除"):
-            build_td_runtime("xtp", MagicMock(), 7, 4, 99)
+            build_td_runtime("xtp", MagicMock(), 7, "td-xtp", 99)
 
 
 def test_xtp_builder_plugin_shape():
@@ -87,7 +82,7 @@ def test_xtp_builder_plugin_shape():
          patch("src.providers.xtp.td._transport.td_api_cls") as api_cls, \
          patch("src.providers.xtp.td.XtpExecutionPort") as port_cls, \
          patch("src.providers.xtp.td._LegacyCompat") as compat:
-        rt = build_td_runtime("xtp", MagicMock(), 7, 4, 99)
+        rt = build_td_runtime("xtp", MagicMock(), 7, "td-xtp", 99)
 
     assert set(rt) == {"gw", "td_api", "adapter", "setting", "td_open",
                        "lead", "lag", "cfg_adapter", "exec_port", "session_slot"}

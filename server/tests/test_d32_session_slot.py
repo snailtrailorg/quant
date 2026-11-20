@@ -12,7 +12,7 @@ from src.strategy_runner.session_slot import (
     SessionUnavailable,
 )
 
-ACC = 989910
+ACC = "xtp|989910"   # login_key（M5）
 
 
 def _db_up() -> bool:
@@ -30,11 +30,11 @@ pytestmark = pytest.mark.skipif(not _db_up(), reason="真库不可用")
 @pytest.fixture(autouse=True)
 def _clean():
     with get_conn() as c:
-        c.execute("DELETE FROM provider_session_slot WHERE account_id=%s", (ACC,))
+        c.execute("DELETE FROM provider_session_slot WHERE login_key=%s", (ACC,))
         c.commit()
     yield
     with get_conn() as c:
-        c.execute("DELETE FROM provider_session_slot WHERE account_id=%s", (ACC,))
+        c.execute("DELETE FROM provider_session_slot WHERE login_key=%s", (ACC,))
         c.commit()
 
 
@@ -47,11 +47,11 @@ def test_acquire_and_release():
     s = _acquire()
     assert s.terminal_id == 2 and s.order_prefix == "t1:e1000:"
     with get_conn() as c:
-        assert c.execute("SELECT holder FROM provider_session_slot WHERE account_id=%s",
+        assert c.execute("SELECT holder FROM provider_session_slot WHERE login_key=%s",
                          (ACC,)).fetchone()[0] == "h1"
     SessionSlotAllocator.release(s)
     with get_conn() as c:
-        assert c.execute("SELECT count(*) FROM provider_session_slot WHERE account_id=%s",
+        assert c.execute("SELECT count(*) FROM provider_session_slot WHERE login_key=%s",
                          (ACC,)).fetchone()[0] == 0
 
 
@@ -65,7 +65,7 @@ def test_stale_heartbeat_can_be_taken():
     _acquire("h1")
     with get_conn() as c:
         c.execute("UPDATE provider_session_slot SET heartbeat=now()-interval '60 seconds' "
-                  "WHERE account_id=%s", (ACC,))
+                  "WHERE login_key=%s", (ACC,))
         c.commit()
     s = _acquire("h2")
     assert s.holder == "h2"
@@ -75,7 +75,7 @@ def test_renew_lost_when_taken_over():
     s = _acquire("h1")
     with get_conn() as c:
         c.execute("UPDATE provider_session_slot SET holder='h2', heartbeat=now() "
-                  "WHERE account_id=%s", (ACC,))
+                  "WHERE login_key=%s", (ACC,))
         c.commit()
     with pytest.raises(SessionLost):
         SessionSlotAllocator.renew(s)
@@ -84,11 +84,11 @@ def test_renew_lost_when_taken_over():
 def test_old_holder_release_does_not_delete_new_owner():
     s = _acquire("h1")
     with get_conn() as c:
-        c.execute("UPDATE provider_session_slot SET holder='h2' WHERE account_id=%s", (ACC,))
+        c.execute("UPDATE provider_session_slot SET holder='h2' WHERE login_key=%s", (ACC,))
         c.commit()
     SessionSlotAllocator.release(s)
     with get_conn() as c:
-        assert c.execute("SELECT holder FROM provider_session_slot WHERE account_id=%s",
+        assert c.execute("SELECT holder FROM provider_session_slot WHERE login_key=%s",
                          (ACC,)).fetchone()[0] == "h2"
 
 

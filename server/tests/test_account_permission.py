@@ -53,7 +53,8 @@ def _call(attr, perm=None, st=None, _st_in_list=False):
     conn.execute.side_effect = _execute
     conn.__enter__.return_value = conn
     with patch("src.data_platform.security_master.SMClient", return_value=sm), \
-         patch("src.data_platform.db.get_conn", return_value=conn):
+         patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch("src.data_platform.iface_store.resolve_login_key", side_effect=lambda a: a):
         return account_allows(1, "600000.XSHG")
 
 
