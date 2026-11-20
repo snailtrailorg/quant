@@ -115,6 +115,15 @@ def collect():
                 break
         rows.append(('禁用表述', bad, why, not hit))
 
+    # 冻结裁定守护（V4/D10）：code 唯一身份含 Redis 键、不保留 bigint 身份。
+    # 防后续某轮审核/实现把它悄悄改回「进程 code / 数据面 id」双身份（2026-11-20 实录：A 审 P0-11 曾被误纳）。
+    rows.append(('冻结裁定', 'code 唯一身份（含 Redis 键）', 'D10/V4 不可动摇',
+                 'code 唯一身份' in req and 'Redis 键' in req))
+    rows.append(('冻结裁定', '不保留 bigint 身份', 'D10/V4 不可动摇',
+                 '不保留 bigint 身份' in req))
+    rows.append(('冻结裁定', 'C4 退役 hub:bars:{int}/td:cmd:{int}', '数据面键必须 code 化',
+                 'hub:bars:{int}:' in m0 and 'td:cmd:{int}' in m0))
+
     if DOC_M0.exists():
         m = re.search(r'## 6\..*?(?=\n## )', req, re.S)
         block = m.group(0) if m else ''
