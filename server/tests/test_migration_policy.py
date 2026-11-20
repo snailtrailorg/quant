@@ -117,7 +117,11 @@ def test_exclusion_is_consumed_not_decorative() -> None:
 
 def test_parse_declaration_forms() -> None:
     d = parse_declaration('# EXPAND-CONTRACT: phase=expand pair=0122\n"""x"""\n')
-    assert d == {"phase": "expand", "pair": "0122", "legacy": False, "reason": None}
+    assert d == {"phase": "expand", "pair": "0122", "legacy": False, "reason": None,
+                 "backup": None, "restore": None}
+    # offline-atomic 声明解析（治理第二合规通道）
+    d = parse_declaration('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n"""x"""\n')
+    assert d["phase"] == "offline-atomic" and d["reason"] == "r" and d["backup"] == "b" and d["restore"] == "rehearsed"
     d = parse_declaration('# EXPAND-CONTRACT: legacy reason="早期实例"\n"""x"""\n')
     assert d["legacy"] is True and d["reason"] == "早期实例" and d["phase"] is None
     d = parse_declaration('"""无声明"""\n')
@@ -679,3 +683,20 @@ def test_import_audit_guard_detects_poisons() -> None:
         "from __future__ import annotations\nimport re\nfrom pathlib import Path\n")
     assert not clean_bad, clean_bad
     assert clean_tops <= set(sys.stdlib_module_names), clean_tops
+
+def test_offline_atomic_requires_attestation(tmp_path) -> None:
+    """A 通道守门：offline-atomic 必须带全 attestation；带 pair 互斥；防成软绕过。"""
+    from src.data_platform.migration_policy import evaluate
+    body = '"""x"""\ndef upgrade() -> None:\n    op.drop_table("t")\n'
+    bad = tmp_path / "0200_bad.py"
+    bad.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r"\n' + body, encoding="utf-8")
+    ok, why = evaluate(bad, tmp_path)
+    assert not ok and "attestation" in why, why
+    good = tmp_path / "0201_good.py"
+    good.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
+    ok2, why2 = evaluate(good, tmp_path)
+    assert ok2, why2
+    mix = tmp_path / "0202_mix.py"
+    mix.write_text('# EXPAND-CONTRACT: phase=offline-atomic pair=0122 reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
+    ok3, why3 = evaluate(mix, tmp_path)
+    assert not ok3 and "pair" in why3, why3

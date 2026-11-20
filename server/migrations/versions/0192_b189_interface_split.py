@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: phase=offline-atomic reason="批189 M1-M5 离线维护窗原子迁移：停 web/celery/hub/exec + 全库备份校验 + 恢复已演练(2026-11-19)，同发布原子单元(M1-M5+wrapper+前端)" backup="release.yml backup_db ~998MB 校验后保留至冒烟通过(全数据0192库已实测)" restore=rehearsed
 """批189：接口三表 + code 身份（offline 单事务迁移）
 
 M0 v2 §2 / M1 v4 §3。依赖前置产物：

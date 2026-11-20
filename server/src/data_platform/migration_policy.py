@@ -272,16 +272,18 @@ def parse_declaration(text: str) -> dict[str, str | bool | None]:
     """
     decl: dict[str, str | bool | None] = {
         "phase": None, "pair": None, "legacy": False, "reason": None,
+        "backup": None, "restore": None,
     }
     first = text.splitlines()[0] if text else ""
     m = _DECL_RE.match(first)
     if not m:
         return decl
     body = m.group(1)
-    rm = re.search(r'reason\s*=\s*"([^"]*)"', body)
-    if rm:
-        decl["reason"] = rm.group(1)
-        body = (body[: rm.start()] + body[rm.end():])
+    for key in ("reason", "backup"):
+        km = re.search(key + r'\s*=\s*"([^"]*)"', body)
+        if km:
+            decl[key] = km.group(1)
+            body = (body[: km.start()] + body[km.end():])
     for tok in body.split():
         if tok == "legacy":
             decl["legacy"] = True
@@ -289,6 +291,8 @@ def parse_declaration(text: str) -> dict[str, str | bool | None]:
             decl["phase"] = tok[len("phase="):]
         elif tok.startswith("pair="):
             decl["pair"] = tok[len("pair="):]
+        elif tok.startswith("restore="):
+            decl["restore"] = tok[len("restore="):]
     return decl
 
 
@@ -324,6 +328,24 @@ def evaluate(path: Path | str, chain_dir: Path | str,
             f"「可见不阻断」，非冻结 legacy 直接拒；合规性归仓内闸门④"
         )
     phase = decl["phase"]
+    if phase == "offline-atomic":
+        # 离线原子迁移（治理第二合规通道，用户 2026-11-20 裁定 A）：滚动模型不适用——
+        # 离线维护窗全停+全库备份校验+恢复已演练，无「旧代码读新 schema」重叠窗，
+        # 回滚＝快照恢复+旧代码。必须带齐 attestation（防成 LEGACY_FROZEN 式软绕过）：
+        if decl.get("pair"):
+            return False, f"{name}: phase=offline-atomic 不得带 pair（与两步走互斥）"
+        miss = []
+        if not (decl.get("reason") or "").strip():
+            miss.append("reason=\"…\"")
+        if not (decl.get("backup") or "").strip():
+            miss.append("backup=\"…\"（备份产物指针）")
+        if (decl.get("restore") or "") != "rehearsed":
+            miss.append("restore=rehearsed")
+        if miss:
+            return False, (f"{name}: phase=offline-atomic 缺 attestation：{miss}——"
+                           f"离线原子迁移须显式声明 reason/backup/restore=rehearsed（机器不可验，属评审断言）")
+        return True, ("合规 offline-atomic（reason/backup/restore=rehearsed 齐备；"
+                      "离线维护窗原子迁移，回滚=快照恢复+旧代码）")
     if phase is None:
         first_hit = hits[0]
         return False, (
@@ -336,7 +358,7 @@ def evaluate(path: Path | str, chain_dir: Path | str,
             f"破坏性 op 须拆到后续发布里的 contract 步"
         )
     if phase != "contract":
-        return False, f"{name}: 未知 phase={phase!r}（合法值 expand/contract；历史遗留用 legacy）"
+        return False, f"{name}: 未知 phase={phase!r}（合法值 expand/contract/offline-atomic；历史遗留用 legacy）"
     pair = decl["pair"]
     if not pair:
         return False, f"{name}: phase=contract 须带 pair=<4 位 expand 迁移 id>"
