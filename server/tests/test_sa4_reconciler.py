@@ -294,7 +294,7 @@ class TestSa4Reconciler:
 # ── 批5：L3 扩面——期望表三源归一 + md-hub 三重熔断 + failed 态区分（D1/D2 v2.1）──
 
 
-HUB_UNIT = "quant-md-hub@4.service"   # 批 66b：期望源=DB 行驱动（数字实例名=行 id）
+HUB_UNIT = "quant-md-hub@md-4.service"   # M4：期望源=market_interface 行驱动（实例名=接口 code）
 
 
 def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
@@ -311,11 +311,11 @@ def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
     cur_running.fetchall.return_value = [(t,) for t in running_tids]
     cur_linked = MagicMock()
     cur_linked.fetchall.return_value = [(s,) for s in linked_sids]
-    cur_crypto = MagicMock()
-    cur_crypto.fetchall.return_value = [(c,) for c in crypto_ids]
+    cur_md = MagicMock()
+    cur_md.fetchall.return_value = [(f"md-{c}",) for c in crypto_ids]   # M4：md hub 期望=market_interface.code
     conn.execute.side_effect = lambda sql, *a: (
         cur_running if "status='running'" in sql
-        else cur_crypto if "trading_account" in sql
+        else cur_md if "market_interface" in sql
         else cur_linked)
     return conn
 
@@ -375,8 +375,8 @@ class TestDesiredUnits:
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             T._desired_units(conn)
         hub_sql = [c for c in conn.execute.call_args_list
-                   if "trading_account" in c.args[0]]
-        assert hub_sql, "未发 trading_account 查询"
+                   if "market_interface" in c.args[0]]
+        assert hub_sql, "未发 market_interface 查询"
         params = hub_sql[0].args[1][0]
         assert "xtp" in params, f"MD provider 白名单缺 xtp（会把账号 1 hub 周期停掉）: {params}"
         assert "emt_emq" in params   # legacy 双轨仍须保留
@@ -468,7 +468,7 @@ class TestL3HubReconcile:
 
     def test_lease_held_skips_without_backoff_write(self):
         """租约残留（对端实例在场）-> 让位跳过且不写退避计数（正常让位不受惩罚）。"""
-        valkey = _mk_valkey2(exists={"hub:lease:4": 1})   # 批 66b：per-account 租约键（@4 数字实例名）
+        valkey = _mk_valkey2(exists={"hub:lease:md-4": 1})   # M4：租约键按接口 code 分键
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey, sys_return=_cp())
         assert result.get("l3_guards", {}).get(HUB_UNIT) == "lease-held"
         p_sys.assert_not_called()
@@ -476,7 +476,7 @@ class TestL3HubReconcile:
 
     def test_maintenance_marker_skips_and_alerts(self):
         """维护标记在场 -> 跳过 + 告警（写去重键，人工维护窗不打扰）。"""
-        valkey = _mk_valkey2(exists={"quant:maintenance:md-hub:4": 1})   # per-account 维护键
+        valkey = _mk_valkey2(exists={"quant:maintenance:md-hub:md-4": 1})   # M4：维护键按接口 code
         result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey)
         assert result.get("l3_guards", {}).get(HUB_UNIT) == "maintenance"
         p_sys.assert_not_called()

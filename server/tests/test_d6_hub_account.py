@@ -1,7 +1,13 @@
 """D6 加密 per-account hub 部署测试：键 account 化 + SA4 期望态按 account + per-account 维护键。"""
+import pytest
 from unittest.mock import MagicMock
 
 from src.md_hub.parts import _key, LEASE_KEY
+
+
+@pytest.fixture(autouse=True)
+def _no_td_exec(monkeypatch):
+    monkeypatch.setattr("src.data_platform.config_store.exec_interface_codes", lambda: [])
 
 
 class TestKeyAccount:
@@ -23,8 +29,8 @@ class TestDesiredUnitsCryptoHub:
         conn = sa4._mk_conn2(crypto_ids=[3, 7])
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             desired = T._desired_units(conn)
-        assert ("quant-md-hub@3.service", "hub") in desired
-        assert ("quant-md-hub@7.service", "hub") in desired
+        assert ("quant-md-hub@md-3.service", "hub") in desired
+        assert ("quant-md-hub@md-7.service", "hub") in desired
         assert not any(s == "builtin" for _, s in desired)   # builtin 常开条目已退役（66b）
 
     def test_no_trading_account_no_hub(self):
@@ -45,7 +51,7 @@ class TestDesiredUnitsCryptoHub:
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             T._desired_units(conn)
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        hub_sql = [s for s in sqls if "trading_account" in s]
+        hub_sql = [s for s in sqls if "market_interface" in s]
         assert hub_sql and not any("market='crypto'" in s for s in hub_sql)
 
 

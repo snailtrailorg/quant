@@ -2273,7 +2273,8 @@ def sa4_reconciler():
             # md-hub 前置熔断（D1 前两重）：租约（Valkey 不可达 fail-closed）/维护标记。
             # 批 66b：期望源统一 source="hub"，按 account_id 分键（从 unit 名 quant-md-hub@{account_id}.service 解析）
             if source == "hub":
-                vid = int(unit.split("@", 1)[1].rsplit(".service", 1)[0])
+                # M4：实例名=接口 code（md-xtp 等），租约/维护键按 code 分键（非 int id）
+                vid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
                 ok, reason = _sa4_hub_guards(r, vid)
                 if not ok:
                     if reason == "maintenance":
@@ -2340,8 +2341,8 @@ def sa4_reconciler():
         for unit in actives:
             if unit.startswith("quant-md-hub@"):
                 vid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
-                if not vid.isdigit() or unit in desired_units:
-                    continue   # 非数字实例名=遗留过渡态（deploy 退役对象），或仍在期望表
+                if vid == "quant" or unit in desired_units:
+                    continue   # @quant 遗留过渡态由 deploy 波次退役；仍在期望表=健康
                 try:
                     _sa4_systemctl("stop", unit)
                     result.setdefault("l3_stopped", []).append(unit)
