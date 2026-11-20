@@ -123,6 +123,13 @@ def collect():
                  '不保留 bigint 身份' in req))
     rows.append(('冻结裁定', 'C4 退役 hub:bars:{int}/td:cmd:{int}', '数据面键必须 code 化',
                  'hub:bars:{int}:' in m0 and 'td:cmd:{int}' in m0))
+    # 防「双写旧键兼容」类建议回流：M3 规格不得再出现"兼容期双写"旧键方案
+    m3text = (ROOT / 'flow/任务/批189-M3-进程与部署.md').read_text(encoding='utf-8') \
+        if (ROOT / 'flow/任务/批189-M3-进程与部署.md').exists() else ''
+    # M3 心跳只写新键：§4 目标态行须声明「只写新键」，且不得有「+ 旧键 ... 双写」的目标描述。
+    # 用「只写新键」关键词守目标态，不用全文零容忍（驳回说明合法地提到旧方案）。
+    rows.append(('冻结裁定', 'M3 心跳只写新键', 'C4 退役 + D15 不做双写',
+                 '只写新键' in m3text and '单一键族' in m3text))
 
     if DOC_M0.exists():
         m = re.search(r'## 6\..*?(?=\n## )', req, re.S)
