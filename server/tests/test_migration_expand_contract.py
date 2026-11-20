@@ -4,7 +4,8 @@
 步 5 单测的纪律闸门；prod 侧机械强制点＝`release.yml` 阶段 4（判定真源同一模块）。
 
 钉什么：
-① 非 legacy 白名单文件命中回滚安全类 op ⇒ 唯一合规声明＝两步走的 phase=contract
+① 非 legacy/offline-atomic 命名空间文件命中回滚安全类 op ⇒ 合规＝两步走 phase=contract
+  **或** 名单内 offline-atomic（离线维护窗原子迁移；仅全新文件+attestation，见 migration_policy）
   （pair 已上产且声明 expand）；phase=expand 携带任何命中 ⇒ 红（expand 只有「无命中」
   一种合法形态）。白名单 legacy 文件归 ④ 管（消除口径冲突）。
 ② phase=contract 的 pair 必须真实存在且声明 expand（本版目录即全链）。

@@ -684,19 +684,39 @@ def test_import_audit_guard_detects_poisons() -> None:
     assert not clean_bad, clean_bad
     assert clean_tops <= set(sys.stdlib_module_names), clean_tops
 
-def test_offline_atomic_requires_attestation(tmp_path) -> None:
-    """A 通道守门：offline-atomic 必须带全 attestation；带 pair 互斥；防成软绕过。"""
-    from src.data_platform.migration_policy import evaluate
+def test_offline_atomic_requires_attestation(tmp_path, monkeypatch) -> None:
+    """A 通道守门：①非名单拒（禁自声明软绕过）②入名单后 attestation/restore/pair 逐项拒。"""
+    import src.data_platform.migration_policy as mp
     body = '"""x"""\ndef upgrade() -> None:\n    op.drop_table("t")\n'
-    bad = tmp_path / "0200_bad.py"
+    nm = tmp_path / "0200_nm.py"
+    nm.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
+    ok, why = mp.evaluate(nm, tmp_path)
+    assert not ok and "名单" in why, why
+
+    monkeypatch.setattr(mp, "OFFLINE_ATOMIC_FROZEN",
+                        frozenset({"0201_bad.py", "0202_good.py", "0203_mix.py", "0204_r.py", "0205_p.py", "0206_prev.py"}))
+    bad = tmp_path / "0201_bad.py"
     bad.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r"\n' + body, encoding="utf-8")
-    ok, why = evaluate(bad, tmp_path)
+    ok, why = mp.evaluate(bad, tmp_path)
     assert not ok and "attestation" in why, why
-    good = tmp_path / "0201_good.py"
+    good = tmp_path / "0202_good.py"
     good.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
-    ok2, why2 = evaluate(good, tmp_path)
-    assert ok2, why2
-    mix = tmp_path / "0202_mix.py"
+    ok, why = mp.evaluate(good, tmp_path)
+    assert ok, why
+    mix = tmp_path / "0203_mix.py"
     mix.write_text('# EXPAND-CONTRACT: phase=offline-atomic pair=0122 reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
-    ok3, why3 = evaluate(mix, tmp_path)
-    assert not ok3 and "pair" in why3, why3
+    ok, why = mp.evaluate(mix, tmp_path)
+    assert not ok and "pair" in why, why
+    rp = tmp_path / "0204_r.py"
+    rp.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=planned\n' + body, encoding="utf-8")
+    assert not mp.evaluate(rp, tmp_path)[0]
+    ep = tmp_path / "0205_p.py"
+    ep.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
+    assert not mp.evaluate(ep, tmp_path)[0]
+    # 仅限全新迁移：同名存在于 prev_dir ⇒ 拒（不得改造已部署迁移）
+    prev = tmp_path / "prev"; prev.mkdir()
+    (prev / "0206_prev.py").write_text(body, encoding="utf-8")
+    pv = tmp_path / "0206_prev.py"
+    pv.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
+    ok, why = mp.evaluate(pv, tmp_path, prev)
+    assert not ok and "全新" in why, why

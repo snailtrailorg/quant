@@ -1,6 +1,11 @@
 # EXPAND-CONTRACT 破坏性迁移判定 —— 单一真源模块（批 111 产出 4）。
 """破坏性 DDL 两步走（expand → contract）的**唯一判定实现**（批 111，v2.3.1）。
 
+批189 增**第二合规通道 phase=offline-atomic**（离线维护窗原子迁移，用户 2026-11-20 裁定 A）：
+仅对 `OFFLINE_ATOMIC_FROZEN` 名单内、且为**全新**的文件生效，须带 reason/backup/restore=rehearsed
+attestation（机器不可验＝评审断言），且部署门按「命中」处理（rc=1 ⇒ allow_contract + auto_rollback_disabled）。
+禁用自声明（不在名单即拒）——防重蹈 LEGACY_FROZEN 软绕过。
+
 ## 职责（只有这一个实现，别处不得复刻判定逻辑）
 
 1. **判定表**：upgrade 段内的回滚安全类 op（宽口径命中）+ 显式排除（**减法**——摘除被豁免
@@ -169,6 +174,12 @@ LEGACY_FROZEN: frozenset[str] = frozenset({
     "0114_drop_shadow_quality.py",
 })
 
+# 离线原子迁移名单（用户 2026-11-20 裁定 A）：**唯一真源**，同 LEGACY_FROZEN 纪律——名 keyed、
+# 只减不增、新迁移须先经双盲审再入名单。offline-atomic 只对名单内**全新**迁移生效，防自声明软绕过。
+OFFLINE_ATOMIC_FROZEN: frozenset[str] = frozenset({
+    "0192_b189_interface_split.py",
+})
+
 _DECL_RE = re.compile(r"^#\s*EXPAND-CONTRACT:\s*(.*)$")
 _UPGRADE_RE = re.compile(r"^def\s+upgrade\s*\(")
 _DOWNGRADE_RE = re.compile(r"^def\s+downgrade\s*\(")
@@ -318,6 +329,9 @@ def evaluate(path: Path | str, chain_dir: Path | str,
     if decl["legacy"] and (decl["phase"] or decl["pair"]):
         return False, f"{name}: legacy 与 phase/pair 不得同现（互斥声明）"
 
+    if decl["phase"] == "offline-atomic" and decl["pair"]:
+        return False, f"{name}: phase=offline-atomic 不得带 pair（与两步走互斥）"
+
     if not hits:
         return True, "无回滚安全类命中"
 
@@ -331,7 +345,13 @@ def evaluate(path: Path | str, chain_dir: Path | str,
     if phase == "offline-atomic":
         # 离线原子迁移（治理第二合规通道，用户 2026-11-20 裁定 A）：滚动模型不适用——
         # 离线维护窗全停+全库备份校验+恢复已演练，无「旧代码读新 schema」重叠窗，
-        # 回滚＝快照恢复+旧代码。必须带齐 attestation（防成 LEGACY_FROZEN 式软绕过）：
+        # 回滚＝快照恢复+旧代码。**双重硬约束防软绕过**：①名在 OFFLINE_ATOMIC_FROZEN
+        # 名单（禁自声明）②仅限全新迁移（prev 不得已存在，禁改造已部署迁移）。
+        if name not in OFFLINE_ATOMIC_FROZEN:
+            return False, (f"{name}: phase=offline-atomic 未在 OFFLINE_ATOMIC_FROZEN 名单——"
+                           f"离线原子仅限已双盲评审并登记的迁移（禁自声明软绕过）")
+        if prev_dir is not None and (Path(prev_dir) / name).is_file():
+            return False, f"{name}: offline-atomic 仅限全新迁移（不得把已部署迁移就地改造为破坏性）"
         if decl.get("pair"):
             return False, f"{name}: phase=offline-atomic 不得带 pair（与两步走互斥）"
         miss = []
@@ -350,7 +370,7 @@ def evaluate(path: Path | str, chain_dir: Path | str,
         first_hit = hits[0]
         return False, (
             f"{name}: 未声明 EXPAND-CONTRACT 而命中回滚安全类 op（{first_hit[1]}：{first_hit[2]}）——"
-            f"唯一合规声明＝两步走的 phase=contract（pair 指向已上产的 expand）"
+            f"唯一合规声明＝两步走 phase=contract（pair 指向已上产 expand）或名单内 offline-atomic（离线维护窗原子迁移）"
         )
     if phase == "expand":
         return False, (
@@ -470,7 +490,15 @@ def _classify_managed(new_dir: Path | str, prev_dir: Path | str | None,
             continue
         ok, why = evaluate(new_path / name, new_path, prev_path)
         if ok:
-            lines.append(f"✓ {name}: {why}")
+            if decl["phase"] == "offline-atomic":
+                # 离线原子=破坏性且不可自动回滚：部署门按「命中」处理（rc=1）⇒ 触发
+                # allow_contract 逃生门 + auto_rollback_disabled（release.yml 阶段4 既有语义），
+                # 绝不能让 rc=0 使 rescue(6-8) 把旧代码翻到新 schema 上（盲审 A P0-2 / B P1-2）。
+                rejects.append(
+                    f"✗ 破坏性 DDL 命中: {name}——offline-atomic 破坏性迁移(不可自动回滚)："
+                    f"须 allow_contract 放行 + auto_rollback_disabled；回滚=快照恢复+旧代码")
+            else:
+                lines.append(f"✓ {name}: {why}")
         else:
             rejects.append(f"✗ 破坏性 DDL 命中: {name}——{why}")
     return lines, rejects
