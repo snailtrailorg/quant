@@ -531,6 +531,13 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     # 批 76（F2）：新增 sticky_cause 成因键——"ts_gap"/"seq_gap"/"untrusted"，决定自动化档位
     # （仅 seq_gap 走衔接自动解；真坏两类人工解）。判据仍是 sticky 布尔（frozen_allows 零改动）。
     frozen: dict = {"now": False, "sticky": False, "sticky_cause": None}
+    # M4：本任务消费的行情键 = td_md_map 主 md_code（I6 映射反查）；无映射回落 td_code（兼容/单账号）
+    try:
+        from src.data_platform.iface_store import list_mappings
+        _maps = list_mappings("td", account_id)
+        _md_code = _maps[0]["md_code"] if _maps else account_id
+    except Exception:
+        _md_code = account_id
     _orig_send = adapter.send_order
     ctx: dict = {}   # hub_worker.run 的上下文（buy_ok 在 run 内注入）
 
@@ -566,7 +573,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         _reconcile()   # B-P1-1：TD 在线才有对账意义——窗关启动跳过，窗开沿 connect 后由 TD 重连沿触发
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
-        "account_id": account_id, "market": iface.get("market"),   # 批 66c：worker 时段门/缺口检测 per-market 真源（接口行）
+        "account_id": account_id, "md_code": _md_code, "market": iface.get("market"),   # md_code=行情键（M4）；market per-market 真源
         "strategy": strategy, "adapter": adapter, "event_engine": ee, "exec_port": exec_port,
         "session_slot": rt.get("session_slot"),
         "td_api": td_api, "history": history, "frozen": frozen,

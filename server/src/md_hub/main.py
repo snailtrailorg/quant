@@ -56,7 +56,7 @@ def _guard(name):
 
 
 BAR_STREAM_PREFIX = "hub:bars:"
-HB_KEY = "quant:hb:md-hub"
+HB_KEY = "iface:hb:md"
 # 批 66c：maxlen 缺省从 MarketSpec channels 读（消声明孤岛——盲审 B-P2-5：注释宣称同源而值
 # 双份=静默漂移温床）；≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
 def _stream_maxlen(market: str) -> int:
@@ -148,7 +148,7 @@ def main() -> None:
 
     def _on_term(signum, frame):   # 停止来源可见化（部署波/人工 stop 都会留日志）
         logger.warning("收到 SIGTERM（hub pid=%s account=%s）——优雅退出",
-                       os.getpid(), os.environ.get("ACCOUNT_ID", ""))
+                       os.getpid(), os.environ.get("MD_CODE", ""))
         if callable(_prev_term):
             _prev_term(signum, frame)
         else:   # 无人接管（SIG_DFL/SIG_IGN）：必须自行退出，否则吞掉停止信号→systemd 90s 后 SIGKILL
@@ -163,16 +163,15 @@ def main() -> None:
     r = make_valkey()
 
     # ——— boot 守卫（批 66a a′：SET NX EX 30 抢自己的键——拆的是 M5 仲裁复杂度，续租原语保留）———
-    # D6：account_id = ACCOUNT_ID（= trading_account.id，键分叉用；A股实例名 "quant" 非数字 → None 键不分 account）。
-    # 与 HUB_INTERFACE_ROW（账号选择，A股过渡 concrete unit 注入）拆开——二者语义不同，复用会污染（盲审 B P0/P3）
-    _account_env = os.environ.get("ACCOUNT_ID", "")
-    account_id = int(_account_env) if _account_env.isdigit() else None
-    if account_id is None:
-        # D26 账号级 hub（批 66b）：实例名=接口行 id（数字）——裸键/None account 形态退役。
-        # @quant 过渡实例以本代码启动即 78 Failed（预期态：新 unit @{id} 由 SA4 新期望源拉起，
-        # 旧 @quant 由 release 波次 mask——波次清单=DB 驱动新名单，不重启 @quant）。
-        logger.error("ACCOUNT_ID 非数字（实例名须=接口行 id，D26 账号级 hub），exit 78")
+    # M4（批189）：身份 = MD_CODE（行情接口 code，如 md-xtp）。account_id 变量承载 md_code，
+    # 下游 parts 键族（lease/latest_tick/heartbeat/stream）通用形参直接复用。
+    # legacy @quant concrete（无 MD_CODE）→ exit 78 Prevent，永不复活。
+    import re as _re
+    _code_env = os.environ.get("MD_CODE", "")
+    if not _re.match(r"^md-[a-z0-9-]+$", _code_env or ""):
+        logger.error("MD_CODE 缺失/非法: %r（须 ^md-[a-z0-9-]+$），exit 78", _code_env)
         raise SystemExit(78)
+    account_id = _code_env
     market = "astock"   # 会话模型分支（加密接入批）：iface 读取后更新为 iface["market"]
     instance_name = os.environ.get("INSTANCE_NAME", "")   # 仅日志标识（a′ 后无仲裁用途）
     my_uuid, gen = _lease_boot(r, account_id)
@@ -237,7 +236,7 @@ def main() -> None:
             "untrusted": int(bar.get("untrusted", False)),
             "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
             "volume": bar["volume"], "amount": bar["amount"], "tick_count": bar["tick_count"],
-            "account_id": account_id,
+            "md_code": account_id,
         }
         return m
 
@@ -246,14 +245,10 @@ def main() -> None:
     #   HUB_INTERFACE_ROW 在场优先（A 股 @quant 过渡期由 concrete unit 注入——禁入共享模板，
     #   会污染加密 @4/@5 实例；66b unit 换名后随 concrete unit 退役）
     #   → 否则 ACCOUNT_ID 数字（加密 per-account 直取）→ 皆空 = EX_CONFIG(78)
-    interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
+    row_id = account_id   # md_code
     try:
-        row_id = int(interface_row) if interface_row else account_id
-        if row_id is None:
-            raise ValueError("row_id 无来源（HUB_INTERFACE_ROW 与 ACCOUNT_ID 均空）——D26 #6 缺省选行已退役")
         from src.strategy_framework.broker import get_interface_row
-        # 指定行缺必填凭证/解密失败/未注册 provider均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）；
-        # md_only=True：MD 数据面空凭证，跳过 required_fields 校验（盲审 B P0）
+        # md_only=True：MD 数据面空凭证，跳过 required_fields 校验
         iface = get_interface_row(row_id, md_only=True)
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
         from src.strategy_framework.md_gateway import create_md_gateway
@@ -265,7 +260,7 @@ def main() -> None:
         try:
             from src.data_platform.db import get_conn as _gc
             with _gc() as _c:
-                _r = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (row_id,)).fetchone()
+                _r = _c.execute("SELECT impl FROM market_interface WHERE code=%s", (row_id,)).fetchone()
             _impl = (_r[0] if _r else "legacy")
         except Exception:   # noqa: BLE001 —— 读不到按 legacy
             _impl = "legacy"
@@ -282,7 +277,7 @@ def main() -> None:
         md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
         md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）
     except Exception as e:
-        logger.error("行情网关初始化失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
+        logger.error("行情网关初始化失败（md_code=%s），exit 78: %s", row_id, e)
         raise SystemExit(78)
 
     # 批 64+66a：对账 trading_account 行变更——Web 拖拽/改行 bump cfg:version，provider 或
@@ -344,7 +339,8 @@ def main() -> None:
                     from src.data_platform.schema import to_vt_symbol
                     cur = conn.execute(
                         "SELECT DISTINCT symbol FROM position_snapshot "
-                        "WHERE volume>0 AND account_id=%s", (account_id,))
+                        "WHERE volume>0 AND account_code IN "
+                        "(SELECT td_code FROM td_md_map WHERE md_code=%s)", (account_id,))
                     pos_rows = {to_vt_symbol(x[0]) for x in cur.fetchall() if x[0]}
                     if pos_rows:
                         rows |= pos_rows

@@ -26,7 +26,7 @@ from src.data_platform.log_sink import exit_process
 logger = logging.getLogger("hub_worker")
 
 BAR_STREAM_PREFIX = "hub:bars:"   # 前缀常量（终态键 hub:bars:{account_id}:{symbol}——bar_stream_key 单点构造）
-HB_KEY = "quant:hb:md-hub"        # 前缀常量（per-account 键 quant:hb:md-hub:{account_id}——_hub_alive 单点构造）
+HB_KEY = "iface:hb:md"            # 前缀常量（per-md 键 iface:hb:md:{md_code}——_hub_alive 单点构造，M4）
 STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 
 
@@ -112,7 +112,7 @@ def _account_mismatch(fields: dict, account_id) -> bool:
     if account_id is None:
         return True
     try:
-        return int(fields.get("account_id", -1)) != account_id
+        return str(fields.get("md_code", "")) != str(account_id)
     except (TypeError, ValueError):
         return True
 # 批 2 骨架三件套（与 hub 同款；_valkey 保留别名供测试/冒烟注入 fake）
@@ -453,16 +453,17 @@ def run(ctx: dict) -> None:
 
     def _in_mkt_session(now=None) -> bool:
         return in_session(market, now)
-    account_id = ctx.get("account_id")     # D26 批 66b：per-account 流键/同源校验真源（全市场；上游 NOT NULL+main 层兜底）
+    account_id = ctx.get("account_id")     # 下单/规则身份（td_code）
     if account_id is None:
-        raise ValueError("ctx.account_id required——裸键形态已退役（批 66b；上游 live_task.account_id NOT NULL）")
+        raise ValueError("ctx.account_id required（td_code）")
+    md_code = ctx.get("md_code") or account_id   # 行情键身份（md_code；缺省回落 account_id 兼容测试）
     strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
     exec_port = ctx["exec_port"]      # 172b：事件推送走 ExecutionPort（必填，禁回落直注册）
     td_api = ctx.get("td_api")
     history = ctx["history"]
     frozen = ctx["frozen"]            # 与 _run_hub_mode 的 send_order 网关共享同一 dict（评审 C2）
-    stream = bar_stream_key(symbol, account_id)
+    stream = bar_stream_key(symbol, md_code)
     gname = f"task-{tid}"
     cname = f"w-{os.getpid()}"
     state = BarMsgState()
@@ -498,7 +499,7 @@ def run(ctx: dict) -> None:
 
     # P0-3 配套：max_ts 持久化恢复（R-DL1 跨重启去重——曾进程内存失忆）
     # 批 66b：水位键全市场统一含 account（旧 A股裸水位键失联=重新暖机，部署窗外切换无害）
-    _mts_key = f"hub:worker:max_ts:{account_id}:{symbol}"
+    _mts_key = f"hub:worker:max_ts:{md_code}:{symbol}"
     try:
         _saved = r.get(_mts_key)
         if _saved:
@@ -600,10 +601,10 @@ def run(ctx: dict) -> None:
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
         # D26 批 66b 同源校验（全市场）：流消息必带本 account_id（payload 契约），跨源 fail-fast 不落地
-        if _account_mismatch(fields, account_id):
+        if _account_mismatch(fields, md_code):
             stats["dropped_cross"] += 1
-            logger.error("跨源消息拒绝（account_id=%s != %s）: %s",
-                         fields.get("account_id"), account_id, fields.get("ts"))
+            logger.error("跨源消息拒绝（md_code=%s != %s）: %s",
+                         fields.get("md_code"), md_code, fields.get("ts"))
             return
         ts_key = _epoch_key(fields.get("ts", ""))
         # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃（epoch 键——跨表示同刻同键）
@@ -744,7 +745,7 @@ def run(ctx: dict) -> None:
         emergency_drain_s = float(get_retry_config().get("drain_timeout_s") or 5)
     except Exception:
         emergency_drain_s = 5.0
-    emergency = EmergencyWorker(adapter=adapter, td_api=td_api, account_id=account_id,
+    emergency = EmergencyWorker(adapter=adapter, td_api=td_api, account_id=account_id, quote_md_code=md_code,
                                 tid=tid, closing=closing)
 
     def _drain_before_exit(where: str) -> None:
@@ -798,7 +799,7 @@ def run(ctx: dict) -> None:
     def _blind_watch():
         """盲视观测（S6）：frozen["now"] 只喂心跳/告警，下单判定由 send_order 时刻的 buy_ok 做。"""
         sess_now = _in_mkt_session()
-        hub_alive = _hub_alive(r, account_id)
+        hub_alive = _hub_alive(r, md_code)
         bar_stale = (sess_now and stats["sess_bar_wall"]
                      and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)
         new_dyn = (not hub_alive) or bool(bar_stale)

@@ -13,12 +13,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def licensed(account_id: int, symbol: str) -> bool:
+def _data_license(account: str) -> str:
+    """data_license 真源：md-* 取 market_interface.params（M4）；其余走 AccountPermSpec（TD）。"""
+    if str(account).startswith("md-"):
+        import json
+        from src.data_platform.db import get_conn
+        with get_conn() as c:
+            row = c.execute("SELECT params FROM market_interface WHERE code=%s", (account,)).fetchone()
+        if not row:
+            return ""
+        p = row[0] or {}
+        if isinstance(p, str):
+            p = json.loads(p)
+        return str(p.get("data_license") or "")
     from src.data_platform import specs
+    return str(specs.AccountPermSpec.of(account).data_license or "")
 
+
+def licensed(account_id: int, symbol: str) -> bool:
     try:
-        perm = specs.AccountPermSpec.of(account_id)
-        raw = (perm.data_license or "").strip()
+        raw = _data_license(account_id).strip()
         if not raw:
             return True
         tokens = {t.strip() for t in raw.split(",") if t.strip()}
