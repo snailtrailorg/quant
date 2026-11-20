@@ -694,7 +694,7 @@ def test_offline_atomic_requires_attestation(tmp_path, monkeypatch) -> None:
     assert not ok and "名单" in why, why
 
     monkeypatch.setattr(mp, "OFFLINE_ATOMIC_FROZEN",
-                        frozenset({"0201_bad.py", "0202_good.py", "0203_mix.py", "0204_r.py", "0205_p.py", "0206_prev.py"}))
+                        frozenset({"0201_bad.py", "0202_good.py", "0203_mix.py", "0204_r.py", "0205_p.py", "0206_prev.py", "0207_e.py"}))
     bad = tmp_path / "0201_bad.py"
     bad.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r"\n' + body, encoding="utf-8")
     ok, why = mp.evaluate(bad, tmp_path)
@@ -713,6 +713,10 @@ def test_offline_atomic_requires_attestation(tmp_path, monkeypatch) -> None:
     ep = tmp_path / "0205_p.py"
     ep.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
     assert not mp.evaluate(ep, tmp_path)[0]
+    eb = tmp_path / "0207_e.py"
+    eb.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="" restore=rehearsed\n' + body, encoding="utf-8")
+    ok, why = mp.evaluate(eb, tmp_path)
+    assert not ok and "attestation" in why, why
     # 仅限全新迁移：同名存在于 prev_dir ⇒ 拒（不得改造已部署迁移）
     prev = tmp_path / "prev"; prev.mkdir()
     (prev / "0206_prev.py").write_text(body, encoding="utf-8")
@@ -720,3 +724,18 @@ def test_offline_atomic_requires_attestation(tmp_path, monkeypatch) -> None:
     pv.write_text('# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n' + body, encoding="utf-8")
     ok, why = mp.evaluate(pv, tmp_path, prev)
     assert not ok and "全新" in why, why
+
+def test_check_release_offline_atomic_rc(tmp_path, monkeypatch) -> None:
+    """部署门钉 P0-2：破坏性 offline-atomic ⇒ rc=1（触发 allow_contract+auto_rollback_disabled）；
+    名单内但零破坏 op 的文件不误报（rc=0）。"""
+    import src.data_platform.migration_policy as mp
+    monkeypatch.setattr(mp, "OFFLINE_ATOMIC_FROZEN", frozenset({"0300_x.py"}))
+    new = tmp_path / "new"; new.mkdir()
+    prev = tmp_path / "prev"; prev.mkdir()
+    hdr = '# EXPAND-CONTRACT: phase=offline-atomic reason="r" backup="b" restore=rehearsed\n'
+    (new / "0300_x.py").write_text(hdr + '"""x"""\ndef upgrade():\n    op.drop_table("t")\n', encoding="utf-8")
+    rc, _ = mp.check_release(new, prev)
+    assert rc == 1, "破坏性离线原子须 rc=1（不能 rc=0 使 rescue 翻旧代码）"
+    (new / "0300_x.py").write_text(hdr + '"""x"""\ndef upgrade():\n    op.create_table("t")\n', encoding="utf-8")
+    rc2, _ = mp.check_release(new, prev)
+    assert rc2 == 0, "零破坏 op 的名单文件不得误报命中"

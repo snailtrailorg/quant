@@ -279,7 +279,7 @@ def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
 def parse_declaration(text: str) -> dict[str, str | bool | None]:
     """解析文件**第 1 行**的 `# EXPAND-CONTRACT: ...` 声明。
 
-    返回 {"phase": str|None, "pair": str|None, "legacy": bool, "reason": str|None}。
+    返回 {phase,pair,legacy,reason,backup,restore}；offline-atomic 用 reason/backup/restore=rehearsed。
     """
     decl: dict[str, str | bool | None] = {
         "phase": None, "pair": None, "legacy": False, "reason": None,
@@ -490,7 +490,7 @@ def _classify_managed(new_dir: Path | str, prev_dir: Path | str | None,
             continue
         ok, why = evaluate(new_path / name, new_path, prev_path)
         if ok:
-            if decl["phase"] == "offline-atomic":
+            if decl["phase"] == "offline-atomic" and scan_unsafe_lines(text):
                 # 离线原子=破坏性且不可自动回滚：部署门按「命中」处理（rc=1）⇒ 触发
                 # allow_contract 逃生门 + auto_rollback_disabled（release.yml 阶段4 既有语义），
                 # 绝不能让 rc=0 使 rescue(6-8) 把旧代码翻到新 schema 上（盲审 A P0-2 / B P1-2）。
