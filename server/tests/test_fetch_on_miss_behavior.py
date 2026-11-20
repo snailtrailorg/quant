@@ -110,8 +110,8 @@ class TestFetchOnMissBehavior:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
                 conn.execute(
-                    "INSERT INTO data_source (name, provider, market, credentials_encrypted, "
-                    "params, capabilities, position, enabled) VALUES (%s, %s, 'astock', NULL, "
+                    "INSERT INTO data_source (code, name, provider, market, credentials_encrypted, "
+                    "params, capabilities, position, enabled) VALUES ('ds-stub-miss', %s, %s, 'astock', NULL, "
                     "'{}'::jsonb, ARRAY['bar_daily'], -100, true)", (DS_ROW_NAME, STUB_PROVIDER))
                 conn.commit()
 
@@ -149,8 +149,8 @@ class TestFetchOnMissBehavior:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
                 conn.execute(
-                    "INSERT INTO data_source (name, provider, market, credentials_encrypted, "
-                    "params, capabilities, position, enabled) VALUES (%s, %s, 'astock', NULL, "
+                    "INSERT INTO data_source (code, name, provider, market, credentials_encrypted, "
+                    "params, capabilities, position, enabled) VALUES ('ds-stub-miss', %s, %s, 'astock', NULL, "
                     "'{}'::jsonb, ARRAY['bar_daily'], -100, true)", (DS_ROW_NAME, STUB_PROVIDER))
                 conn.commit()
             from src.data_platform.databus import DataBus

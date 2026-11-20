@@ -275,8 +275,8 @@ def _install_stub_source():
     _ds._REGISTRY[STUB_PROVIDER] = _StubDataSource
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO data_source (name, provider, market, capabilities, position, enabled) "
-            "VALUES ('批83b测试桩', %s, 'astock', '{hist_quote,ref_data}', 99, true)",
+            "INSERT INTO data_source (code, name, provider, market, capabilities, position, enabled) "
+            "VALUES ('ds-stub-b83b', '批83b测试桩', %s, 'astock', '{hist_quote,ref_data}', 99, true)",
             (STUB_PROVIDER,))
         conn.commit()
 
