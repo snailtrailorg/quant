@@ -46,7 +46,7 @@ class _Api:
 
 
 def _slot():
-    return SessionSlot(account_id=1, provider="xtp", role="td", terminal_id=2,
+    return SessionSlot(login_key=1, provider="xtp", role="td", terminal_id=2,
                        order_prefix="t1:e1000:", window_open=True, tid=1,
                        holder="h", boot_epoch=1000)
 
@@ -278,6 +278,9 @@ def test_td_registry_plugin_impl_builds_port(monkeypatch):
             return _Cur()
 
     monkeypatch.setattr("src.data_platform.db.get_conn", lambda: _Conn())
+    monkeypatch.setattr("src.data_platform.iface_store.get_td_identity",
+                        lambda c: {"impl": "plugin", "login_key": "xtp|a", "provider": "xtp", "code": str(c)})
+    monkeypatch.setattr("src.data_platform.iface_store.td_sibling_codes", lambda lk: ["1"])
     monkeypatch.setattr("src.strategy_runner.session_slot.SessionSlotAllocator.acquire",
                         classmethod(lambda cls, *a, **k: SessionSlot(1, "xtp", "td", 2, "t1:e1:", True, 1, "h", 1)))
     monkeypatch.setattr("src.strategy_runner.td_registry.build_xtp_setting",
