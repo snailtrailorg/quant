@@ -20,7 +20,7 @@ def list_paper_task_rows(status: str | None = None) -> list[tuple]:
     """列纸上任务原始行（mode='paper'）——`GET /api/paper-trade` 的数据面。
 
     返回列序：id, name, strategy_id, symbol, params, status,
-    account_id, initial_capital, created_at, account_name（JOIN trading_account 取名）。
+    account_code, initial_capital, created_at, account_name（JOIN trade_interface 取名）。
     """
     from src.data_platform.db import get_conn
     _base = ("SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "

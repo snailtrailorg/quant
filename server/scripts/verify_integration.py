@@ -117,16 +117,16 @@ def verify_broker_config():
     from src.data_platform.db import get_conn
     try:
         with get_conn() as conn:
-            cur = conn.execute("SELECT id, name, provider, enabled FROM trading_account "
+            cur = conn.execute("SELECT code, name, provider, enabled FROM trade_interface "
                                "WHERE provider='xtp'")
             rows = cur.fetchall()
             if rows:
                 check("XTP broker 配置", True,
-                      "; ".join(f"id={r[0]} name={r[1]} enabled={r[3]}" for r in rows))
+                      "; ".join(f"code={r[0]} name={r[1]} enabled={r[3]}" for r in rows))
             else:
-                check("XTP broker 配置", False, "trading_account 无 xtp 行（用 .env 备选）")
+                check("XTP broker 配置", False, "trade_interface 无 xtp 行（用 .env 备选）")
     except Exception as e:
-        check("trading_account 查询", False, str(e))
+        check("trade_interface 查询", False, str(e))
 
 
 def verify_services():
