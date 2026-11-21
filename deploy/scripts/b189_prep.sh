@@ -32,8 +32,8 @@ esac
 
 echo "== [2] 全库备份 + 可恢复性校验 =="
 BK=/var/lib/pgsql/quant_${ENV}_$(date +%F_%H%M%S).dump
-sudo -u quant pg_dump -Fc -d "$DB" -f "$BK"
-sudo -u quant pg_restore --list "$BK" >/dev/null
+sudo -u postgres pg_dump -Fc -d "$DB" -f "$BK"
+sudo -u postgres pg_restore --list "$BK" >/dev/null
 ls -lh "$BK"
 echo "   backup OK: $BK"
 
