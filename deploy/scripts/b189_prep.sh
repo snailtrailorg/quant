@@ -17,6 +17,14 @@ RUN=$($QPSQL -tAc "select count(*) from live_task where status='running'")
 [ "$RUN" = "0" ] || { echo "❌ 有 $RUN 个 running live_task，先停任务"; exit 3; }
 echo "   head=0191 run=0 OK"
 
+# deploy 公钥路径：bootstrap_staging 默认取 $SUDO_USER 家，michael sudo 时找错家——显式解析
+if [ -f /home/bernard/.ssh/quant_deploy_ed25519.pub ]; then
+  PUB=/home/bernard/.ssh/quant_deploy_ed25519.pub
+else
+  PUB=/home/${SUDO_USER:-bernard}/.ssh/quant_deploy_ed25519.pub
+fi
+export PUB
+
 echo "== [1] wrapper/unit/sudoers 装位（幂等；刷新 dbro/hbcheck TRANSITION-0189）=="
 case "$ENV" in
   staging)
