@@ -519,6 +519,23 @@
           # 补审A-4：恒跑（去 when 门）——幂等秒级非耗时大头，恢复批 8 前的 DB 漂移自愈性
           # （备份恢复/人工 stamp 后指纹一致也会自愈到 head；migrations 同内容=空跑）
 
+        - name: 阶段 5.5 —— 迁移后重取 hub 期望集（0192 落库后 market_interface 在位 → code 单元名）
+          ansible.builtin.command: "{{ quant_dbro_cmd }} hub"
+          register: hub_units_post
+          changed_when: false
+          when: deploy_task_units_source == 'db'
+
+        - name: 阶段 5.5 —— 重解析 hub 单元（code；修「首发布在 0191 采集 numeric → 新代码读 MD_CODE 退出 78」——2026-11-21 staging 彩排实证）
+          ansible.builtin.set_fact:
+            deploy_hub_units: >-
+              {{ hub_units_post.stdout_lines | default([])
+                 | map('split', '|')
+                 | selectattr(1, 'in', deploy_hub_md_providers)
+                 | map(attribute=0)
+                 | map('regex_replace', '^(.*)$', 'quant-md-hub@\1.service')
+                 | list }}
+          when: hub_units_post is succeeded
+
       rescue:
         - name: rescue(2-5) —— 清理 staged（auto_rollback_disabled 时保留供人工处置）
           ansible.builtin.file:

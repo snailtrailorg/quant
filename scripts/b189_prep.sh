@@ -6,7 +6,7 @@
 set -euo pipefail
 ENV=${1:?用法: sudo bash b189_prep.sh <staging|prod> [db=quant]}
 DB=${2:-quant}
-HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
+HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
 QPSQL="sudo -u quant psql -d $DB"
 [ "$(id -u)" = "0" ] || { echo "❌ 须 root 运行"; exit 2; }
 
