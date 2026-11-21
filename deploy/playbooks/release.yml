@@ -536,6 +536,17 @@
                  | list }}
           when: hub_units_post is succeeded
 
+        - name: 阶段 5.5 —— 迁移后重取 td_exec 期望集（0192 后 trade_interface.code → code 单元；不依赖 active 枚举，旧 numeric 已 failed）
+          ansible.builtin.command: "{{ quant_dbro_cmd }} td"
+          register: td_units_post
+          changed_when: false
+          when: deploy_task_units_source == 'db'
+
+        - name: 阶段 5.5 —— 重解析 td_exec 单元（code）
+          ansible.builtin.set_fact:
+            deploy_td_exec_units: "{{ td_units_post.stdout_lines | default([]) }}"
+          when: td_units_post is succeeded
+
       rescue:
         - name: rescue(2-5) —— 清理 staged（auto_rollback_disabled 时保留供人工处置）
           ansible.builtin.file:

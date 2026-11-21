@@ -40,14 +40,14 @@
 #                         生产为空（sudoers env_reset 亦会清空）走下方真 psql。
 set -euo pipefail
 
-usage() { echo "用法: quant-dbro <which>  which ∈ live|feishu|hub" >&2; exit 2; }
+usage() { echo "用法: quant-dbro <which>  which ∈ live|feishu|hub|td" >&2; exit 2; }
 
 [ $# -eq 1 ] || usage
 which_arg=$1
 
 case "$which_arg" in
-  live|feishu|hub) ;;
-  *) echo "✗ which 不在白名单（须 live|feishu|hub）: $which_arg" >&2; exit 2 ;;
+  live|feishu|hub|td) ;;
+  *) echo "✗ which 不在白名单（须 live|feishu|hub|td）: $which_arg" >&2; exit 2 ;;
 esac
 
 # ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头）----
@@ -129,6 +129,11 @@ case "$which_arg" in
     ;;
   hub)
     sql=$(select_hub_units) || exit 1
+    ;;
+  td)
+    # 批189 后：交易执行单元素材=trade_interface.code（exec 接口）；排除 virtual（paper 不走 td_exec）。
+    # 仅阶段5.5（迁移后，trade_interface 在位）调用；preflight 仍按 active 枚举旧实例供 7.6 停。
+    sql="SELECT 'quant-td-exec@' || code || '.service' FROM trade_interface WHERE enabled AND NOT is_virtual ORDER BY code"
     ;;
 esac
 
