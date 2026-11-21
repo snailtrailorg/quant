@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from . import xtp  # noqa: F401  —— import 即注册（P3）
+from . import emt  # noqa: F401  —— import 即注册（P4 EMT 执行插件）
 
 
 def ensure_registered() -> None:
@@ -17,6 +18,10 @@ def ensure_registered() -> None:
         get(DOMAIN_TRADING, "xtp")
     except UnknownProvider:
         register(DOMAIN_TRADING, "xtp", xtp.XtpPlugin())
+    try:
+        get(DOMAIN_TRADING, "emt_emq")
+    except UnknownProvider:
+        register(DOMAIN_TRADING, "emt_emq", emt.EmtPlugin())
     # MD 网关注册（vnpy 依赖，运行时才导入；保证 create_md_gateway('xtp') 可用）
     try:
         from .xtp import md_gateway  # noqa: F401
@@ -24,4 +29,4 @@ def ensure_registered() -> None:
         pass
 
 
-__all__: list[str] = ["xtp", "ensure_registered"]
+__all__: list[str] = ["xtp", "emt", "ensure_registered"]
