@@ -17,7 +17,7 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="166" />
       </TableShell>
     </el-card>
-    <InterfacesCard kind="data_source" @loaded="onRowsChanged" />
+    <InterfacesManager :modes="['ds']" @loaded="onRowsChanged" />
     <template v-if="tushareExists">
       <el-divider />
       <el-collapse>
@@ -67,7 +67,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
-import InterfacesCard from '../components/InterfacesCard.vue'
+import InterfacesManager from '../components/InterfacesManager.vue'
 import { apiErr, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage } from 'element-plus'
 
