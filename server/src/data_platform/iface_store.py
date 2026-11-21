@@ -92,12 +92,12 @@ def get_td_identity(td_code: str) -> dict | None:
     """
     with get_conn() as conn:
         r = conn.execute(
-            "SELECT code,provider,account_key,login_key,credentials_encrypted,params,impl,is_virtual "
+            "SELECT code,provider,account_key,login_key,credentials_encrypted,params,impl,is_virtual,enabled "
             "FROM trade_interface WHERE code=%s", (str(td_code),)).fetchone()
     if not r:
         return None
     return dict(zip(("code", "provider", "account_key", "login_key",
-                     "credentials_encrypted", "params", "impl", "is_virtual"), r))
+                     "credentials_encrypted", "params", "impl", "is_virtual", "enabled"), r))
 
 
 def resolve_login_key(account: str) -> str:
