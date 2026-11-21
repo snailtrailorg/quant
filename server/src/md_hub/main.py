@@ -251,6 +251,7 @@ def main() -> None:
         # md_only=True：MD 数据面空凭证，跳过 required_fields 校验
         iface = get_interface_row(row_id, md_only=True)
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
+        _iface_enabled = bool(iface.get("enabled", True))   # C4 心跳 enabled/working 真源
         from src.strategy_framework.md_gateway import create_md_gateway
         import src.providers as _providers
         from src.registry import UnsupportedCapability, UnknownProvider, pick
@@ -453,10 +454,12 @@ def main() -> None:
 
     def _heartbeat() -> None:
         # 批 69b：connected 导出（int(bool) 形态立法——L2 真连探测/检查单消费；窗外挂起=False 属预期态）
+        _connected = bool(md_gw.connected)
         hb.beat(pid=os.getpid(), gen=gen, subs=len(sm.current),
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0,
-                connected=int(bool(md_gw.connected)))
+                enabled=int(_iface_enabled), working=int(_iface_enabled and _connected),
+                connected=int(_connected))
 
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗

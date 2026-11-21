@@ -228,11 +228,11 @@ def get_interface_row(code: str, md_only: bool = False) -> dict:
         with get_conn() as conn:
             if md_only:
                 cur = conn.execute(
-                    "SELECT provider, credentials_encrypted, params, market "
+                    "SELECT provider, credentials_encrypted, params, market, enabled "
                     "FROM market_interface WHERE code=%s", (code,))
             else:
                 cur = conn.execute(
-                    "SELECT provider, credentials_encrypted, params, market "
+                    "SELECT provider, credentials_encrypted, params, market, enabled "
                     "FROM trade_interface WHERE code=%s", (code,))
             r = cur.fetchone()
         if not r:
@@ -253,7 +253,8 @@ def get_interface_row(code: str, md_only: bool = False) -> dict:
             if missing:
                 raise RuntimeError(f"接口 code={code}（{r[0]}）凭证缺必填字段 {missing}——禁 .env fallback")
         return {"provider": r[0], "credentials": cred, "params": params,
-                "market": r[3], "capabilities": ["rt_quote"] if md_only else ["trading"]}
+                "market": r[3], "enabled": bool(r[4]),
+                "capabilities": ["rt_quote"] if md_only else ["trading"]}
     except Exception as e:
         logger.warning("读接口行 code=%s 失败: %s", code, e)
         raise
