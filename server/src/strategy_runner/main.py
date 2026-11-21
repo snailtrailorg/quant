@@ -669,7 +669,7 @@ def main():
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-            "status, account_id, initial_capital, owner_username, mode FROM live_task WHERE id=%s",
+            "status, account_code, initial_capital, owner_username, mode FROM live_task WHERE id=%s",
             (args.task_id,))
         row = cur.fetchone()
     if not row:

@@ -595,7 +595,7 @@ def run(ctx: dict) -> None:
     _close_freeze("restart")
 
     # ——— send_order 时刻事实检查（S6）：交易时段+bar 新鲜+hub 心跳；纯逻辑在 trading.buy_ok_check，检查器由 ctx 注入 C2 网关 ———
-    ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r, account_id), time.time(),
+    ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r, md_code), time.time(),
                                                 in_session=_in_mkt_session())
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)

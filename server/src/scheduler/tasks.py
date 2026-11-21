@@ -331,12 +331,12 @@ _POSITION_DIFF_SQL = """
                COALESCE(s.vid, t.vid) AS vid,
                COALESCE(s.snap_vol, 0) AS snap_vol,
                COALESCE(t.derived_vol, 0) AS derived_vol
-        FROM (SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
+        FROM (SELECT account_code AS vid, split_part(symbol, '.', 1) AS sym,
                      min(symbol) AS sym_vt, SUM(volume) AS snap_vol
               FROM position_snapshot WHERE direction != 'direction_short'
               GROUP BY 1, 2) s
         FULL OUTER JOIN (
-            SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
+            SELECT account_code AS vid, split_part(symbol, '.', 1) AS sym,
                    min(symbol) AS sym_vt,
                    SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
             FROM trade_log GROUP BY 1, 2) t
@@ -424,13 +424,13 @@ def reconcile_three_books():
                 from src.quant_common.fees import calc_trade_fee
                 # 每 account baseline 现金（首条快照 available_cash + ts）+ 券商现金（最新快照 available_cash）
                 cur = conn.execute(
-                    "SELECT DISTINCT ON (account_id) account_id, available_cash, ts "
-                    "FROM account_snapshot ORDER BY account_id, ts ASC")
+                    "SELECT DISTINCT ON (account_code) account_code, available_cash, ts "
+                    "FROM account_snapshot ORDER BY account_code, ts ASC")
                 baseline = {r[0]: (float(r[1]) if r[1] is not None else None, r[2])
                             for r in cur.fetchall()}
                 cur = conn.execute(
-                    "SELECT DISTINCT ON (account_id) account_id, available_cash "
-                    "FROM account_snapshot ORDER BY account_id, ts DESC")
+                    "SELECT DISTINCT ON (account_code) account_code, available_cash "
+                    "FROM account_snapshot ORDER BY account_code, ts DESC")
                 latest = {r[0]: (float(r[1]) if r[1] is not None else None)
                           for r in cur.fetchall()}
                 for vid in set(baseline) | set(latest):
@@ -441,7 +441,7 @@ def reconcile_three_books():
                     # 成交流水（baseline 之后的成交，BUY 现金流出 / SELL 现金流入，窗口对齐盲审 A-3/B-1）
                     cur = conn.execute(
                         "SELECT symbol, action, volume, price FROM trade_log "
-                        "WHERE account_id=%s AND ts > %s", (vid, base_ts))
+                        "WHERE account_code=%s AND ts > %s", (vid, base_ts))
                     net = 0.0
                     fees = 0.0
                     for sym, act, vol, px in cur.fetchall():
@@ -473,9 +473,9 @@ def reconcile_three_books():
             # 6. D4 跨 account 反向识别（对敲）：同 symbol 一 account long 一 account short（默认告警不拦截）
             try:
                 cur = conn.execute("""
-                    SELECT a.symbol, a.account_id, b.account_id
+                    SELECT a.symbol, a.account_code, b.account_code
                     FROM position_snapshot a
-                    JOIN position_snapshot b ON a.symbol=b.symbol AND a.account_id < b.account_id
+                    JOIN position_snapshot b ON a.symbol=b.symbol AND a.account_code < b.account_code
                     WHERE a.direction IN ('direction_long','direction_short')
                       AND b.direction IN ('direction_long','direction_short')
                       AND a.direction != b.direction

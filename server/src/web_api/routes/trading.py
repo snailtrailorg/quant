@@ -128,8 +128,8 @@ def create_live_task(body: dict = Body(...),
                            "虚拟账户不存在（迁移 0127 未执行？）——纸上任务无法创建")
     elif account_id is None:
         raise ApiError(400, "ACCOUNT_REQUIRED", "account_id 必填（交易账号）")
-    if not isinstance(account_id, int) or isinstance(account_id, bool):
-        raise ApiError(400, "ACCOUNT_ID_INVALID", "account_id 须为整数（交易账号 id）")
+    if not isinstance(account_id, str) or not account_id:
+        raise ApiError(400, "ACCOUNT_ID_INVALID", "account_id 须为接口 code（如 td-xtp）")
 
     # 读策略配置
     with get_conn() as conn:
@@ -185,7 +185,7 @@ def create_live_task(body: dict = Body(...),
                            f"account {account_id} 不允许交易品种 {symbol}（三维 category/exchange/board 权限）")
         cur = conn.execute(
             "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
-            "account_id, initial_capital, owner_username, mode) "
+            "account_code, initial_capital, owner_username, mode) "
             "VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s) RETURNING id",
             (name, strategy_id, symbol, json.dumps(merged_params), json.dumps(strategy_snapshot),
              account_id, initial_capital, payload["username"], mode))
@@ -512,8 +512,8 @@ def _account_state(conn):
     baseline（initial）= 该 account 首条快照 total_value（#10 口径）；无历史退回快照列值/默认 100 万。
     """
     cur = conn.execute(
-        "SELECT DISTINCT ON (account_id) account_id, total_value, daily_pnl, initial_capital "
-        "FROM account_snapshot ORDER BY account_id, ts DESC")
+        "SELECT DISTINCT ON (account_code) account_code, total_value, daily_pnl, initial_capital "
+        "FROM account_snapshot ORDER BY account_code, ts DESC")
     latest = cur.fetchall()
     cur = conn.execute(
         "SELECT DISTINCT ON (account_code) account_code, total_value "
@@ -547,8 +547,8 @@ def get_position(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         accounts_state = _account_state(conn)
         cur = conn.execute(
-            "SELECT account_id, symbol, direction, volume, frozen, cost_price, pnl "
-            "FROM position_snapshot WHERE volume != 0 ORDER BY account_id, symbol")
+            "SELECT account_code, symbol, direction, volume, frozen, cost_price, pnl "
+            "FROM position_snapshot WHERE volume != 0 ORDER BY account_code, symbol")
         pos_by_account: dict = {}
         for r in cur.fetchall():
             pos_by_account.setdefault(r[0], []).append({
@@ -556,7 +556,7 @@ def get_position(payload: dict = Depends(require_perm("read"))):
                 "frozen": int(r[4] or 0),
                 "cost_price": float(r[5]) if r[5] is not None else None,
                 "pnl": float(r[6]) if r[6] is not None else None})
-        cur = conn.execute("SELECT account_id, ts, rows FROM position_refresh")
+        cur = conn.execute("SELECT account_code, ts, rows FROM position_refresh")
         refresh_by_account = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
     now = _pdt.datetime.now(_pdt.timezone.utc)
@@ -596,11 +596,11 @@ def get_pnl(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         accounts_state = _account_state(conn)
         cur = conn.execute(
-            "SELECT account_id, ts, total_value, daily_pnl FROM ("
-            "  SELECT account_id, ts, total_value, daily_pnl, "
-            "         ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY ts DESC) AS rn "
+            "SELECT account_code, ts, total_value, daily_pnl FROM ("
+            "  SELECT account_code, ts, total_value, daily_pnl, "
+            "         ROW_NUMBER() OVER (PARTITION BY account_code ORDER BY ts DESC) AS rn "
             "  FROM account_snapshot"
-            ") sub WHERE rn <= 90 ORDER BY account_id, ts DESC")
+            ") sub WHERE rn <= 90 ORDER BY account_code, ts DESC")
         rows = cur.fetchall()
     curve_by_account: dict = {}
     for r in rows:
@@ -649,7 +649,7 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
 @router.get("/api/trades")
 def list_trades(limit: int = Query(200, ge=1, le=1000),
                 symbol: str | None = None,
-                account_id: int | None = None,
+                account_id: str | None = None,
                 since: str | None = None,
                 payload: dict = Depends(require_perm("read"))):
     """成交流水（trade_log 唯一读出口；批188 补：此前只有写口，清仓到底成没成交无法自查）。

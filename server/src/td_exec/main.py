@@ -98,7 +98,7 @@ class TdExec:
             # 与 live_task 同源（hub_worker._td_connect_due）：启动时读一次，改动重启生效
             from src.providers.xtp.session import load_xtp_window_cfg
             self._td_window = load_xtp_window_cfg()
-        return row
+        return ident
 
     def _build(self):
         from src.strategy_runner.main import make_event_engine

@@ -129,8 +129,8 @@ def api_probe(request: Request):
 
         r = business_redis(socket_timeout=2,
                            decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
-        keys = [k for k in r.scan_iter(match="quant:hb:md-hub:*", count=100)
-                if k.rsplit(":", 1)[-1].isdigit()]
+        keys = [k for k in r.scan_iter(match="iface:hb:md:*", count=100)
+                if k.startswith("iface:hb:md:") and k.rsplit(":", 1)[-1]]
         if not keys:
             raise RuntimeError("hub 心跳在场集空（无 per-account 键——hub 未起或键切换未达）")
         stale = []

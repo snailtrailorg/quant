@@ -603,7 +603,7 @@ def _account_perm_row(r) -> dict:
 
 
 @router.get("/api/accounts/{account_id}/permission")
-def get_account_permission(account_id: int, payload: dict = Depends(require_perm("read"))):
+def get_account_permission(account_id: str, payload: dict = Depends(require_perm("read"))):
     """account 权限读（无行 404——权限人工配置，未配置不猜默认）。"""
     r = config_store.get_account_permission(account_id)
     if r is None:
@@ -612,7 +612,7 @@ def get_account_permission(account_id: int, payload: dict = Depends(require_perm
 
 
 @router.put("/api/accounts/{account_id}/permission")
-def put_account_permission(account_id: int, req: AccountPermissionReq, payload: dict = Depends(require_perm("system_config"))):
+def put_account_permission(account_id: str, req: AccountPermissionReq, payload: dict = Depends(require_perm("system_config"))):
     """account 权限写（upsert）。校验：account 存在且为交易账号；值域 ⊆ 注册表（防拼写错）。
 
     批 83a：存在性判据从「external_interface 交易域行」改为「trading_account 行」
@@ -688,7 +688,7 @@ def patch_spec_band(exchange: str, board: str, body: dict = Body(...),
 
 
 @router.get("/api/specs/accounts/{account_id}/close-policy")
-def get_spec_close_policy(account_id: int, payload: dict = Depends(require_perm("read"))):
+def get_spec_close_policy(account_id: str, payload: dict = Depends(require_perm("read"))):
     from src.data_platform import specs
     try:
         return specs.get_close_policy(account_id)
@@ -697,7 +697,7 @@ def get_spec_close_policy(account_id: int, payload: dict = Depends(require_perm(
 
 
 @router.patch("/api/specs/accounts/{account_id}/close-policy")
-def patch_spec_close_policy(account_id: int, body: dict = Body(...),
+def patch_spec_close_policy(account_id: str, body: dict = Body(...),
                             payload: dict = Depends(require_perm("system_config"))):
     from src.data_platform import specs
     try:
@@ -712,7 +712,7 @@ def patch_spec_close_policy(account_id: int, body: dict = Body(...),
 
 
 @router.patch("/api/specs/accounts/{account_id}/impl")
-def patch_spec_impl(account_id: int, body: dict = Body(...),
+def patch_spec_impl(account_id: str, body: dict = Body(...),
                     payload: dict = Depends(require_perm("system_config"))):
     """双轨开关（legacy/plugin）——审计记录，任务下次启动生效。"""
     from src.data_platform import specs
@@ -728,7 +728,7 @@ def patch_spec_impl(account_id: int, body: dict = Body(...),
 
 
 @router.patch("/api/specs/accounts/{account_id}/data-license")
-def patch_spec_data_license(account_id: int, body: dict = Body(...),
+def patch_spec_data_license(account_id: str, body: dict = Body(...),
                             payload: dict = Depends(require_perm("system_config"))):
     from src.data_platform import specs
     try:

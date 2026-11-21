@@ -165,11 +165,11 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     legacy_transition = 0 in hubs   # legacy 裸键收编在场=键切换/回滚过渡态——R4 豁免（终态应消失；盲审 B-P2-2 修：防迁移夜假 critical）
     if deps.get("valkey") and not legacy_transition:
         for acct in expected:
-            missing = int(acct) not in hubs
+            missing = acct not in hubs
             streaks[acct] = (streaks.get(acct, 0) + 1) if missing else 0
             if missing and streaks[acct] >= 2:
                 out.append({"rule_id": "hub_hb_lost", "component": f"md-hub:{acct}", "severity": "critical",
-                            "detail": f"quant:hb:md-hub:{acct} 连续 {streaks[acct]} 轮（30s/轮）缺失——hub 进程未续心跳"})
+                            "detail": f"iface:hb:md:{acct} 连续 {streaks[acct]} 轮（30s/轮）缺失——hub 进程未续心跳"})
         if not expected:
             # 空集地板（期望集未注入=交叉不可用）：在场集非空即过，全空按全局 streak（保守告警）
             missing = not hubs

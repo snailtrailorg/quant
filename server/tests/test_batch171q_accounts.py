@@ -66,7 +66,7 @@ class TestCreatePathRejectsVirtual:
         from src.web_api.routes import trading as T
 
         strat = ("1", "s", "py", "600000.XSHG", "xtp", True, "[]", "{}", "{}", "{}", True)
-        acct = (502, True)      # 虚拟账户
+        acct = ("td-virt", True)      # 虚拟账户（code 身份）
 
         def _cur(val):
             c = MagicMock()
@@ -79,7 +79,7 @@ class TestCreatePathRejectsVirtual:
         conn.execute.side_effect = [_cur(strat), _cur(acct)]
 
         body = {"name": "t", "strategy_id": "1", "symbol": "600000.XSHG",
-                "account_id": 502, "initial_capital": 100000, "mode": "live"}
+                "account_id": "td-virt", "initial_capital": 100000, "mode": "live"}
         with patch.object(T, "get_conn", MagicMock(return_value=conn)),              patch("src.web_api.auth.load_effective_permissions",
                    return_value=({"live_control"}, {})),              patch.object(T, "audit_log"):
             with pytest.raises(ApiError) as ei:

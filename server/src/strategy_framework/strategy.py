@@ -347,7 +347,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(volume - COALESCE(frozen,0)),0) FROM position_snapshot "
-                "WHERE symbol = ANY(%s) AND account_id=%s AND direction != 'direction_short'",
+                "WHERE symbol = ANY(%s) AND account_code=%s AND direction != 'direction_short'",
                 (syms, self.account_id))
             return int(cur.fetchone()[0] or 0)
 
@@ -358,7 +358,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(cost_price * volume),0) FROM position_snapshot "
-                "WHERE account_id=%s AND direction != 'direction_short'", (self.account_id,))
+                "WHERE account_code=%s AND direction != 'direction_short'", (self.account_id,))
             return float(cur.fetchone()[0] or 0)
 
     def _param(self, key, default=None):
@@ -369,7 +369,7 @@ class Strategy:
         from ..data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT total_value FROM account_snapshot WHERE account_id=%s ORDER BY ts DESC LIMIT 1",
+                "SELECT total_value FROM account_snapshot WHERE account_code=%s ORDER BY ts DESC LIMIT 1",
                 (self.account_id,))
             row = cur.fetchone()
         if not row or not row[0]:
@@ -384,7 +384,7 @@ class Strategy:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT available_cash FROM account_snapshot "
-                    "WHERE account_id=%s AND available_cash IS NOT NULL ORDER BY ts DESC LIMIT 1",
+                    "WHERE account_code=%s AND available_cash IS NOT NULL ORDER BY ts DESC LIMIT 1",
                     (self.account_id,))
                 row = cur.fetchone()
             return float(row[0]) if row else None

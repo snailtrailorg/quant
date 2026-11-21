@@ -48,13 +48,13 @@ def _journal_bad(unit: str, since: str) -> tuple[int, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     # 批 66b（D26）：hub 账号级实例化——unit/心跳键由 account_id 派生（必填，无裸键默认）
-    ap.add_argument("--account-id", type=int, required=True,
-                    help="接口行 id（unit=quant-md-hub@{id}，hb 键=quant:hb:md-hub:{id}）")
+    ap.add_argument("--md-code", type=str, required=True,
+                    help="行情接口 code（unit=quant-md-hub@{code}，hb 键=iface:hb:md:{code}）")
     ap.add_argument("--minutes", type=int, default=5)
     ap.add_argument("--interval", type=int, default=60)
     args = ap.parse_args()
-    unit = f"quant-md-hub@{args.account_id}"
-    hb_key = f"quant:hb:md-hub:{args.account_id}"
+    unit = f"quant-md-hub@{args.md_code}"
+    hb_key = f"iface:hb:md:{args.md_code}"
     since = "now"   # 脚本启动即窗口起点（部署方应在部署后立即跑）
     r = _redis()
     deadline = time.time() + args.minutes * 60

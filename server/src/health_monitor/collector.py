@@ -22,7 +22,7 @@ CORE_UNITS = [
 ]
 
 HUB_HB_KEY = "quant:hb:md-hub"
-HUB_HB_PATTERN = "quant:hb:md-hub:*"   # 批 66b：per-account 在场集（SCAN 发现；尾冒号隔离——glob 不吞垂死裸键）
+HUB_HB_PATTERN = "iface:hb:md:*"   # M4：per-md_code 在场集（SCAN；键 iface:hb:md:<code>）
 TASK_HB_PATTERN = "quant:hb:task:*"
 
 
@@ -265,8 +265,8 @@ def collect(now: float | None = None) -> dict:
         # hub 心跳 N 实例（批 66b：SCAN per-account 在场集——{account_id: {...}}；
         # legacy 兼容读：键切换窗裸键在场也收编（account_id=0 表示）防观测面瞬盲）
         for key in list(r.scan_iter(HUB_HB_PATTERN, count=100)):
-            acct = key.rsplit(":", 1)[-1]
-            if not acct.isdigit():
+            acct = key.rsplit(":", 1)[-1]   # 接口 code（md-xtp 等）
+            if not key.startswith("iface:hb:md:") or not acct:
                 continue
             try:
                 h = r.hgetall(key)
@@ -275,7 +275,7 @@ def collect(now: float | None = None) -> dict:
             if not h:
                 continue
             last_tick = float(h.get("last_tick_ts") or 0)
-            snap["hubs"][int(acct)] = {
+            snap["hubs"][acct] = {
                 "gen": int(h.get("gen") or 0),
                 "subs": int(h.get("subs") or 0),
                 "ticks": int(h.get("ticks") or 0),

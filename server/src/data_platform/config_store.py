@@ -185,8 +185,8 @@ def exposure_snapshots() -> dict:
                 "GROUP BY 1").fetchall():
             out.setdefault(acct_id, {})["pos_value"] = float(val or 0)
         for acct_id, tv, pnl, ts in conn.execute(
-                "SELECT DISTINCT ON (account_id) account_id, total_value, daily_pnl, ts "
-                "FROM account_snapshot ORDER BY account_id, ts DESC").fetchall():
+                "SELECT DISTINCT ON (account_code) account_code, total_value, daily_pnl, ts "
+                "FROM account_snapshot ORDER BY account_code, ts DESC").fetchall():
             out.setdefault(acct_id, {})["snap"] = (float(tv or 0), float(pnl or 0), ts)
     return out
 
@@ -197,13 +197,13 @@ def live_running_tasks() -> list[tuple]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         return conn.execute(
-            "SELECT id, account_id FROM live_task WHERE status='running'").fetchall()
+            "SELECT id, account_code FROM live_task WHERE status='running'").fetchall()
 
 
 def has_live_task(account_id: int) -> bool:
     """该 id 是否被 live_task 引用（**仅交易族可调**：live_task.account_id → trading_account.id）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM live_task WHERE account_id=%s LIMIT 1", (account_id,))
+        cur = conn.execute("SELECT id FROM live_task WHERE account_code=%s LIMIT 1", (account_id,))
         return cur.fetchone() is not None
 
 

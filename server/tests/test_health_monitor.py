@@ -12,7 +12,7 @@ def _snap(**over):
     snap = {"ts": 0.0,
             "units": {"quant-md-hub@quant": {"ActiveState": "active", "SubState": "running", "NRestarts": "0"}},
             "deps": {"postgres": True, "valkey": True},
-            "hubs": {1: {"gen": 10, "subs": 1, "ticks": 100, "sess_ticks": 100, "bars": 9,
+            "hubs": {"1": {"gen": 10, "subs": 1, "ticks": 100, "sess_ticks": 100, "bars": 9,
                          "dropped_pg": 0, "tick_age": 3.0}},
             "hub_expected": ["1"],
             "tasks": {}}
@@ -76,11 +76,11 @@ class TestEvaluate:
         monkeypatch.setattr(monitor, "_in_session", lambda: True)
         hub = {"gen": 10, "subs": 1, "ticks": 500, "sess_ticks": 42, "bars": 9,
                "dropped_pg": 0, "tick_age": 400.0}
-        f1, s1 = monitor.evaluate(_snap(hubs={1: hub}))
+        f1, s1 = monitor.evaluate(_snap(hubs={"1": hub}))
         assert not any(f["rule_id"] == "hub_tick_stalled" for f in f1)
-        f2, s2 = monitor.evaluate(_snap(hubs={1: hub}), s1)
+        f2, s2 = monitor.evaluate(_snap(hubs={"1": hub}), s1)
         assert not any(f["rule_id"] == "hub_tick_stalled" for f in f2)   # stall=1 未达阈
-        f3, s3 = monitor.evaluate(_snap(hubs={1: dict(hub, tick_age=520.0)}), s2)
+        f3, s3 = monitor.evaluate(_snap(hubs={"1": dict(hub, tick_age=520.0)}), s2)
         fired = [f for f in f3 if f["rule_id"] == "hub_tick_stalled"]
         assert fired and fired[0]["severity"] == "critical" and fired[0]["component"] == "md-hub:1"
 
@@ -142,7 +142,7 @@ class TestRenderPrometheus:
     def _snap(self):
         return _snap(units={"quant-md-hub@1": {"ActiveState": "active", "SubState": "running", "NRestarts": "2"},
                             "quant-web-api@quant": {"ActiveState": "active", "SubState": "running", "NRestarts": "0"}},
-                     hubs={1: {"gen": 10, "subs": 1, "ticks": 193, "sess_ticks": 100, "bars": 9,
+                     hubs={"1": {"gen": 10, "subs": 1, "ticks": 193, "sess_ticks": 100, "bars": 9,
                                "dropped_pg": 0, "tick_age": 3.2}},
                      tasks={"7": {"md": "hub", "bars": 78, "lag": 41.6, "frozen": 0}})
 
@@ -295,7 +295,7 @@ class TestApiProbe:
         conn.execute.return_value.fetchone.return_value = [0]
         # 批 66b：_probe hub_hb=SCAN 在场集+ts 判龄——mock 形态对齐（scan_iter 键+hget ts）
         r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
-        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+        r.scan_iter.return_value = iter(["iface:hb:md:1"])
         r.hget.return_value = str(__import__("time").time())
         with patch("src.web_api.routes.system.get_conn", return_value=conn), \
              patch("redis.Redis.from_url", return_value=r):
@@ -336,7 +336,7 @@ class TestApiProbe:
         conn = MagicMock(); conn.__enter__.return_value = conn
         conn.execute.return_value.fetchone.return_value = [0]
         r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
-        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+        r.scan_iter.return_value = iter(["iface:hb:md:1"])
         r.hget.return_value = str(_time.time() - 300)   # 5 分钟前的心跳
         with patch("src.web_api.routes.system.get_conn", return_value=conn), \
              patch("redis.Redis.from_url", return_value=r):
@@ -564,16 +564,16 @@ class TestCollectorLegacyHub:
         r = MagicMock()
         r.ping.return_value = True
         r.scan_iter.side_effect = lambda pattern, **k: (
-            iter(["quant:hb:md-hub:1"]) if "md-hub" in str(pattern) else iter([]))
+            iter(["iface:hb:md:1"]) if "iface:hb:md" in str(pattern) else iter([]))
 
         def _hgetall(key):
             return ({"gen": "9", "subs": "1", "ticks": "1", "bars": "1", "sess_ticks": "1",
                      "dropped_pg": "0", "last_tick_ts": str(_t.time())}
-                    if key == "quant:hb:md-hub:1" else {"gen": "1"})
+                    if key == "iface:hb:md:1" else {"gen": "1"})
         r.hgetall.side_effect = _hgetall
         monkeypatch.setattr(collector, "_valkey", lambda: r)
         snap = collector.collect()
-        assert 1 in snap["hubs"] and 0 not in snap["hubs"]
+        assert "1" in snap["hubs"] and 0 not in snap["hubs"]
 
 
 class TestHubExpectedIds:

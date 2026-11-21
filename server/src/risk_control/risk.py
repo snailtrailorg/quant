@@ -220,10 +220,10 @@ class RiskControl:
                     "SELECT COALESCE(SUM(CASE WHEN direction='direction_long' THEN cost_price*volume "
                     "WHEN direction='direction_net' THEN cost_price*volume "
                     "WHEN direction='direction_short' THEN -cost_price*volume ELSE 0 END),0) "
-                    "FROM position_snapshot WHERE symbol=%s AND account_id=%s", (vt, account_id))
+                    "FROM position_snapshot WHERE symbol=%s AND account_code=%s", (vt, account_id))
                 held = float(cur.fetchone()[0] or 0)
                 cur = conn.execute(
-                    "SELECT total_value FROM account_snapshot WHERE account_id=%s ORDER BY ts DESC LIMIT 1",
+                    "SELECT total_value FROM account_snapshot WHERE account_code=%s ORDER BY ts DESC LIMIT 1",
                     (account_id,))
                 row = cur.fetchone()
                 return held, float(row[0]) if row else 0.0
@@ -548,7 +548,7 @@ class RiskControl:
                 cur = conn.execute(
                     "SELECT total_value, daily_pnl, initial_capital, "
                     "EXTRACT(EPOCH FROM (now() - ts)) FROM account_snapshot "
-                    "WHERE account_id=%s ORDER BY ts DESC LIMIT 1", (account_id,))
+                    "WHERE account_code=%s ORDER BY ts DESC LIMIT 1", (account_id,))
                 row = cur.fetchone()
                 if not row:
                     logger.warning("account_snapshot 无数据（风控 fail-closed，等待首个快照）")
@@ -576,7 +576,7 @@ class RiskControl:
         """更新账户快照（策略引擎/交易引擎调用，供风控读取）。D2：per-account 落行。"""
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s,%s)",
+                "INSERT INTO account_snapshot (account_code, total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s,%s)",
                 (account_id, total_value, daily_pnl, initial_capital))
             conn.commit()
 
