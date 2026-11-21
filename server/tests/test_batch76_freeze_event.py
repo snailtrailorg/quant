@@ -48,7 +48,7 @@ def test_record_then_close_roundtrip_and_idempotent():
     assert len(evs) == 1
     e = evs[0]
     assert (e["freeze_type"], e["watermark"], e["gap_target_ts"]) == ("ts_gap", "1759000000", "1759000300")
-    assert e["unfrozen_at"] is None and e["unfreeze_method"] is None and e["account_id"] == 1
+    assert e["unfrozen_at"] is None and e["unfreeze_method"] is None and str(e["account_id"]) == "1"
 
     n = close_freeze(TID, method="manual_web", operator="william", symbol=SYM)
     assert n == 1

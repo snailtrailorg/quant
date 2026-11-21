@@ -109,8 +109,8 @@ class TestRootInvariantRealDb:
         from src.data_platform.db import get_conn
         with get_conn() as c:
             bad = c.execute("""
-                SELECT lt.id FROM live_task lt JOIN trading_account ta ON ta.id = lt.account_id
-                WHERE lt.mode = 'live' AND ta.is_virtual
+                SELECT lt.id FROM live_task lt JOIN trade_interface ti ON ti.code = lt.account_code
+                WHERE lt.mode = 'live' AND ti.is_virtual
             """).fetchall()
         assert bad == [], f"实盘任务绑定虚拟账户（数据破损）: {bad}"
 
@@ -120,10 +120,10 @@ class TestRootInvariantRealDb:
         import psycopg
         from src.data_platform.db import get_conn
         with get_conn() as c:
-            vid = c.execute("SELECT id FROM trading_account WHERE is_virtual LIMIT 1").fetchone()[0]
+            vid = c.execute("SELECT code FROM trade_interface WHERE is_virtual ORDER BY code LIMIT 1").fetchone()[0]
             with pytest.raises(psycopg.errors.RaiseException):
                 c.execute(
                     "INSERT INTO live_task (name,strategy_id,symbol,params,strategy_snapshot,"
-                    "status,account_id,mode) VALUES ('x','1','600000.XSHG','{}','{}','stopped',%s,'live')",
+                    "status,account_code,mode) VALUES ('x','1','600000.XSHG','{}','{}','stopped',%s,'live')",
                     (vid,))
             c.rollback()

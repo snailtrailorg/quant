@@ -201,8 +201,8 @@ def _load_state(force: bool = False) -> _TableState:
             # 批 83a 拆表：路由表读「数据源」侧（data_source）——原 external_interface 混表已拆，
             # exchanges 列随交易侧迁走（数据源无该列，_row_covers 走 row.get 缺项→None=全所语义）
             cur = conn.execute(
-                "SELECT id, provider, market, capabilities, params, position, enabled "
-                "FROM data_source ORDER BY position, id")
+                "SELECT code, provider, market, capabilities, params, position, enabled "
+                "FROM data_source ORDER BY position, code")
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             cur = conn.execute("SELECT consumer_tag, weights, bulkhead_defaults FROM routing_policy")
@@ -290,7 +290,7 @@ def resolve(req, principal: tuple[str, str] | None = None) -> CandidateChain:
                                position=int(row.get("position") or 0)))
     # 排序键：健康一票前置（熔断源无论人工序多靠前都沉底——验收③字面；28 §6.1 样例将
     # health 并入 score，但 position 前置会抵消 −∞——张力裁决：健康>人工序>质量分）
-    cands.sort(key=lambda c: (1 if _breaker_open(c.adapter, (c.account or {}).get("id", 0)) else 0, c.position, -_score(w, c.quality)))
+    cands.sort(key=lambda c: (1 if _breaker_open(c.adapter, (c.account or {}).get("code", (c.account or {}).get("id", 0))) else 0, c.position, -_score(w, c.quality)))
     chain = CandidateChain(tuple(cands), epoch=st.version, fingerprint=st.fingerprint)
     _audit("resolve", req, chain, tuple(cands))
     return chain

@@ -23,8 +23,7 @@ pytestmark = pytest.mark.skipif(not _db_up(), reason="真库不可用")
 @pytest.fixture
 def acc():
     with get_conn() as c:
-        aid = c.execute("SELECT id FROM trading_account WHERE account_key IS NOT NULL "
-                        "ORDER BY id LIMIT 1").fetchone()[0]
+        aid = c.execute("SELECT code FROM trade_interface ORDER BY code LIMIT 1").fetchone()[0]
         prev = specs.get_data_license(aid)
     specs.update_data_license(aid, "")
     specs.invalidate()

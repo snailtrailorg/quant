@@ -630,7 +630,7 @@ class TestS7SubscriptionSource:
         from src.strategy_framework.runtime.loop import EngineLoop
         from src.strategy_framework.runtime.subs import SubscriptionManager
 
-        acc_a, acc_b = 989910, 989911
+        acc_a, acc_b = "td-a", "td-b"   # M4/M5：接口 code 身份；持仓按 td_md_map 映射到本 hub 的 md_code
         captured = {}
 
         class _GW:
@@ -660,17 +660,18 @@ class TestS7SubscriptionSource:
             with get_conn() as c:
                 for aid in (acc_a, acc_b):
                     c.execute(
-                        "INSERT INTO trading_account (id,name,provider,market,capabilities) "
-                        "VALUES (%s,%s,'xtp','astock','{}')", (aid, f"s7-{aid}"))
+                        "INSERT INTO trade_interface (code,name,provider,market,login_key,enabled) "
+                        "VALUES (%s,%s,'xtp','astock',%s,true)", (aid, f"s7-{aid}", f"xtp|{aid}"))
+                c.execute("INSERT INTO td_md_map (td_code,md_code,priority) VALUES (%s,'md-xtp',1)", (acc_a,))
                 c.execute(
-                    "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
+                    "INSERT INTO position_snapshot (account_code,symbol,direction,volume,frozen) "
                     "VALUES (%s,'689997.XSHG','direction_net',100,0)", (acc_a,))
                 c.execute(
-                    "INSERT INTO position_snapshot (account_id,symbol,direction,volume,frozen) "
+                    "INSERT INTO position_snapshot (account_code,symbol,direction,volume,frozen) "
                     "VALUES (%s,'689996.XSHG','direction_net',100,0)", (acc_b,))
                 c.commit()
-            old = os.environ.get("ACCOUNT_ID")
-            os.environ["ACCOUNT_ID"] = str(acc_a)
+            old = os.environ.get("MD_CODE")
+            os.environ["MD_CODE"] = "md-xtp"
             try:
                 with patch.object(M, "make_valkey", lambda: _FakeVK()), \
                      patch.object(M, "_lease_boot", lambda r, aid: ("uuid", 1)), \
@@ -690,9 +691,9 @@ class TestS7SubscriptionSource:
                     M.main()
             finally:
                 if old is None:
-                    os.environ.pop("ACCOUNT_ID", None)
+                    os.environ.pop("MD_CODE", None)
                 else:
-                    os.environ["ACCOUNT_ID"] = old
+                    os.environ["MD_CODE"] = old
 
             sm = {h.name: h for h in captured["loop"]._hooks}["subs-poll"].fn.__self__
             assert isinstance(sm, SubscriptionManager)
@@ -702,10 +703,10 @@ class TestS7SubscriptionSource:
                 "他账号持仓标的不得到本 hub 订阅（account_id 过滤失效=红）"
         finally:
             with get_conn() as c:
-                c.execute("DELETE FROM position_snapshot WHERE account_id = ANY(%s)",
+                c.execute("DELETE FROM position_snapshot WHERE account_code = ANY(%s)",
                           ([acc_a, acc_b],))
-                c.execute("DELETE FROM trading_account WHERE id = ANY(%s)",
-                          ([acc_a, acc_b],))
+                c.execute("DELETE FROM td_md_map WHERE td_code = ANY(%s)", ([acc_a, acc_b],))
+                c.execute("DELETE FROM trade_interface WHERE code = ANY(%s)", ([acc_a, acc_b],))
                 c.commit()
 
 
@@ -774,7 +775,7 @@ class TestS8AccountClosePolicy:
         from src.data_platform import specs
         from src.data_platform.db import get_conn
         with get_conn() as c:
-            row = c.execute("SELECT id, params FROM trading_account ORDER BY id LIMIT 1").fetchone()
+            row = c.execute("SELECT code, params FROM trade_interface ORDER BY code LIMIT 1").fetchone()
         acc_id, prev = row[0], row[1]
         try:
             specs.update_close_policy(acc_id, {"opponent_depth": 2, "aggression": 0.25,
@@ -785,7 +786,7 @@ class TestS8AccountClosePolicy:
             assert a.max_close_order_qty("600000.XSHG") == 500
         finally:
             with get_conn() as c:
-                c.execute("UPDATE trading_account SET params=%s::jsonb WHERE id=%s",
+                c.execute("UPDATE trade_interface SET params=%s::jsonb WHERE code=%s",
                           (json.dumps(prev or {}, ensure_ascii=False), acc_id))
                 c.commit()
             specs.invalidate()

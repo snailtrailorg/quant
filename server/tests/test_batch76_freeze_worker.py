@@ -83,7 +83,7 @@ class StubStrategy:
 
 
 def _bar(seq, ts):
-    return {"gen": 1, "seq": seq, "ts": ts, "pub_ts": time.time(), "account_id": "1",
+    return {"gen": 1, "seq": seq, "ts": ts, "pub_ts": time.time(), "md_code": "1",
             "open": "10", "high": "10", "low": "10", "close": "10", "volume": "100"}
 
 

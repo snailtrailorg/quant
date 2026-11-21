@@ -47,7 +47,7 @@ def record_freeze(task_id: int, symbol: str, freeze_type: str, *, account_id: in
         raise ValueError(f"未知 freeze_type={freeze_type!r}（合法={FREEZE_TYPES}）")
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO freeze_event (task_id, account_id, symbol, freeze_type, watermark, "
+            "INSERT INTO freeze_event (task_id, account_code, symbol, freeze_type, watermark, "
             "gap_target_ts, detail) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (task_id, account_id, symbol, freeze_type, watermark, gap_target_ts,
              jsonb(detail) if detail is not None else None))
@@ -88,7 +88,7 @@ def list_events(task_id: int | None = None, limit: int = 50, *, open_only: bool 
     完整时区偏移），前端 `new Date()` 一族解析器全兼容。**勿用 `str(datetime)`**：丢分隔符、
     且隐式绑定 Python 默认表示（驱动/时区处理一变即静默漂移；批 76b 裁决点①定稿于此）。
     """
-    sql = ("SELECT id, task_id, account_id, symbol, freeze_type, frozen_at, watermark, "
+    sql = ("SELECT id, task_id, account_code, symbol, freeze_type, frozen_at, watermark, "
            "gap_target_ts, unfrozen_at, unfreeze_method, operator FROM freeze_event")
     args: list = []
     where: list[str] = []

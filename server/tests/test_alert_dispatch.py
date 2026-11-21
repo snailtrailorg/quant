@@ -349,7 +349,9 @@ def test_writeback_real_pg():
     "could not determine data type"——mock 测不出，本测直连本地 PG 走真 SQL。"""
     try:
         import psycopg
-        conn = psycopg.connect("postgresql://quant@127.0.0.1:5432/quant", autocommit=True)
+        import os
+        _u = os.environ.get("QUANT_DB_URL") or "postgresql://quant@127.0.0.1:5432/quant"
+        conn = psycopg.connect(_u, autocommit=True)
     except Exception:
         import pytest
         pytest.skip("本地 PG 不可用（真库回归跳过）")

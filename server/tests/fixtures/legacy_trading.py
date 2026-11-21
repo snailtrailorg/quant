@@ -68,7 +68,7 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
                 if row:
                     order_db_id, strategy_of = row[0], row[1] or sid
             conn.execute(
-                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref, account_id) "
+                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref, account_code) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
                 (as_utc(getattr(d, "datetime", None)) if getattr(d, "datetime", None) is not None else None,
                  strategy_of, order_db_id, getattr(d, "symbol", symbol),

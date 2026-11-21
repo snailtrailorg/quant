@@ -40,8 +40,8 @@ class TestAccountMismatch:
     """批 66b：同源校验无市场跳过分支（A 股同样必须匹配 account_id——payload 契约保证字段在场）。"""
 
     def test_matching(self):
-        assert hw._account_mismatch({"account_id": "1"}, 1) is False
-        assert hw._account_mismatch({"account_id": "7"}, 7) is False
+        assert hw._account_mismatch({"md_code": "1"}, 1) is False
+        assert hw._account_mismatch({"md_code": "7"}, 7) is False
 
     def test_astock_cross_source_now_rejected(self):
         """批 66b 反转钉：A 股跳过分支已删——跨源/缺失 account_id 一律拒（旧形态恒 False）。"""

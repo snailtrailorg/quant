@@ -31,6 +31,7 @@ def _data_license(account: str) -> str:
 
 
 def licensed(account_id: int, symbol: str) -> bool:
+    from src.data_platform import specs
     try:
         raw = _data_license(account_id).strip()
         if not raw:

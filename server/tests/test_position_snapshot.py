@@ -112,7 +112,7 @@ class TestOWiringContracts:
     def test_direct_flush_inside_else_branch(self):
         """快照写库（含 available_cash 列）与 flush 同分支：flush 在 INSERT 之后。"""
         src = open("src/strategy_runner/trading.py").read()
-        i_insert = src.index("INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital, available_cash)")   # D2 加 account_id 列
+        i_insert = src.index("INSERT INTO account_snapshot (account_code, total_value, daily_pnl, initial_capital, available_cash)")   # D2 加 account_id 列
         i_flush = src.index("_flush_positions(adapter, account_id, tid)")
         assert i_flush > i_insert, "flush 应在快照写库之后（同 else 分支）"
 
