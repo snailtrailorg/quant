@@ -129,6 +129,8 @@ export const getLLMUsageSeries = () => api.get('/llm-usage/series')   // 批54 �
 
 // 批 83a：配置面两族（域=表=端点族——kind ∈ data_source|trading_account，与后端 markets.DOMAIN_* 同源）
 const IFACE_PATH = { data_source: '/data-sources', trading_account: '/trading-accounts' }
+// M6a：交易族新 code API（LiveTask 绑定下拉用；旧 /trading-accounts 管理族待整体退役）
+export const getTdInterfaces = () => api.get('/td-interfaces')
 export const getInterfaces = (kind, cap) => api.get(IFACE_PATH[kind], { params: cap ? { cap } : {} })
 export const getInterfaceProviders = (kind) => api.get(`${IFACE_PATH[kind]}/providers`)
 export const createInterface = (kind, data) => api.post(IFACE_PATH[kind], data)

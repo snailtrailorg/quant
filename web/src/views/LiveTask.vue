@@ -180,7 +180,7 @@
         <el-divider content-position="left">{{ t('liveTask.account') }}</el-divider>
         <el-form-item :label="t('liveTask.accountId')">
           <el-select v-model="form.account_id" :placeholder="t('liveTask.phAccountId')" style="width: 100%">
-            <el-option v-for="v in accounts" :key="v.id" :label="`${v.name} (${v.id})`" :value="v.id" />
+            <el-option v-for="v in accounts" :key="v.code" :label="`${v.name} (${v.code})`" :value="v.code" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('liveTask.initialCapital')">
@@ -223,7 +223,7 @@ import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import api, { getLiveTasks, createLiveTask, updateLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getFreezeEvents, unfreezeLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
+import api, { getLiveTasks, createLiveTask, updateLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getFreezeEvents, unfreezeLiveTask, getStrategies, getTdInterfaces, apiErr } from '../api'
 import { CAPITAL_INPUT } from '../utils/inputRanges'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -250,7 +250,7 @@ const symbolSearching = ref(false)
 const loadAccounts = async () => {
   // 批83a：拆表后实盘任务绑定的是交易账号族（域=trading_account）——旧 'trading' 是能力 token 不是域；
   // 仍按 trading 能力筛选（行为不变：纯行情账号不进出绑定下拉，live_task.account_id FK 指向 trading_account.id）
-  try { accounts.value = await getInterfaces('trading_account', 'trading') || [] } catch { accounts.value = [] }
+  try { accounts.value = await getTdInterfaces() || [] } catch { accounts.value = [] }
 }
 const searchSymbols = async (q) => {
   if (!q || q.length < 2) { symbolOptions.value = []; return }
