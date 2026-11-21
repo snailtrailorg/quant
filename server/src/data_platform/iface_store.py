@@ -176,6 +176,12 @@ def update_interface(kind: str, code: str, patch: dict,
 
 def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], bool]) -> None:
     """启用前校验（建/改/启用共用）。失败不改 enabled。"""
+    if kind == "ds":
+        # 数据源=拉取侧适配器（非 registry 载体、无 login_key/account_key）——只校验能力非空
+        # （M0 §2.1 ds 保留 capabilities）。原误走 trade carrier_probe ⇒ ds 恒 PROVIDER_UNSUPPORTED 不可启用。
+        if not (row.get("capabilities") or []):
+            raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "数据源 capabilities 不能为空")
+        return
     role = "market" if kind == "md" else "trade"
     if not carrier_probe(role, row.get("provider", "")):
         raise IfaceError("PROVIDER_UNSUPPORTED", 400, f"{kind}:{row.get('provider')}")
