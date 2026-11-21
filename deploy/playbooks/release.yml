@@ -542,9 +542,15 @@
           changed_when: false
           when: deploy_task_units_source == 'db'
 
-        - name: 阶段 5.5 —— 重解析 td_exec 单元（code）
+        - name: 阶段 5.5 —— 重解析 td_exec 单元（code；provider∈deploy_td_exec_providers——无 TD builder 的 provider(如加密 P5 前)不拉，防 78）
           ansible.builtin.set_fact:
-            deploy_td_exec_units: "{{ td_units_post.stdout_lines | default([]) }}"
+            deploy_td_exec_units: >-
+              {{ td_units_post.stdout_lines | default([])
+                 | map('split', '|')
+                 | selectattr(1, 'in', deploy_td_exec_providers)
+                 | map(attribute=0)
+                 | map('regex_replace', '^(.*)$', 'quant-td-exec@\1.service')
+                 | list }}
           when: td_units_post is succeeded
 
       rescue:

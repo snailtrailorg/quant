@@ -133,7 +133,7 @@ case "$which_arg" in
   td)
     # 批189 后：交易执行单元素材=trade_interface.code（exec 接口）；排除 virtual（paper 不走 td_exec）。
     # 仅阶段5.5（迁移后，trade_interface 在位）调用；preflight 仍按 active 枚举旧实例供 7.6 停。
-    sql="SELECT 'quant-td-exec@' || code || '.service' FROM trade_interface WHERE enabled AND NOT is_virtual ORDER BY code"
+    sql="SELECT code || '|' || provider FROM trade_interface WHERE enabled AND NOT is_virtual ORDER BY code"
     ;;
 esac
 
