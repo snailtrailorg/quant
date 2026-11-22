@@ -23,6 +23,22 @@ _CLASSES = ("actionable", "in_constraint", "pinned", "current",
             "drift", "unreachable", "unknown")
 
 
+def _rpm_evr(raw):
+    """RPM EVR 解析：'[epoch:]version[-release]' -> (epoch:int, version:str, release:str)。"""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    epoch = 0
+    if ":" in s:
+        e, _, s = s.partition(":")
+        try:
+            epoch = int(e)
+        except ValueError:
+            epoch = 0
+    version, _, release = s.partition("-")
+    return epoch, version, release
+
+
 def _v(raw):
     """PEP440 解析；None/非法 -> None（行级不可比，禁异常外溢）。"""
     if raw is None:
@@ -54,6 +70,17 @@ def judge(cur: str | None, constraint: str | None, latest: str | None,
             return "unreachable", "本地构建 fork，不与上游比较"
         if managed_by in ("", "none", None):
             return "unknown", "无版本坐标（非 pypi/rpm 纳管）"
+        if managed_by == "repo":                 # OS rpm：EVR 语义（PEP440 解析不了 -20.al8）
+            cur_r = _rpm_evr(cur)
+            if cur_r is None:
+                return "unknown", f"当前版本不可解析: {cur!r}"
+            if not latest:
+                return "unknown", "上游不可达或未登记"
+            lat_r = _rpm_evr(latest)
+            if lat_r is None:
+                return "unknown", f"上游版本不可解析: {latest!r}"
+            return (("current", "") if evr_compare(lat_r, cur_r) <= 0
+                    else ("actionable", f"可升级 {cur} -> {latest}"))
         cur_v = _v(cur)
         if cur_v is None:
             return "unknown", f"当前版本不可解析: {cur!r}"

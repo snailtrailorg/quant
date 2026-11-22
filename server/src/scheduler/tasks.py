@@ -1251,7 +1251,12 @@ def dep_audit():
     try:
         provider = os_pkg.detect_provider()
         _pm = getattr(provider, "id", "unknown") or "unknown"
-        os_installed = [{"name": p.name, "version": p.version} for p in provider.list_installed()]
+        def _evr(p):
+            # 保留 RPM release：只存 version 会与 latest（version-release）不可比
+            base = p.version + (("-" + p.release) if getattr(p, "release", "") else "")
+            e = getattr(p, "epoch", "") or ""
+            return f"{e}:{base}" if e not in ("", "0", "(none)") else base
+        os_installed = [{"name": p.name, "version": _evr(p)} for p in provider.list_installed()]
         _upg = provider.upgrade_candidates() or {}
         os_upgrades = _upg if isinstance(_upg, dict) else {}
         try:

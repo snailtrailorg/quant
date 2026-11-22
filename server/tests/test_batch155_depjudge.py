@@ -128,6 +128,16 @@ class TestConstraints:
         assert in_constraint_max(["1.0"], None, "0.9") is None  # 无约束不用 icm
 
 
+class TestRpmJudge:
+    def test_os_rpm_actionable(self):
+        from src.quant_common.depjudge import judge
+        assert judge("5.10.134-19.7.al8", None, "5.10.134-20.al8", None, True, "repo")[0] == "actionable"
+
+    def test_os_rpm_current_equal(self):
+        from src.quant_common.depjudge import judge
+        assert judge("5.10.134-20.al8", None, "5.10.134-20.al8", None, True, "repo")[0] == "current"
+
+
 class TestEvr:
     def test_numeric_beats_alpha(self):
         assert evr_key(None, "1.1.11", None) > evr_key(None, "1.1.1k", None)  # rpm 语义

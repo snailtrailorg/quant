@@ -425,7 +425,7 @@ const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
 const compFilter = ref('')
 // 行筛选（RowFilter 分组——批 124）：默认 {vuln: ['yes']}（=行动导向默认视图，
 // 状态可见可改——取消"有漏洞"=健康面）；来源组选项从台账数据 distinct 预取
-const compRowFilter = ref({ vuln: ['yes'] })   // 初始=行动导向；「全部」清 {} ⇒ 下行 hasOwn 判据区分
+const compRowFilter = ref({})   // 初始=全部（安全更新/无 CVE 行不得被默认视图吞掉；按更新/漏洞排序置顶）
 // 组件全量（台账：pip+rpm+binary+system——批 124 起 binary 也入账，ffmpeg 这类
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
