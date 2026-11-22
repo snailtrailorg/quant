@@ -5,7 +5,6 @@ const props = defineProps({
   label: { type: String, required: true },
   value: { type: [String, Number], required: true },
   sub: { type: String, default: '' },
-  subLines: { type: Array, default: null },
   trend: { type: Number, default: null },
   spark: { type: Array, default: null },
   tone: { type: String, default: '' },   // 额外类（如 up/down）
@@ -18,7 +17,6 @@ const props = defineProps({
     <svg v-if="spark && spark.length > 1" class="sparkline-svg" width="100%" height="24" viewBox="0 0 100 24">
       <polyline :points="sparkPoints" fill="none" stroke="var(--up)" stroke-width="1.5" />
     </svg>
-    <div v-for="(line, i) in (subLines && subLines.length ? subLines : [])" :key="i" class="ksub">{{ line }}</div>
     <div v-if="sub || trend != null" class="ksub">
       <span v-if="trend != null" :class="trend >= 0 ? 'up' : 'down'">{{ trend >= 0 ? '▲' : '▼' }} {{ Math.abs(trend) }}%</span>
       <span v-if="sub">{{ sub }}</span>

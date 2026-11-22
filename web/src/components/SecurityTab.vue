@@ -71,9 +71,12 @@
                  :class="{ 'deploy-cur': r === snap.deploy?.current }">{{ deployFmt(r) }}</div>
           </div>
         </el-card>
-        <KpiCard :label="t('secpage.compUpdates')" :value="updCounts.total"
-                 :sub-lines="[t('secpage.osUpdates') + ': ' + updCounts.os,
-                              t('secpage.pypiUpdates') + ': ' + updCounts.pip]" />
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.compUpdates') }}</span></div>
+          <div class="card-value"><span class="pct small">{{ updCounts.total }}</span></div>
+          <div class="kpi-sub">{{ t('secpage.osUpdates') }}: {{ updCounts.os }}</div>
+          <div class="kpi-sub">{{ t('secpage.pypiUpdates') }}: {{ updCounts.pip }}</div>
+        </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
           <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
@@ -268,7 +271,6 @@ import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
 import IconBtn from './IconBtn.vue'
-import KpiCard from './KpiCard.vue'
 
 
 const { t, locale } = useI18n()
@@ -552,7 +554,7 @@ const onDeleteSummary = async (d) => {
 
 <style scoped>
 /* A 区四卡——同 SystemMetricsCards 形态（wd-20 首屏同构；窄屏 2×2 回退同款） */
-.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+.card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); }
 .metric-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
 .card-name { font-size: var(--fs-label); color: var(--text-secondary); }
