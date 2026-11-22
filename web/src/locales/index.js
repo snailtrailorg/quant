@@ -1433,6 +1433,7 @@ mail: '邮件 SMTP',
     },
     secpage: {   // 批 120：安全态势五区（A 状态卡/B AI 摘要/C 漏洞列表/D 组件版本/E 基线时间线）
       vulnTotal: '活跃漏洞', depOutdated: '依赖滞后', lastScan: '上次扫描',
+      compUpdates: '组件更新', osUpdates: '系统包', pypiUpdates: 'PyPI 包',
       stale: '数据过期（超 26h 未扫）', vulnDb: '漏洞库',
       scanResult: '扫描结果', deploys: '近期发布',   // 批 171p：两卡合并+发布卡（名词用户终裁——'上产'是内部黑话，'发布'对齐 release 本义）
       dnfUpdates: '系统安全更新', updateTag: '更新标识', kernelReboot: '需重启生效',
@@ -2885,6 +2886,7 @@ mail: 'Email SMTP',
     },
     secpage: {   // batch 120: security posture five zones
       vulnTotal: 'Active vulns', depOutdated: 'Deps outdated', lastScan: 'Last scan',
+      compUpdates: 'Component Updates', osUpdates: 'OS packages', pypiUpdates: 'PyPI packages',
       stale: 'Data stale (no scan in 26h+)', vulnDb: 'Vuln DB',
       scanResult: 'Scan Result', deploys: 'Recent Releases',
       dnfUpdates: 'OS Security Updates', updateTag: 'Update ref', kernelReboot: 'Reboot to apply',
@@ -4831,6 +4833,7 @@ mail: 'Email SMTP',
       secpage: {
         "vulnTotal": "活躍漏洞",
                 "depOutdated": "依賴滯後",
+                "compUpdates": "組件更新", "osUpdates": "系統套件", "pypiUpdates": "PyPI 套件",
         "lastScan": "上次掃描",
         "stale": "資料過期（超 26h 未掃）",
         "vulnDb": "漏洞庫",

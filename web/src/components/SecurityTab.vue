@@ -72,6 +72,12 @@
           </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.compUpdates') }}</span></div>
+          <div class="card-value"><span class="pct small">{{ updCounts.total }}</span></div>
+          <div class="kpi-sub">{{ t('secpage.osUpdates') }}: {{ updCounts.os }}</div>
+          <div class="kpi-sub">{{ t('secpage.pypiUpdates') }}: {{ updCounts.pip }}</div>
+        </el-card>
+        <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
           <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
           <div class="kpi-sub" style="white-space:nowrap">{{ t('secpage.dbUpstreamAt') }}：{{ dbBuiltTime }}</div>
@@ -425,9 +431,15 @@ const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
 const compFilter = ref('')
 // 行筛选（RowFilter 分组——批 124）：默认 {vuln: ['yes']}（=行动导向默认视图，
 // 状态可见可改——取消"有漏洞"=健康面）；来源组选项从台账数据 distinct 预取
-const compRowFilter = ref({})   // 初始=全部（安全更新/无 CVE 行不得被默认视图吞掉；按更新/漏洞排序置顶）
+const compRowFilter = ref({ vuln: ['yes'] })   // 初始=行动导向（只看有漏洞；用户裁定保留）
 // 组件全量（台账：pip+rpm+binary+system——批 124 起 binary 也入账，ffmpeg 这类
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
+const updCounts = computed(() => {
+  const rows = componentRows.value
+  const os = rows.filter(r => r.has_update === 'yes' && r.source === 'os').length
+  const pip = rows.filter(r => r.has_update === 'yes' && r.source === 'pip').length
+  return { total: os + pip, os, pip }
+})
 const componentRows = computed(() => {
   const led = snap.value?.components_ledger || []
   // 批181：漏洞数与修复建议改为**后端单源**（selects active findings + vuln_advice），
