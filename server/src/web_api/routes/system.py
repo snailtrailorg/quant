@@ -237,6 +237,29 @@ def health_events_api(limit: int = 100, payload: dict = Depends(require_perm("sy
                         "severity": r[3], "detail": r[4] or ""} for r in rows]}
 
 
+@router.get("/api/alerts/active")
+def alerts_active_api(_u=Depends(require_perm("read"))):
+    """系统告警·当前未消除（每 rule+component 最新非 recovery 行）。"""
+    from src.data_platform.health_events import active_alerts
+    return {"items": active_alerts()}
+
+
+@router.get("/api/alerts/history")
+def alerts_history_api(limit: int = 200, _u=Depends(require_perm("read"))):
+    """系统告警·已消除历史（原始告警 + 恢复时间）。"""
+    from src.data_platform.health_events import resolved_alerts
+    return {"items": resolved_alerts(max(1, min(limit, 500)))}
+
+
+@router.delete("/api/alerts/history")
+def alerts_clear_api(payload: dict = Depends(require_perm("system_config"))):
+    """清除已消除历史（未消除告警保留；操作留审计）。"""
+    from src.data_platform.health_events import clear_resolved
+    n = clear_resolved()
+    audit_log(payload["username"], "alerts_history_clear", f"deleted={n}")
+    return {"deleted": n}
+
+
 @router.get("/api/system/metrics")
 def system_metrics_api(payload: dict = Depends(require_perm("system_config"))):
     """系统指标：资源当前值（最新 system_metric 行）+ 近 7d 时间序列（sparkline 用）。

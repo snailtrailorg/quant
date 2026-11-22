@@ -79,8 +79,14 @@ def _prune_events() -> None:
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            conn.execute("DELETE FROM health_event WHERE ts < now() - (%s * interval '1 day')",
-                         (EVENT_RETENTION_DAYS,))
+            # 保留每 (rule_id,component) 的最新一行：长寿命活动告警不得因 30 天窗被删成「无告警」
+            conn.execute(
+                # 每 (rule,component) 的「最新告警」+「最新恢复」各留一行（长寿命故障恢复后历史可见）
+                "DELETE FROM health_event h WHERE ts < now() - (%s * interval '1 day') "
+                "AND EXISTS (SELECT 1 FROM health_event n WHERE n.rule_id=h.rule_id "
+                "AND n.component=h.component AND n.ts > h.ts "
+                "AND (n.severity='recovery') = (h.severity='recovery'))",
+                (EVENT_RETENTION_DAYS,))
             conn.commit()
     except Exception as e:
         logger.debug("health_event 清理失败（表未建/PG 抖动，忽略）: %s", e)
