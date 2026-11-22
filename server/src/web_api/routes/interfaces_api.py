@@ -92,14 +92,45 @@ def list_ds(enabled: bool | None = None, market: str | None = None,
     return {"items": _wrap(S.list_interfaces, "ds", enabled=enabled, market=market)}
 
 
+def _config_axis(kind: str, rows: list[dict], ready: dict[str, bool],
+                 mapped: set[str]) -> dict[str, dict]:
+    """C3 配置轴（纯函数）：缺载体/缺凭证(td)/缺映射(td)；virtual 行不判。"""
+    out: dict[str, dict] = {}
+    for row in rows:
+        missing: list[str] = []
+        if not row.get("is_virtual"):
+            if not ready.get(row.get("provider", ""), False):
+                missing.append("carrier")
+            if kind == "td" and not row.get("has_credentials"):
+                missing.append("credentials")
+            if kind == "td" and row.get("code") not in mapped:
+                missing.append("mapping")
+        out[row["code"]] = {
+            "virtual": bool(row.get("is_virtual")),
+            "config_ok": not missing,
+            "config_missing": missing,
+        }
+    return out
+
+
 @router.get("/api/interfaces/status")
 def iface_status(kind: str, _u=Depends(require_perm("read"))):
-    """接口运行态只读（M6a 状态卡）：running/working/connected，不判活不做阈值。"""
+    """接口两轴状态（M6b）：运行轴 running/working/connected + 配置轴 完整/未完成原因。
+
+    配置轴按 C3：缺载体 / 缺凭证（td）/ 缺映射（td）；virtual 行显示「—」不判配置。
+    """
     from src.data_platform.iface_status import status_of
     if kind not in ("md", "td"):
         raise ApiError(400, "KIND_UNKNOWN", kind)
-    codes = [r["code"] for r in _wrap(S.list_interfaces, kind)]
-    return {"items": status_of(kind, codes)}
+    rows = _wrap(S.list_interfaces, kind)
+    ready = {x["provider"]: x["ready"] for x in _providers("market" if kind == "md" else "trade")}
+    mapped = ({r["code"] for r in rows if _wrap(S.list_mappings, "td", r["code"])}
+              if kind == "td" else set())
+    axis = _config_axis(kind, rows, ready, mapped)
+    out = status_of(kind, [r["code"] for r in rows])
+    for item in out:
+        item.update(axis.get(item["code"], {}))
+    return {"items": out}
 
 
 @router.get("/api/md-interfaces/providers")

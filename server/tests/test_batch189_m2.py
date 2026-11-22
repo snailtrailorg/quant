@@ -96,6 +96,79 @@ def test_td_credentials_encrypted_and_enable_without_reentry():
             c.commit()
 
 
+def test_mapping_items_normalization():
+    """M6b 映射写侧：唯一 md、priority 1..99 整数（防 PK 裸 500 与主源不确定）。"""
+    assert S.norm_mapping_items([{"md_code": "md-a", "priority": "2"}]) == [
+        {"md_code": "md-a", "priority": 2}]
+    for bad in ([{"md_code": "md-a", "priority": 1}, {"md_code": "md-a", "priority": 2}],
+                [{"md_code": "md-a", "priority": 1}, {"md_code": "md-b", "priority": 1}],
+                [{"md_code": "", "priority": 1}],
+                [{"md_code": "md-a", "priority": 0}]):
+        with pytest.raises(S.IfaceError):
+            S.norm_mapping_items(bad)
+
+
+def test_virtual_enable_skips_mapping_and_db(monkeypatch):
+    """virtual（paper）走 paper 通道：不查载体/映射，配置轴显示「—」。"""
+    def _boom(*a, **k):
+        raise AssertionError("virtual 不应查库")
+    monkeypatch.setattr(S, "get_conn", _boom)
+    S.validate_payload("td", {"provider": "paper", "is_virtual": True,
+                              "login_key": "paper|virtual"}, lambda role, prov: False)
+
+
+def _fake_map_conn(md_market="astock"):
+    from unittest.mock import MagicMock
+    cur = MagicMock()
+    cur.fetchone.return_value = (md_market,)
+    conn = MagicMock()
+    conn.execute.return_value = cur
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    return ctx
+
+
+def test_set_mappings_cross_market_rejected(monkeypatch):
+    monkeypatch.setattr(S, "_get_interface_raw",
+                        lambda kind, code: {"code": code, "market": "astock", "enabled": False})
+    monkeypatch.setattr(S, "get_conn", lambda: _fake_map_conn("crypto"))
+    with pytest.raises(S.IfaceError) as e:
+        S.set_mappings("td-x", [{"md_code": "md-crypto", "priority": 1}])
+    assert "跨市场" in str(e.value)
+
+
+def test_set_mappings_unknown_td_404(monkeypatch):
+    monkeypatch.setattr(S, "_get_interface_raw",
+                        lambda kind, code: (_ for _ in ()).throw(S.IfaceError("IFACE_NOT_FOUND", 404, code)))
+    with pytest.raises(S.IfaceError) as e:
+        S.set_mappings("td-none", [])
+    assert e.value.status == 404
+
+
+def test_set_mappings_rejects_clear_when_enabled(monkeypatch):
+    monkeypatch.setattr(S, "_get_interface_raw",
+                        lambda kind, code: {"code": code, "market": "astock", "enabled": True})
+    with pytest.raises(S.IfaceError) as e:
+        S.set_mappings("td-x", [])
+    assert "不可清空" in str(e.value)
+
+
+def test_config_axis_two_axis_status():
+    """M6b 配置轴：td 缺载体/缺凭证/缺映射三类；virtual 不判；md 不要求映射。"""
+    from src.web_api.routes.interfaces_api import _config_axis
+    rows = [{"code": "td-a", "provider": "xtp", "has_credentials": True},
+            {"code": "td-b", "provider": "emt_emq", "has_credentials": False},
+            {"code": "td-v", "provider": "paper", "is_virtual": True}]
+    ax = _config_axis("td", rows, {"xtp": True, "emt_emq": False}, {"td-a"})
+    assert ax["td-a"]["config_ok"] and ax["td-a"]["config_missing"] == []
+    assert ax["td-b"]["config_missing"] == ["carrier", "credentials", "mapping"]
+    assert ax["td-v"]["virtual"] and ax["td-v"]["config_ok"]
+    md = _config_axis("md", [{"code": "md-x", "provider": "binance_perp"}],
+                      {"binance_perp": True}, set())
+    assert md["md-x"]["config_ok"]
+
+
 def test_provider_directory_marks_carrier_readiness():
     """目录带就绪态：xtp 交易就绪；emt_emq 交易无端口=待接入（可存草稿不可启用）。"""
     from src.web_api.routes.interfaces_api import _providers

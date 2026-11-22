@@ -235,6 +235,9 @@ def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], b
         if not (row.get("capabilities") or []):
             raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "数据源 capabilities 不能为空")
         return
+    # virtual（paper）：无券商载体/无映射，走 live_task paper 通道——配置轴显示「—」，不判
+    if row.get("is_virtual"):
+        return
     role = "market" if kind == "md" else "trade"
     if not carrier_probe(role, row.get("provider", "")):
         raise IfaceError("PROVIDER_UNSUPPORTED", 400, f"{kind}:{row.get('provider')}")
@@ -286,19 +289,48 @@ def delete_interface(kind: str, code: str, stop_unit: Callable[[str], None],
         _bump()
 
 
+def norm_mapping_items(items: Iterable[dict]) -> list[dict]:
+    """映射条目规范化/校验（纯函数）：md_code 非空且唯一、priority 1..99 整数。"""
+    out: list[dict] = []
+    seen: set[str] = set()
+    prios: set[int] = set()
+    for it in items or []:
+        md = str((it or {}).get("md_code") or "").strip()
+        if not md:
+            raise IfaceError("MAPPING_MISSING", 400, "映射缺 md_code")
+        if md in seen:
+            raise IfaceError("MAPPING_MISSING", 400, f"映射重复：{md}")
+        seen.add(md)
+        try:
+            pri = int((it or {}).get("priority"))
+        except (TypeError, ValueError):
+            raise IfaceError("MAPPING_MISSING", 400, "priority 必须为 1..99 整数") from None
+        if not 1 <= pri <= 99:
+            raise IfaceError("MAPPING_MISSING", 400, "priority 必须为 1..99 整数")
+        if pri in prios:
+            raise IfaceError("MAPPING_MISSING", 400, f"优先级重复：{pri}")
+        prios.add(pri)
+        out.append({"md_code": md, "priority": pri})
+    return out
+
+
 def set_mappings(td_code: str, items: Iterable[dict]) -> None:
+    norm = norm_mapping_items(items)
+    row = _get_interface_raw("td", td_code)          # 不存在 → 404（空 items 也不例外）
+    if row.get("enabled") and not norm:
+        raise IfaceError("MAPPING_MISSING", 400, "已启用交易接口不可清空取价映射")
     with get_conn() as conn:
-        for it in items:
-            chk = conn.execute("SELECT market FROM trade_interface WHERE code=%s", (td_code,)).fetchone()
-            mkt = conn.execute("SELECT market FROM market_interface WHERE code=%s", (it["md_code"],)).fetchone()
-            if not chk or not mkt:
-                raise IfaceError("MAPPING_MISSING", 409, "td 或 md 不存在")
-            if chk[0] != mkt[0]:
+        for it in norm:
+            mkt = conn.execute("SELECT market FROM market_interface WHERE code=%s",
+                               (it["md_code"],)).fetchone()
+            if not mkt:
+                raise IfaceError("MAPPING_MISSING", 409, f"行情接口不存在：{it['md_code']}")
+            if row["market"] != mkt[0]:
                 raise IfaceError("MAPPING_MISSING", 409, "跨市场映射不允许")
         conn.execute("DELETE FROM td_md_map WHERE td_code=%s", (td_code,))
-        for it in items:
+        for it in norm:
             conn.execute("INSERT INTO td_md_map(td_code,md_code,priority) VALUES (%s,%s,%s)",
-                         (td_code, it["md_code"], int(it["priority"])))
+                         (td_code, it["md_code"], it["priority"]))
         conn.commit()
         _bump()
 

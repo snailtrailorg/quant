@@ -221,11 +221,12 @@ class TdExec:
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
 
     def _config_digest(self):
-        """接口行身份/凭证/启用态摘要（配置面 bump 后重读；变更=带码重启生效）。"""
-        from src.data_platform.iface_store import get_td_identity
+        """接口行身份/凭证/启用态 + 取价映射摘要（变更=带码重启生效；映射热改不重启会半生效）。"""
+        from src.data_platform.iface_store import get_td_identity, list_mappings
         ident = get_td_identity(self.td_code) or {}
+        maps = tuple((m["md_code"], m["priority"]) for m in list_mappings("td", self.td_code))
         return (ident.get("provider"), ident.get("credentials_encrypted"),
-                ident.get("params"), bool(ident.get("enabled")))
+                ident.get("params"), bool(ident.get("enabled")), maps)
 
     def _reload_iface(self) -> None:
         if self._config_digest() != getattr(self, "_cfg_digest", None):

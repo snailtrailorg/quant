@@ -944,6 +944,11 @@ def run(ctx: dict) -> None:
     loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
 
     _cfg_seen = {"v": None}
+    _map_seen = {"d": None}   # M6b：取价映射摘要（变化→exit 9 重启，任务侧 ≤2s+重启窗生效）
+
+    def _mapping_digest():
+        from src.data_platform.iface_store import list_mappings
+        return tuple((m["md_code"], m["priority"]) for m in list_mappings("td", account_id))
 
     def _cfg_version_hook():
         """P2b：配置版本轮询（≤2s）——变化即清规格缓存，全进程读到新规格。"""
@@ -954,6 +959,11 @@ def run(ctx: dict) -> None:
         except Exception as e:   # noqa: BLE001 —— 读失败下轮再试
             logger.debug("cfg:version 轮询失败: %s", e)
             return
+        if _map_seen["d"] is None:
+            try:
+                _map_seen["d"] = _mapping_digest()   # 首轮建基线（防首次变更被吞）
+            except Exception as e:   # noqa: BLE001
+                logger.debug("取价映射基线读取失败: %s", e)
         if _cfg_seen["v"] is None:
             _cfg_seen["v"] = ver
             return
@@ -965,6 +975,17 @@ def run(ctx: dict) -> None:
             except Exception as e:   # noqa: BLE001
                 logger.warning("规格缓存失效失败: %s", e)
             logger.info("cfg:version=%s 变化，规格缓存已失效", ver)
+            # M6b/E8：映射热改须让任务重读（否则取价用旧 md，与 hub 订阅源分叉=全平 NO_QUOTE）
+            try:
+                cur_map = _mapping_digest()
+            except Exception as e:   # noqa: BLE001 —— 读失败下轮再试
+                logger.warning("取价映射摘要读取失败: %s", e)
+                cur_map = _map_seen["d"]
+            if _map_seen["d"] is not None and cur_map != _map_seen["d"]:
+                _alert(f"任务 {tid} 取价映射已变更", "重启任务进程以切换取价源（避免 hub/任务双源分叉）。",
+                       code="mapping.changed")
+                exit_process(9)
+            _map_seen["d"] = cur_map
 
     loop.every("cfg-version", 2.0, _cfg_version_hook)
 

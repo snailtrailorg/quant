@@ -12,6 +12,8 @@
             <el-tag v-for="m in (maps[row.code] || [])" :key="(kind === 'td' ? m.md_code : m.td_code) + '-' + m.priority" size="small" class="mtag">
               {{ kind === 'td' ? m.md_code : m.td_code }} · p{{ m.priority }}
             </el-tag>
+            <el-button v-if="kind === 'td' && canWrite" link type="primary" size="small" class="mtag" :disabled="mapsOk[row.code] !== true" @click="openMaps(row)">编辑映射</el-button>
+            <span v-if="mapsOk[row.code] !== true" class="muted">（映射未就绪，暂不可编辑）</span>
           </div>
         </template>
       </el-table-column>
@@ -79,6 +81,32 @@
         <el-button type="primary" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="mapDlg" :title="'编辑取价映射 · ' + mapCode" :width="520">
+      <el-table :data="mapForm" size="small" border>
+        <el-table-column label="行情接口" min-width="200">
+          <template #default="{ row }">
+            <el-select v-model="row.md_code" filterable placeholder="md-*">
+              <el-option v-for="m in mdOf" :key="m.code" :label="m.code" :value="m.code" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="优先级" min-width="110">
+          <template #default="{ row }"><el-input-number v-model="row.priority" :min="1" :max="99" size="small" /></template>
+        </el-table-column>
+        <el-table-column label="" min-width="60">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" @click="mapForm.splice($index, 1)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-button size="small" class="mtag" @click="mapForm.push({ md_code: '', priority: mapForm.length + 1 })">添加</el-button>
+      <div class="muted mtag">保存后进程在 2–45s 内检测并重启生效（主备顺序=priority）。</div>
+      <template #footer>
+        <el-button @click="mapDlg = false">取消</el-button>
+        <el-button type="primary" @click="saveMaps">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -95,6 +123,13 @@ const providers = ref([])
 const perms = ref([])
 const dlg = ref(false)
 const form = ref({})
+const mapDlg = ref(false)
+const mapCode = ref('')
+const mapForm = ref([])
+const mapMarket = ref('')
+const mdOptions = ref([])
+const mapsOk = ref({})
+const mdOf = computed(() => mdOptions.value.filter(m => !mapMarket.value || m.market === mapMarket.value))
 
 const canWrite = computed(() => perms.value.includes('system_config'))
 const base = k => (k === 'td' ? '/td-interfaces' : k === 'md' ? '/md-interfaces' : '/data-sources')
@@ -111,9 +146,15 @@ async function load() {
     rows.value = r.items || []
     maps.value = {}
     if (props.kind !== 'ds') {
+      mapsOk.value = {}
       for (const row of rows.value) {
-        try { maps.value[row.code] = (await api.get(base(props.kind) + '/' + row.code + '/mappings')).items || [] }
-        catch { maps.value[row.code] = [] }
+        try {
+          maps.value[row.code] = (await api.get(base(props.kind) + '/' + row.code + '/mappings')).items || []
+          mapsOk.value[row.code] = true
+        } catch {
+          maps.value[row.code] = []
+          mapsOk.value[row.code] = false   // 读失败≠无映射：禁编辑，防全量替换误清空
+        }
       }
     }
     emit('loaded', rows.value)
@@ -122,6 +163,23 @@ async function load() {
 async function loadProviders() {
   if (props.kind === 'ds') return
   try { providers.value = (await api.get(base(props.kind) + '/providers')).items || [] } catch { providers.value = [] }
+  if (props.kind === 'td') {
+    try { mdOptions.value = (await api.get('/md-interfaces')).items || [] } catch { mdOptions.value = [] }
+  }
+}
+function openMaps(row) {
+  mapCode.value = row.code
+  mapMarket.value = row.market
+  mapForm.value = (maps.value[row.code] || []).map(m => ({ md_code: m.md_code, priority: m.priority }))
+  mapDlg.value = true
+}
+async function saveMaps() {
+  const items = mapForm.value.filter(m => m.md_code)
+    .map(m => ({ md_code: m.md_code, priority: Number(m.priority) || 1 }))
+  try {
+    await api.post('/td-interfaces/' + mapCode.value + '/mappings', { items })
+    mapDlg.value = false; ElMessage.success('映射已保存'); load()
+  } catch (e) { ElMessage.error(apiErr(e)) }
 }
 function openCreate() {
   form.value = { _create: true, code: '', name: '', provider: '', market: 'astock',
