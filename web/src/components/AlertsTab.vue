@@ -4,7 +4,7 @@
       <template #header>
         <div class="hd">
           <b>{{ t('sysmon.alertsActive') }}</b>
-          <el-button size="small" @click="load">{{ t('common.refresh') }}</el-button>
+          <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
         </div>
       </template>
       <el-table :data="active" size="small" border>
@@ -24,13 +24,14 @@
       <template #header>
         <div class="hd">
           <b>{{ t('sysmon.alertsHistory') }}</b>
-          <div>
-            <el-button size="small" @click="load">{{ t('common.refresh') }}</el-button>
-            <el-button v-if="canClear" size="small" type="primary" plain @click="clear">{{ t('sysmon.clearHistory') }}</el-button>
+          <div style="display:flex;align-items:center;gap:var(--icon-gap)">
+            <RowFilter v-model="histFilter" :groups="histFilterGroups" :title="t('common.filter')" />
+            <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
+            <IconBtn v-if="canClear" :icon="Delete" type="danger" :title="t('sysmon.clearHistory')" @click="clear" />
           </div>
         </div>
       </template>
-      <el-table :data="history" size="small" border>
+      <el-table :data="histRows" size="small" border>
         <el-table-column :label="t('sysmon.tsCol')" min-width="170">
           <template #default="{ row }">{{ fmt(row.ts) }}</template>
         </el-table-column>
@@ -53,7 +54,10 @@ import { ref, computed, onMounted } from 'vue'
 import { fmtTime } from '../utils/fmtTime'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Refresh } from '@element-plus/icons-vue'
 import api, { apiErr, meOnce } from '../api'
+import IconBtn from './IconBtn.vue'
+import RowFilter from './RowFilter.vue'
 
 const { t } = useI18n()
 const active = ref([])
@@ -65,6 +69,24 @@ const fmt = v => (v ? fmtTime.full(v) : '—')
 const sev = s => (s === 'critical' ? t('sysmon.critical')
   : s === 'warning' ? t('sysmon.warning') : t('sysmon.normal'))
 const sevType = s => (s === 'critical' ? 'danger' : s === 'warning' ? 'warning' : 'info')
+
+// 历史卡行筛选：级别 + 规则（选项从当前数据 distinct，空=全显）
+const histFilter = ref({})
+const histFilterGroups = computed(() => {
+  const rules = [...new Set(history.value.map(r => r.rule_id).filter(Boolean))].sort()
+  return [
+    { key: 'sev', label: t('sysmon.severityCol'), options: [
+      { value: 'critical', label: t('sysmon.critical') },
+      { value: 'warning', label: t('sysmon.warning') }] },
+    { key: 'rule', label: t('sysmon.ruleCol'), options: rules.map(x => ({ value: x, label: x })) },
+  ]
+})
+const histRows = computed(() => {
+  const f = histFilter.value
+  const sev = f.sev ?? [], rule = f.rule ?? []
+  return history.value.filter(r =>
+    (!sev.length || sev.includes(r.severity)) && (!rule.length || rule.includes(r.rule_id)))
+})
 
 async function load() {
   try {
