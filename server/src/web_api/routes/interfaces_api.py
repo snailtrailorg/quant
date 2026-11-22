@@ -63,6 +63,9 @@ def _providers(role: str) -> list[dict]:
     from src.registry import DOMAIN_MARKET, DOMAIN_TRADING, pick, registered
     domain, need = ((DOMAIN_MARKET, {"market_data"}) if role == "market"
                     else (DOMAIN_TRADING, {"execution"}))
+    from src.data_platform.interfaces import list_interface_schemas
+    schemas = list_interface_schemas()
+    _alias = {"emt": "emt_emq"}
     out = []
     for prov in sorted({name for (dom, name) in registered() if dom == domain}):
         try:
@@ -70,7 +73,10 @@ def _providers(role: str) -> list[dict]:
             ready = True
         except Exception:  # noqa: BLE001 —— 实体在、端口缺 = 待接入
             ready = False
-        out.append({"provider": prov, "ready": ready})
+        sch = schemas.get(prov) or schemas.get(_alias.get(prov, ""), {})
+        out.append({"provider": prov, "ready": ready,
+                    "field_schema": sch.get("field_schema", []),
+                    "params_schema": sch.get("params_schema", [])})
     return out
 
 

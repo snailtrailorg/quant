@@ -1,238 +1,345 @@
 <template>
-  <div>
-    <div v-if="canWrite" class="mb">
-      <el-button type="primary" size="small" @click="openCreate">新增{{ labelOf(kind) }}</el-button>
-    </div>
-    <el-table :data="rows" row-key="code" size="small" border>
-      <el-table-column v-if="kind !== 'ds'" type="expand">
+  <el-card>
+    <template #header>
+      <div class="hd">
+        <span class="hd-title">{{ title }}</span>
+        <div class="hd-acts">
+          <RowFilter v-model="filter" :groups="filterGroups" :title="t('common.filter')" />
+          <ColumnSettings :storage-key="'cols.iface.' + kind" :columns="colDefs" v-model:visible="visible" />
+          <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
+          <IconBtn v-if="canWrite" :icon="Plus" :title="t('common.create')" @click="openCreate" />
+        </div>
+      </div>
+    </template>
+    <TableShell :data="shown" :storage-key="'iface.' + kind">
+      <el-table-column prop="code" :label="t('interfaces.colCode')" min-width="120">
+        <template #default="{ row }"><code class="code">{{ row.code }}</code></template>
+      </el-table-column>
+      <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="provider" label="Provider" min-width="110" />
+      <el-table-column prop="market" :label="t('interfaces.colMarket')" min-width="80">
+        <template #default="{ row }">{{ marketName(row.market) }}</template>
+      </el-table-column>
+      <el-table-column v-if="kind === 'ds'" :label="t('interfaces.colCapabilities')" min-width="200">
         <template #default="{ row }">
-          <div class="pad">
-            <b>取价映射（只读）</b>
-            <span v-if="!(maps[row.code] && maps[row.code].length)" class="muted"> —（无映射）</span>
-            <el-tag v-for="m in (maps[row.code] || [])" :key="(kind === 'td' ? m.md_code : m.td_code) + '-' + m.priority" size="small" class="mtag">
-              {{ kind === 'td' ? m.md_code : m.td_code }} · p{{ m.priority }}
-            </el-tag>
-            <el-button v-if="kind === 'td' && canWrite" link type="primary" size="small" class="mtag" :disabled="mapsOk[row.code] !== true" @click="openMaps(row)">编辑映射</el-button>
-            <span v-if="mapsOk[row.code] !== true" class="muted">（映射未就绪，暂不可编辑）</span>
-          </div>
+          <el-tag v-for="c in row.capabilities || []" :key="c" size="small" class="tag">{{ t('interfaces.cap_' + c) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="code" label="code" min-width="110" />
-      <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="provider" label="provider" min-width="100" />
-      <el-table-column prop="market" label="市场" min-width="80" />
-      <el-table-column v-if="kind === 'ds'" label="能力" min-width="180">
-        <template #default="{ row }">{{ (row.capabilities || []).join(', ') }}</template>
-      </el-table-column>
-      <el-table-column v-else prop="impl" label="impl" min-width="70" />
-      <el-table-column v-if="kind !== 'ds'" label="载体" min-width="90">
-        <template #default="{ row }"><span :class="carrierOf(row.provider) === '就绪' ? 'on' : 'off'">{{ carrierOf(row.provider) }}</span></template>
-      </el-table-column>
-      <el-table-column label="启用" min-width="80">
+      <el-table-column v-else :label="t('interfaces.colCarrier')" min-width="90">
         <template #default="{ row }">
-          <el-switch :model-value="row.enabled" :disabled="!canWrite" @change="v => toggle(row, v)" />
+          <el-tag size="small" :type="carrierType(row.provider)" effect="plain">
+            {{ carrier(row.provider) ? t('interfaces.carrierReady') : t('interfaces.carrierPending') }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="凭证" min-width="70">
-        <template #default="{ row }"><span>{{ row.has_credentials ? '有' : '无' }}</span></template>
-      </el-table-column>
-      <el-table-column v-if="canWrite" label="操作" min-width="140">
+      <el-table-column v-if="kind !== 'ds'" :label="t('interfaces.colRuntime')" min-width="190">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-popconfirm title="确认删除该接口？" @confirm="del(row)">
-            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
-          </el-popconfirm>
+          <span class="dot" :class="runClass(row.code)" />
+          <span>{{ runText(row.code) }}</span>
+          <span v-if="ageText(row.code)" class="muted"> · {{ ageText(row.code) }}</span>
         </template>
+      </el-table-column>
+      <el-table-column v-if="kind !== 'ds'" :label="t('interfaces.colConfig')" min-width="130">
+        <template #default="{ row }">
+          <span v-if="row.is_virtual" class="muted">—</span>
+          <el-tag v-else-if="st(row.code)?.config_ok" size="small" type="success" effect="plain">{{ t('interfaces.configOk') }}</el-tag>
+          <span v-else class="missing">{{ (st(row.code)?.config_missing || []).map(missingText).join(' / ') || '—' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="kind === 'td'" :label="t('interfaces.colAccountKey')" min-width="120">
+        <template #default="{ row }">
+          <span v-if="row.is_virtual" class="tag-v">{{ t('interfaces.virtual') }}</span>
+          <code v-else class="code">{{ maskAcct(row.account_key) }}</code>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="kind === 'td'" :label="t('interfaces.colMapping')" min-width="220">
+        <template #default="{ row }">
+          <template v-if="mapsOk[row.code]">
+            <el-tag v-for="m in maps[row.code] || []" :key="m.md_code" size="small" class="tag">{{ m.md_code }} · p{{ m.priority }}</el-tag>
+            <span v-if="!(maps[row.code] || []).length" class="missing">{{ t('interfaces.mappingNone') }}</span>
+          </template>
+          <span v-else class="muted">{{ t('interfaces.mappingLoading') }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="kind === 'md'" :label="t('interfaces.colRefs')" min-width="150">
+        <template #default="{ row }">
+          <el-tag v-for="r in refs[row.code] || []" :key="r.td_code" size="small" class="tag">{{ r.td_code }}</el-tag>
+          <span v-if="!(refs[row.code] || []).length" class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.enable')" min-width="80">
+        <template #default="{ row }">
+          <el-switch :model-value="!!row.enabled" :disabled="!canWrite" @change="v => toggle(row, v)" />
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.credential')" min-width="80">
+        <template #default="{ row }">
+          <el-tag size="small" :type="credType(row.has_credentials)" effect="plain">
+            {{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+        <template #default="{ row }">{{ row.updated_at ? fmtTime.m(row.updated_at) : '—' }}</template>
+      </el-table-column>
+      <el-table-column v-if="canWrite" :label="t('common.action')" min-width="130">
+        <template #default="{ row }">
+          <IconBtn v-if="kind === 'td'" size="small" :icon="SetUp" :title="t('interfaces.mappingEdit')" :disabled="mapsOk[row.code] !== true" @click="openMaps(row)" />
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" />
+          <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="del(row)" />
+        </template>
+      </el-table-column>
+    </TableShell>
+  </el-card>
+
+  <el-dialog v-model="dlg" :title="(form._create ? t('common.create') : t('common.edit')) + ' · ' + title" width="600" :close-on-click-modal="false">
+    <el-form label-width="130">
+      <el-form-item label="code">
+        <el-input v-if="form._create" v-model="form.code" :placeholder="prefix + 'xxx'" />
+        <el-input v-else :model-value="form.code" disabled />
+      </el-form-item>
+      <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
+      <el-form-item label="Provider">
+        <el-select v-if="form._create" v-model="form.provider" filterable @change="onProvider">
+          <el-option v-for="p in providers" :key="p.provider" :value="p.provider" :label="p.provider">
+            <span>{{ p.provider }}</span>
+            <span class="opt-tag">{{ p.ready ? t('interfaces.carrierReady') : t('interfaces.carrierPending') }}</span>
+          </el-option>
+        </el-select>
+        <el-input v-else :model-value="form.provider" disabled />
+      </el-form-item>
+      <el-form-item :label="t('interfaces.colMarket')">
+        <el-input :model-value="marketName(form.market)" disabled />
+      </el-form-item>
+      <el-form-item v-if="kind === 'td'" :label="t('interfaces.colAccountKey')">
+        <el-input v-model="form.account_key" :placeholder="t('interfaces.accountKeyPh')" />
+      </el-form-item>
+      <el-form-item v-if="kind === 'td'" :label="t('interfaces.virtual')">
+        <el-switch v-model="form.is_virtual" :disabled="!form._create" />
+      </el-form-item>
+      <template v-for="f in curFields" :key="'c' + f.key">
+        <el-form-item :label="labelOf(f)">
+          <el-select v-if="f.type === 'select'" v-model="form.credentials[f.key]" style="width:100%">
+            <el-option v-for="o in f.options || []" :key="o" :value="o" :label="o" />
+          </el-select>
+          <el-switch v-else-if="f.type === 'boolean'" v-model="form.credentials[f.key]" />
+          <el-input v-else v-model="form.credentials[f.key]" :type="f.secret ? 'password' : 'text'" :show-password="!!f.secret" autocomplete="new-password" />
+        </el-form-item>
+      </template>
+      <template v-for="f in curParams" :key="'p' + f.key">
+        <el-form-item :label="labelOf(f)">
+          <el-input v-if="f.type === 'number'" v-model.number="form.params[f.key]" />
+          <el-switch v-else-if="f.type === 'boolean'" v-model="form.params[f.key]" />
+          <el-input v-else v-model="form.params[f.key]" />
+        </el-form-item>
+      </template>
+      <div v-if="!curFields.length && !curParams.length" class="muted note">{{ t('interfaces.noSchema') }}</div>
+      <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="mapDlg" :title="t('interfaces.mappingEdit') + ' · ' + mapCode" width="520">
+    <el-table :data="mapForm" size="small" border>
+      <el-table-column :label="t('interfaces.colMd')" min-width="200">
+        <template #default="{ row }">
+          <el-select v-model="row.md_code" filterable>
+            <el-option v-for="m in mdOf" :key="m.code" :value="m.code" :label="m.code" />
+          </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column label="priority" min-width="110">
+        <template #default="{ row }"><el-input-number v-model="row.priority" :min="1" :max="99" size="small" /></template>
+      </el-table-column>
+      <el-table-column min-width="60">
+        <template #default="{ $index }"><IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="mapForm.splice($index, 1)" /></template>
       </el-table-column>
     </el-table>
-
-    <el-dialog v-model="dlg" :title="(form._create ? '新增' : '编辑') + labelOf(kind)" :width="560">
-      <el-form label-width="100px">
-        <el-form-item label="code">
-          <el-input v-if="form._create" v-model="form.code" :placeholder="prefixOf(kind) + 'xxx（小写字母数字-，不可改）'" />
-          <el-input v-else :model-value="form.code" disabled />
-        </el-form-item>
-        <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item label="provider">
-          <el-select v-if="providers.length" v-model="form.provider" :disabled="!form._create" filterable allow-create>
-            <el-option v-for="x in providers" :key="x.provider" :label="x.provider" :value="x.provider" />
-          </el-select>
-          <el-input v-else v-model="form.provider" :disabled="!form._create" placeholder="ds-* 由数据源注册表提供" />
-        </el-form-item>
-        <el-form-item label="市场"><el-input v-model="form.market" :disabled="!form._create" /></el-form-item>
-        <el-form-item v-if="kind === 'ds'" label="能力">
-          <el-input v-model="form.capabilities" placeholder="逗号分隔，如 hist_quote,ref_data" />
-        </el-form-item>
-        <el-form-item v-if="kind === 'td'" label="account_key">
-          <el-input v-model="form.account_key" placeholder="物理资金账号（凭证内优先）" />
-        </el-form-item>
-        <el-form-item v-if="kind === 'td'" label="虚拟账户">
-          <el-switch v-model="form.is_virtual" :disabled="!form._create" />
-        </el-form-item>
-        <el-form-item label="凭证 JSON">
-          <el-input v-model="form.credentials" type="textarea" :rows="3" placeholder='{"app_id":...,"app_secret":...}（留空不改）' />
-        </el-form-item>
-        <el-form-item v-if="kind !== 'ds'" label="参数 JSON">
-          <el-input v-model="form.params" type="textarea" :rows="3" placeholder='{"td_host":"host:port"}（留空不改）' />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dlg = false">取消</el-button>
-        <el-button type="primary" @click="save">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="mapDlg" :title="'编辑取价映射 · ' + mapCode" :width="520">
-      <el-table :data="mapForm" size="small" border>
-        <el-table-column label="行情接口" min-width="200">
-          <template #default="{ row }">
-            <el-select v-model="row.md_code" filterable placeholder="md-*">
-              <el-option v-for="m in mdOf" :key="m.code" :label="m.code" :value="m.code" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="优先级" min-width="110">
-          <template #default="{ row }"><el-input-number v-model="row.priority" :min="1" :max="99" size="small" /></template>
-        </el-table-column>
-        <el-table-column label="" min-width="60">
-          <template #default="{ $index }">
-            <el-button link type="danger" size="small" @click="mapForm.splice($index, 1)">移除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-button size="small" class="mtag" @click="mapForm.push({ md_code: '', priority: mapForm.length + 1 })">添加</el-button>
-      <div class="muted mtag">保存后进程在 2–45s 内检测并重启生效（主备顺序=priority）。</div>
-      <template #footer>
-        <el-button @click="mapDlg = false">取消</el-button>
-        <el-button type="primary" @click="saveMaps">保存</el-button>
-      </template>
-    </el-dialog>
-  </div>
+    <div class="map-foot"><IconBtn size="small" :icon="Plus" :title="t('common.create')" @click="mapForm.push({ md_code: '', priority: mapForm.length + 1 })" /></div>
+    <template #footer>
+      <el-button @click="mapDlg = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="saving" @click="saveMaps">{{ t('common.save') }}</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, Edit, Delete, SetUp } from '@element-plus/icons-vue'
 import api, { apiErr, meOnce } from '../api'
+import { fmtTime } from '../utils/fmtTime'
+import IconBtn from './IconBtn.vue'
+import RowFilter from './RowFilter.vue'
+import ColumnSettings from './ColumnSettings.vue'
+import TableShell from './TableShell.vue'
 
 const props = defineProps({ kind: { type: String, required: true } })
 const emit = defineEmits(['loaded'])
-const rows = ref([])
-const maps = ref({})
-const providers = ref([])
-const perms = ref([])
-const dlg = ref(false)
-const form = ref({})
-const mapDlg = ref(false)
-const mapCode = ref('')
-const mapForm = ref([])
-const mapMarket = ref('')
-const mdOptions = ref([])
-const mapsOk = ref({})
-const mdOf = computed(() => mdOptions.value.filter(m => !mapMarket.value || m.market === mapMarket.value))
+const { t, te } = useI18n()
 
+const rows = ref([]), providers = ref([]), perms = ref([])
+const status = ref({}), maps = ref({}), mapsOk = ref({}), refs = ref({})
+const filter = ref({}), visible = ref([])
+const dlg = ref(false), saving = ref(false)
+const form = ref(empty())
+const mapDlg = ref(false), mapCode = ref(''), mapForm = ref([]), mapMarket = ref(''), mdRows = ref([])
+
+const base = () => ({ ds: '/data-sources', md: '/md-interfaces', td: '/td-interfaces' }[props.kind])
+const prefix = computed(() => ({ ds: 'ds-', md: 'md-', td: 'td-' }[props.kind]))
+const title = computed(() => ({ ds: t('interfaces.cardTitleData'), md: t('interfaces.cardTitleMarket'), td: t('interfaces.cardTitleTrading') }[props.kind]))
 const canWrite = computed(() => perms.value.includes('system_config'))
-const base = k => (k === 'td' ? '/td-interfaces' : k === 'md' ? '/md-interfaces' : '/data-sources')
-const labelOf = k => (k === 'td' ? '交易接口' : k === 'md' ? '行情接口' : '数据源')
-const prefixOf = k => (k === 'td' ? 'td-' : k === 'md' ? 'md-' : 'ds-')
-const carrierOf = p => {
-  const x = providers.value.find(v => v.provider === p)
-  return !x ? '未知' : (x.ready ? '就绪' : '待接入')
-}
+const st = code => status.value[code] || {}
+const carrier = p => !!providers.value.find(v => v.provider === p)?.ready
+const carrierType = p => (carrier(p) ? 'success' : 'warning')
+const credType = ok => (ok ? 'success' : 'info')
+const curProv = computed(() => providers.value.find(p => p.provider === form.value.provider) || {})
+const curFields = computed(() => curProv.value.field_schema || [])
+const curParams = computed(() => curProv.value.params_schema || [])
+const mdOf = computed(() => mdRows.value.filter(m => !mapMarket.value || m.market === mapMarket.value))
+const colDefs = computed(() => [{ key: 'updated_at', label: t('common.updatedAt'), hidden: true }])
+const colOn = k => visible.value.includes(k)
 
+function empty() { return { _create: true, code: '', name: '', provider: '', market: 'astock', credentials: {}, params: {}, account_key: '', is_virtual: false, enabled: false } }
+function marketName(m) { return m === 'astock' ? t('interfaces.marketAstock') : m === 'crypto' ? t('interfaces.marketCrypto') : (m || '—') }
+function labelOf(f) { return f.label_key && te(f.label_key) ? t(f.label_key) : (f.label || f.key) }
+function maskAcct(v) { const s = String(v || ''); return s.length > 4 ? s.slice(0, 2) + '****' + s.slice(-2) : (s || '—') }
+function missingText(m) { return ({ carrier: t('interfaces.missingCarrier'), credentials: t('interfaces.missingCredentials'), mapping: t('interfaces.missingMapping') }[m] || m) }
+function runClass(code) { const s = st(code); return s.running ? (s.connected ? 'ok' : 'warn') : 'off' }
+function runText(code) {
+  const s = st(code)
+  if (!s.running) return t('interfaces.runStopped')
+  return [t('interfaces.runRunning'), s.working ? t('interfaces.runWorking') : t('interfaces.runIdle'), s.connected ? t('interfaces.runConnected') : t('interfaces.runDisconnected')].join(' · ')
+}
+function ageText(code) {
+  const ts = Number(st(code).ts || 0)
+  if (!ts) return ''
+  const d = Math.max(0, Math.round(Date.now() / 1000 - ts))
+  return d < 120 ? t('interfaces.ageSec', { n: d }) : t('interfaces.ageMin', { n: Math.round(d / 60) })
+}
+const filterGroups = computed(() => {
+  const groups = [{ key: 'market', label: t('interfaces.colMarket'), options: [...new Set(rows.value.map(r => r.market).filter(Boolean))].map(m => ({ value: m, label: marketName(m) })) }]
+  if (props.kind !== 'ds') {
+    groups.push({ key: 'run', label: t('interfaces.colRuntime'), options: [
+      { value: 'running', label: t('interfaces.runRunning') }, { value: 'stopped', label: t('interfaces.runStopped') }] })
+    groups.push({ key: 'config', label: t('interfaces.colConfig'), options: [
+      { value: 'ok', label: t('interfaces.configOk') }, { value: 'bad', label: t('interfaces.configBad') }] })
+  } else {
+    const caps = [...new Set(rows.value.flatMap(r => r.capabilities || []))]
+    if (caps.length) groups.push({ key: 'cap', label: t('interfaces.colCapabilities'), options: caps.map(c => ({ value: c, label: t('interfaces.cap_' + c) })) })
+  }
+  return groups
+})
+const shown = computed(() => {
+  const f = filter.value
+  return rows.value.filter(r => {
+    if (f.market?.length && !f.market.includes(r.market)) return false
+    if (f.cap?.length && !(r.capabilities || []).some(c => f.cap.includes(c))) return false
+    const s = st(r.code)
+    if (f.run?.length && !f.run.includes(s.running ? 'running' : 'stopped')) return false
+    if (f.config?.length && !f.config.includes(s.config_ok ? 'ok' : 'bad')) return false
+    return true
+  })
+})
+function onProvider(p) {
+  const x = providers.value.find(v => v.provider === p)
+  form.value.market = x?.market || 'astock'
+  form.value.credentials = {}
+  form.value.params = {}
+}
+function openCreate() { form.value = empty(); dlg.value = true }
+function openEdit(r) {
+  form.value = { ...empty(), _create: false, code: r.code, name: r.name, provider: r.provider, market: r.market,
+    credentials: {}, params: { ...(r.params || {}) }, account_key: r.account_key || '', is_virtual: !!r.is_virtual, enabled: !!r.enabled }
+  dlg.value = true
+}
+async function save() {
+  const f = form.value
+  const payload = { name: f.name, provider: f.provider, market: f.market, enabled: f.enabled,
+    credentials: Object.fromEntries(Object.entries(f.credentials).filter(([, v]) => v !== '' && v != null)),
+    params: f.params }
+  if (props.kind === 'td') { payload.account_key = f.account_key || null; payload.is_virtual = f.is_virtual }
+  if (f._create) payload.code = f.code
+  saving.value = true
+  try {
+    if (f._create) await api.post(base(), payload)
+    else await api.post(base() + '/' + f.code, payload)
+    dlg.value = false; ElMessage.success(t('interfaces.saved')); load()
+  } catch (e) { ElMessage.error(apiErr(e)) } finally { saving.value = false }
+}
+async function toggle(r, v) {
+  try { await api.post(base() + '/' + r.code + '/enable', { enabled: v }); load() }
+  catch (e) { ElMessage.error(apiErr(e)) }
+}
+async function del(r) {
+  try {
+    await ElMessageBox.confirm(t('interfaces.deleteConfirm', { code: r.code }), t('common.delete'), { type: 'warning' })
+    await api.delete(base() + '/' + r.code); ElMessage.success(t('interfaces.deleted')); load()
+  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(apiErr(e)) }
+}
+function openMaps(r) {
+  mapCode.value = r.code; mapMarket.value = r.market
+  mapForm.value = (maps.value[r.code] || []).map(m => ({ md_code: m.md_code, priority: m.priority }))
+  mapDlg.value = true
+}
+async function saveMaps() {
+  saving.value = true
+  try {
+    await api.post('/td-interfaces/' + mapCode.value + '/mappings', { items: mapForm.value.filter(m => m.md_code) })
+    mapDlg.value = false; ElMessage.success(t('interfaces.saved')); load()
+  } catch (e) { ElMessage.error(apiErr(e)) } finally { saving.value = false }
+}
 async function load() {
   try {
-    const r = await api.get(base(props.kind))
-    rows.value = r.items || []
-    maps.value = {}
+    const [list, prov] = await Promise.all([api.get(base()), api.get(base() + '/providers')])
+    rows.value = list.items || []
+    providers.value = prov.items || []
     if (props.kind !== 'ds') {
-      mapsOk.value = {}
-      for (const row of rows.value) {
-        try {
-          maps.value[row.code] = (await api.get(base(props.kind) + '/' + row.code + '/mappings')).items || []
-          mapsOk.value[row.code] = true
-        } catch {
-          maps.value[row.code] = []
-          mapsOk.value[row.code] = false   // 读失败≠无映射：禁编辑，防全量替换误清空
-        }
-      }
+      const s = await api.get('/interfaces/status', { params: { kind: props.kind } })
+      status.value = Object.fromEntries((s.items || []).map(x => [x.code, x]))
+    }
+    if (props.kind === 'td') {
+      maps.value = {}; mapsOk.value = {}
+      await Promise.all(rows.value.map(async r => {
+        try { maps.value[r.code] = (await api.get('/td-interfaces/' + r.code + '/mappings')).items || []; mapsOk.value[r.code] = true }
+        catch { maps.value[r.code] = []; mapsOk.value[r.code] = false }
+      }))
+      mdRows.value = (await api.get('/md-interfaces')).items || []
+    }
+    if (props.kind === 'md') {
+      refs.value = {}
+      await Promise.all(rows.value.map(async r => {
+        try { refs.value[r.code] = (await api.get('/md-interfaces/' + r.code + '/mappings')).items || [] }
+        catch { refs.value[r.code] = [] }
+      }))
     }
     emit('loaded', rows.value)
   } catch (e) { ElMessage.error(apiErr(e)); rows.value = [] }
 }
-async function loadProviders() {
-  if (props.kind === 'ds') return
-  try { providers.value = (await api.get(base(props.kind) + '/providers')).items || [] } catch { providers.value = [] }
-  if (props.kind === 'td') {
-    try { mdOptions.value = (await api.get('/md-interfaces')).items || [] } catch { mdOptions.value = [] }
-  }
-}
-function openMaps(row) {
-  mapCode.value = row.code
-  mapMarket.value = row.market
-  mapForm.value = (maps.value[row.code] || []).map(m => ({ md_code: m.md_code, priority: m.priority }))
-  mapDlg.value = true
-}
-async function saveMaps() {
-  const items = mapForm.value.filter(m => m.md_code)
-    .map(m => ({ md_code: m.md_code, priority: Number(m.priority) || 1 }))
-  try {
-    await api.post('/td-interfaces/' + mapCode.value + '/mappings', { items })
-    mapDlg.value = false; ElMessage.success('映射已保存'); load()
-  } catch (e) { ElMessage.error(apiErr(e)) }
-}
-function openCreate() {
-  form.value = { _create: true, code: '', name: '', provider: '', market: 'astock',
-                 account_key: '', is_virtual: false, capabilities: '', credentials: '', params: '' }
-  dlg.value = true
-}
-function openEdit(row) {
-  form.value = { _create: false, code: row.code, name: row.name, provider: row.provider, market: row.market,
-                 account_key: row.account_key || '', is_virtual: !!row.is_virtual,
-                 capabilities: (row.capabilities || []).join(','),
-                 credentials: '', params: JSON.stringify(row.params || {}, null, 0) }
-  dlg.value = true
-}
-async function save() {
-  const p = { name: form.value.name }
-  if (form.value._create) { p.code = form.value.code; p.provider = form.value.provider; p.market = form.value.market }
-  if (props.kind === 'ds') p.capabilities = form.value.capabilities.split(',').map(s => s.trim()).filter(Boolean)
-  if (props.kind === 'td') {
-    p.account_key = form.value.account_key
-    if (form.value._create) p.is_virtual = form.value.is_virtual
-  }
-  if (form.value.credentials && form.value.credentials.trim()) p.credentials = form.value.credentials.trim()
-  if (props.kind !== 'ds' && form.value.params && form.value.params.trim()) {
-    try { p.params = JSON.parse(form.value.params) } catch { ElMessage.error('参数不是合法 JSON'); return }
-  }
-  try {
-    if (form.value._create) await api.post(base(props.kind), p)
-    else await api.patch(base(props.kind) + '/' + form.value.code, p)
-    dlg.value = false; ElMessage.success('已保存'); load()
-  } catch (e) { ElMessage.error(apiErr(e)) }
-}
-async function toggle(row, v) {
-  try {
-    if (props.kind === 'ds') await api.patch(base(props.kind) + '/' + row.code, { enabled: v })
-    else await api.post(base(props.kind) + '/' + row.code + '/enable', { enabled: v })
-    row.enabled = v
-  } catch (e) { ElMessage.error(apiErr(e)); load() }
-}
-async function del(row) {
-  try { await api.delete(base(props.kind) + '/' + row.code); ElMessage.success('已删除'); load() }
-  catch (e) { ElMessage.error(apiErr(e)) }
-}
 onMounted(async () => {
   try { perms.value = (await meOnce())?.permissions || [] } catch { perms.value = [] }
-  loadProviders(); load()
+  load()
 })
 </script>
 
 <style scoped>
-.mb { margin-bottom: var(--sp-3); }
-.pad { padding: var(--sp-2) var(--sp-3); }
-.muted { color: var(--text-3); }
-.mtag { margin-left: var(--sp-1); }
-.on { color: var(--success); }
-.off { color: var(--text-3); }
+.hd { display: flex; align-items: center; justify-content: space-between; }
+.hd-title { font-size: var(--fs-card); font-weight: 600; }
+.hd-acts { display: flex; align-items: center; gap: var(--icon-gap); }
+.code { font-family: var(--font-num); font-size: var(--fs-foot); }
+.tag { margin: 0 var(--sp-1) 0 0; }
+.tag-v { color: var(--brand-600); font-size: var(--fs-foot); }
+.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%; margin-right: var(--sp-1); vertical-align: middle; }
+.dot.ok { background: var(--success); }
+.dot.warn { background: var(--warn-fill); }
+.dot.off { background: var(--flat); }
+.muted { color: var(--text-secondary); font-size: var(--fs-foot); }
+.missing { color: var(--critical); font-size: var(--fs-foot); }
+.note { margin: var(--sp-2) 0; }
+.opt-tag { float: right; color: var(--text-secondary); font-size: var(--fs-foot); }
+.map-foot { margin-top: var(--sp-2); }
 </style>
