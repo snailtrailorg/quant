@@ -268,8 +268,16 @@ def test_dispatch_rejects_when_iface_disabled():
     ex = M.TdExec.__new__(M.TdExec)
     ex.td_code = "td-xtp"
     ex._enabled = False
-    with patch("src.strategy_runner.trading.write_cmd_result") as wcr:
+    class _T:
+        def __init__(self, target, daemon=None, **kw):
+            self.target = target
+        def start(self):
+            self.target()          # 同步执行（避免线程断言竞态）
+    with patch("src.strategy_runner.trading.write_cmd_result") as wcr, \
+         patch("src.alert_notify.notify.safe_notify") as sn, \
+         patch("src.td_exec.main.threading.Thread", _T):
         ex._dispatch({"verb": "place-order", "req_id": "r1"})
+    sn.assert_called_once()
     d = wcr.call_args[0][1]
     assert d["accepted"] is False and d["code"] == "IFACE_IDLE"
 

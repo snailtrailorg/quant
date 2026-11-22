@@ -37,6 +37,40 @@ class TestEvaluate:
         assert {f["rule_id"] for f in f2} == {"unit_down", "hub_hb_lost"}
         assert all(f["severity"] == "critical" for f in f2)
 
+    def test_m7_mapping_missing_rule(self):
+        """M7：已启用交易接口无映射 → mapping_missing（配置缺口可见）。"""
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(_snap(mapping_missing=["td-xtp"]))
+        hit = [f for f in findings if f["rule_id"] == "mapping_missing"]
+        assert hit and hit[0]["component"] == "td-iface:td-xtp"
+        # D-F5：采集证据缺失不发（也不得发假恢复）
+        findings2, _ = evaluate(_snap(mapping_missing=["td-xtp"], mapping_evidence=False))
+        assert not any(f["rule_id"] == "mapping_missing" for f in findings2)
+
+    def test_m7_subscription_fail_resets_on_gen_change(self):
+        """进程重启（gen 变）计数归零：重基线并补报重启后失败，防历史峰值掩盖。"""
+        from src.health_monitor.monitor import evaluate
+        hub = {"gen": 1, "subs": 1, "ticks": 1, "sess_ticks": 1, "bars": 1,
+               "dropped_pg": 0, "tick_age": 1.0, "sub_fail": 9}
+        _, s1 = evaluate(_snap(hubs={"md-xtp": hub}, hub_expected=["md-xtp"]))
+        f2, _ = evaluate(_snap(hubs={"md-xtp": {**hub, "gen": 2, "sub_fail": 1}},
+                               hub_expected=["md-xtp"]), s1)
+        assert any(f["rule_id"] == "subscription_fail" for f in f2)
+
+    def test_m7_subscription_fail_edge(self):
+        """M7：sub_fail 增长沿告警；不增长不重复报。"""
+        from src.health_monitor.monitor import evaluate
+        hub0 = {"gen": 1, "subs": 1, "ticks": 1, "sess_ticks": 1, "bars": 1,
+                "dropped_pg": 0, "tick_age": 1.0, "sub_fail": 2}
+        f1, s1 = evaluate(_snap(hubs={"md-xtp": hub0}, hub_expected=["md-xtp"]))
+        assert not any(f["rule_id"] == "subscription_fail" for f in f1)
+        f2, s2 = evaluate(_snap(hubs={"md-xtp": {**hub0, "sub_fail": 5}},
+                                hub_expected=["md-xtp"]), s1)
+        assert any(f["rule_id"] == "subscription_fail" for f in f2)
+        f3, _ = evaluate(_snap(hubs={"md-xtp": {**hub0, "sub_fail": 5}},
+                               hub_expected=["md-xtp"]), s2)
+        assert not any(f["rule_id"] == "subscription_fail" for f in f3)
+
     def test_legacy_transition_exemption_removed(self):
         """C4/E9：hubs 含 0（退役裸键形态）不再豁免 hub_hb_lost（fail-loud）。"""
         from src.health_monitor.monitor import evaluate
@@ -125,6 +159,43 @@ class TestRunCheckChain:
         monkeypatch.setattr(monitor, "_write_event", lambda *a, **k: None)
         monitor.run_check()
         assert any("valkey" in t for _, t in notified), "Valkey 宕机的 critical 必须仍被通知"
+
+    def test_run_check_persists_sub_fail_state(self, monkeypatch):
+        """M7 P0：sub_fail 基线必须载入+回写，否则计数沿永不触发。"""
+        from src.health_monitor import monitor, collector
+
+        class FakeR:
+            def __init__(self):
+                self.d = {}
+            def get(self, k):
+                return self.d.get(k)
+            def set(self, k, v, ex=None):
+                self.d[k] = v
+            def hset(self, k, mapping=None):
+                self.d.setdefault(k, {}).update(mapping or {})
+            def expire(self, k, ttl):
+                pass
+            def scan_iter(self, pattern, count=None):
+                return iter([k for k in list(self.d) if k.startswith(pattern.rstrip("*"))])
+            def delete(self, k):
+                self.d.pop(k, None)
+        r = FakeR()
+        snap = {"ts": 0.0, "units": {}, "deps": {"postgres": True, "valkey": True},
+                "hubs": {"md-xtp": {"gen": 1, "subs": 1, "ticks": 1, "sess_ticks": 1,
+                                    "bars": 1, "dropped_pg": 0, "tick_age": 1.0, "sub_fail": 0}},
+                "hub_expected": ["md-xtp"], "tasks": {}, "mapping_missing": [],
+                "mapping_evidence": True}
+        monkeypatch.setattr(collector, "collect", lambda: snap)
+        monkeypatch.setattr(collector, "_valkey", lambda: r)
+        monkeypatch.setattr(monitor, "_hub_expected_ids", lambda: ["md-xtp"])
+        got = []
+        monkeypatch.setattr(monitor, "_notify", lambda sev, title, body, code=None: got.append(title))
+        monkeypatch.setattr(monitor, "_write_event", lambda *a, **k: None)
+        monitor.run_check()                       # 首轮建基线
+        assert monitor._SF_PREV_KEY in r.d
+        snap["hubs"]["md-xtp"]["sub_fail"] = 3
+        monitor.run_check()                       # 第二轮增长沿 → 必须出告警
+        assert any("subscription_fail" in t for t in got)
 
     def test_restart_events_bypass_state_machine(self, monkeypatch):
         """D-F4：unit_restarted 是计数沿，不进电平状态机（否则 30s 后必跟假恢复）。"""

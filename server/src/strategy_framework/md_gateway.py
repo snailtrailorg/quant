@@ -387,6 +387,7 @@ class EmqMdGateway(MdGateway):
         eid = getattr(error_info, "error_id", None) if error_info else None
         code = getattr(ticker, "ticker", "?") if ticker else "?"
         if eid:
+            self._sub_fail_cnt = getattr(self, "_sub_fail_cnt", 0) + 1   # M7：SDK 拒收计数（心跳 sub_fail）
             logger.error("[gw] EMQ 订阅被拒 %s（error_id=%s）", code, eid)
             self._alert("EMQ 订阅失败", f"{code} error_id={eid}", code="emq.sub-fail")
 

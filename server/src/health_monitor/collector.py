@@ -7,9 +7,35 @@
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 import time
 from src.quant_common.redis_client import business_redis
+
+logger = logging.getLogger(__name__)
+
+_MAP_CACHE: dict = {"ok_ts": 0.0, "fail_ts": 0.0, "codes": []}
+
+
+def _mapping_missing_cached(now: float) -> tuple[list[str], bool]:
+    """返回 (codes, evidence)：成功 60s 内 evidence=True；失败 60s 退避 evidence=False。"""
+    if now - float(_MAP_CACHE["ok_ts"] or 0) < 60:
+        return list(_MAP_CACHE["codes"]), True
+    if now - float(_MAP_CACHE["fail_ts"] or 0) < 60:
+        return list(_MAP_CACHE["codes"]), False
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT t.code FROM trade_interface t WHERE t.enabled AND NOT t.is_virtual "
+                "AND NOT EXISTS (SELECT 1 FROM td_md_map m WHERE m.td_code=t.code)").fetchall()
+        _MAP_CACHE["codes"] = [r[0] for r in rows]
+        _MAP_CACHE["ok_ts"] = now
+        return list(_MAP_CACHE["codes"]), True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("mapping_missing 采集失败（证据缺失，60s 后再试）: %s", e)
+        _MAP_CACHE["fail_ts"] = now     # 负缓存退避：PG 抖动期不每请求打库
+        return list(_MAP_CACHE["codes"]), False
 
 
 # 常驻单元（实例=quant）。live-task@*/strategy@* 按需，心跳覆盖；feishu 多实例动态发现
@@ -232,6 +258,8 @@ def collect(now: float | None = None) -> dict:
     except Exception:
         _exec_expected = set()
     snap["td_execs"] = {"expected": sorted(_exec_expected), "alive": [], "details": {}}
+    # M7 mapping_missing：已启用非虚拟交易接口无 td_md_map（60s TTL 缓存，避免 /metrics 高频打库）
+    snap["mapping_missing"], snap["mapping_evidence"] = _mapping_missing_cached(now)
 
     # 系统资源（内存/磁盘/swap，各按配置周期采集；psutil 缺失→对应项 None=证据缺失）+ 生效阈值（同源配置）
     snap["resources"] = _collect_resources(now)
@@ -282,6 +310,8 @@ def collect(now: float | None = None) -> dict:
                 "bars": int(h.get("bars") or 0),
                 "dropped_pg": int(h.get("dropped_pg") or 0),
                 "connected": int(h.get("connected") or 0),   # 批 69b：真连导出（L2 探测）
+                "sub_fail": int(h.get("sub_fail") or 0),     # M7：订阅失败单调计数
+                "gen": int(h.get("gen") or 0),               # M7：进程代号（重启计数归零的基线判定）
                 "tick_age": (now - last_tick) if last_tick else None,
             }
         # C4/M8：退役裸键 quant:hb:md-hub 不再读、不再收编为 hubs[0]（旧键零读点）

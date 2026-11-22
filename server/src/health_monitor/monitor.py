@@ -24,6 +24,7 @@ _NR_PREFIX = "quant:hm:nr:"                # 上次见到的 NRestarts：{unit} 
 _R4_STREAK_KEY = "quant:hm:hub_lost_streak"   # 批 66b：值=JSON dict（per-account streak）
 _R6_STALL_KEY = "quant:hm:r6_stall"           # 批 66b：值=JSON dict（per-account）        # 交易时段 sess_ticks 零增长连续轮数
 _R6_PREV_KEY = "quant:hm:r6_prev_sess_ticks"  # 批 66b：值=JSON dict（per-account）
+_SF_PREV_KEY = "quant:hm:sub_fail_prev"        # M7：sub_fail 单调计数基线（per-code JSON dict）
 EVENT_RETENTION_DAYS = 30
 
 
@@ -123,6 +124,7 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     由调用方持久化（R4/R6 需要连续轮次证据）。"""
     # 批 66b：R4/R6 per-account 化（hub N 实例）——streak/prev 均为 {account_id: n} dict
     state = dict(state or {"hub_lost_streak": {}, "sess_stall": {}, "prev_sess_ticks": {}})
+    state.setdefault("sub_fail_prev", {})   # M7 subscription_fail 沿基线
     out: list[dict] = []
 
     # R1 常驻 unit 掉线（事实信号：systemd 状态）
@@ -180,6 +182,38 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             if missing and streaks["__all__"] >= 2:
                 out.append({"rule_id": "hub_hb_lost", "component": "md-hub", "severity": "critical",
                             "detail": f"在场集空且期望集未注入，连续 {streaks['__all__']} 轮——hub 心跳全缺失"})
+
+    # M7-1 mapping_missing：已启用交易接口无取价映射（配置缺口；启用校验应拦住，带外改兜底）
+    _map_evidence = snap.get("mapping_evidence", True)   # D-F5：采集失败不判（也不发假恢复）
+    for _code in (snap.get("mapping_missing") or []) if _map_evidence else []:
+        out.append({"rule_id": "mapping_missing", "component": f"td-iface:{_code}",
+                    "severity": "warning", "code": "iface.mapping_missing",
+                    "detail": f"{_code} 无 td_md_map——清仓取价将报 MAPPING_MISSING；"
+                              f"runbook：集成中心→交易接口→编辑映射"})
+
+    # M7-2 subscription_fail：心跳 sub_fail 单调增长沿（订阅异常被网关/管理面记录）
+    _sf_prev = state["sub_fail_prev"]
+    for _acct, _hub in hubs.items():
+        _cur = int(_hub.get("sub_fail") or 0)
+        _gen = int(_hub.get("gen") or 0)
+        _old = _sf_prev.get(_acct)
+        # 兼容旧标量基线；gen 变（进程重启，计数归零）→ 重基线并补报重启后的失败
+        if isinstance(_old, dict):
+            _old_n, _old_gen = int(_old.get("n") or 0), int(_old.get("gen") or 0)
+        else:
+            _old_n, _old_gen = (int(_old) if _old is not None else None), None
+        _reset = _old_n is not None and (_old_gen != _gen or _cur < _old_n)
+        if _reset and _cur > 0:
+            out.append({"rule_id": "subscription_fail", "component": f"md-hub:{_acct}",
+                        "severity": "critical", "code": "iface.subscription_fail",
+                        "detail": f"{_acct} 重启（gen {_old_gen}→{_gen}）后订阅失败 {_cur} 次——"
+                                  f"查网关日志与标的/授权；runbook：journalctl -u quant-md-hub@{_acct}"})
+        elif _old_n is not None and not _reset and _cur > _old_n:
+            out.append({"rule_id": "subscription_fail", "component": f"md-hub:{_acct}",
+                        "severity": "critical", "code": "iface.subscription_fail",
+                        "detail": f"{_acct} 订阅失败 +{_cur - _old_n}（累计 {_cur}）——"
+                                  f"查网关日志与标的/授权；runbook：journalctl -u quant-md-hub@{_acct}"})
+        _sf_prev[_acct] = {"gen": _gen, "n": _cur}
 
     # R6 交易时段 tick 停滞（批 66b per-account；盲审 C-S1：删自杀后"半开连接/线程挂死但
     # 主循环活着"只剩告警抓手）
@@ -310,6 +344,7 @@ def run_check() -> dict:
         state["hub_lost_streak"] = _load_dict(_R4_STREAK_KEY)
         state["sess_stall"] = _load_dict(_R6_STALL_KEY)
         state["prev_sess_ticks"] = _load_dict(_R6_PREV_KEY)
+        state["sub_fail_prev"] = _load_dict(_SF_PREV_KEY)
         valkey_ok = True
     except Exception as e:
         logger.warning("health_monitor Valkey 状态载入失败（本轮按无历史状态判定）: %s", e)
@@ -323,9 +358,12 @@ def run_check() -> dict:
             restart_events = _detect_restarts(snap, r)
             findings += restart_events
             new_events += restart_events
+            # M7 计数沿规则（D-F4 同 unit_restarted）：直发、不进电平状态机、不产生恢复沿
+            counter_rules = ("unit_restarted", "subscription_fail")
+            new_events += [f for f in findings if f["rule_id"] == "subscription_fail"]
 
             current = {(f["rule_id"], f["component"]): f for f in findings
-                       if f["rule_id"] != "unit_restarted"}
+                       if f["rule_id"] not in counter_rules}
             for key, f in current.items():
                 state_key = _STATE_PREFIX + f["rule_id"] + ":" + f["component"]
                 # state 键值存 severity：首触发 / warn→critical 升级 = 新沿（重发通知）；
@@ -350,6 +388,8 @@ def run_check() -> dict:
                     continue
                 if rule_id in res_evidence and not res_evidence[rule_id]:
                     continue
+                if rule_id == "mapping_missing" and not snap.get("mapping_evidence", True):
+                    continue
                 if (rule_id, component) not in current:
                     r.delete(state_key)
                     recovered.append({"rule_id": rule_id, "component": component})
@@ -357,6 +397,7 @@ def run_check() -> dict:
             r.set(_R4_STREAK_KEY, _json.dumps(state["hub_lost_streak"]), ex=7200)
             r.set(_R6_STALL_KEY, _json.dumps(state["sess_stall"]), ex=7200)
             r.set(_R6_PREV_KEY, _json.dumps(state["prev_sess_ticks"]), ex=7200)
+            r.set(_SF_PREV_KEY, _json.dumps(state["sub_fail_prev"]), ex=7200)
             r.hset(HM_HB_KEY, mapping={"ts": snap["ts"]})
             r.expire(HM_HB_KEY, 120)
         except Exception as e:
@@ -370,7 +411,8 @@ def run_check() -> dict:
         logger.log(logging.CRITICAL if f["severity"] == "critical" else logging.WARNING,
                    "[health] %s %s: %s", f["severity"].upper(), f["component"], f["detail"])
         _notify(f["severity"], f"[health] {f['component']} {f['rule_id']}",
-                f"{f['detail']}\nrunbook：15-服务监控设计.md §runbook。", code="health.component")
+                f"{f['detail']}\nrunbook：D15-服务监控设计.md §6。",
+                code=f.get("code") or "health.component")
         _write_event(f["rule_id"], f["component"], f["severity"], f["detail"])
     for rec in recovered:
         logger.info("[health] 恢复: %s %s", rec["component"], rec["rule_id"])

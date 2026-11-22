@@ -176,7 +176,7 @@ def main() -> None:
     _lt_fail_ts: dict[str, float] = {}   # latest_tick 连败退避表（O 审 M6）
     # ticks/bars/last_tick_wall=进程累计（心跳字段，原渠道保留）；
     # 时段内基线（sess_*/enter_ts/沿清零，S6 修订）批 2 起单点化 SessionCounters（事故 1 根治）
-    stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0}
+    stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0, "sub_fail": 0}
     counters = SessionCounters()
 
     @_guard("hub.on_tick")
@@ -351,6 +351,7 @@ def main() -> None:
         try:
             md_gw.subscribe([sym])   # 行情端口收 list（内部逐标的转发）
         except Exception as e:
+            stats["sub_fail"] += 1          # M7 subscription_fail 信号（心跳 sub_fail 单调计数）
             logger.warning("订阅失败 %s: %s", sym, e)
 
     def _unsubscribe(sym: str) -> None:
@@ -444,7 +445,7 @@ def main() -> None:
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0,
                 enabled=int(_iface_enabled), working=int(_iface_enabled and _connected),
                 connected=int(_connected), conn=int(_connected),
-                market=iface["market"], reset_cnt=reset_cnt,
+                market=iface["market"], reset_cnt=reset_cnt, sub_fail=stats["sub_fail"] + int(getattr(md_gw, "_sub_fail_cnt", 0)),
                 provider=getattr(md_gw, "provider", ""))
 
     loop = EngineLoop(name="md-hub", step=5.0,

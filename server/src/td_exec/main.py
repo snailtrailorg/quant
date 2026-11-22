@@ -335,6 +335,20 @@ class TdExec:
             trading.write_cmd_result(req_id, {
                 "req_id": req_id, "verb": verb, "phase": "done", "accepted": False,
                 "code": "IFACE_IDLE", "reason": "接口已停用（空闲）"})
+            # M7 iface_idle_dispatch：向空闲接口下发=配置/路由错误，必须可见（notify 同标题 1min 去重）
+            def _warn_idle():
+                try:
+                    from src.alert_notify.notify import safe_notify
+                    safe_notify("warn", f"向空闲接口 {self.td_code} 下发命令",
+                                f"verb={verb} req={req_id} 已按 IFACE_IDLE 拒绝；"
+                                f"runbook：检查该接口 enabled 与下发目标。",
+                                code="iface.idle_dispatch")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("空闲下发告警发送失败: %s", e)
+            _now_idle = time.time()
+            if _now_idle - getattr(self, "_last_idle_alert", 0.0) >= 60:   # 本地节流：每接口 1 次/分
+                self._last_idle_alert = _now_idle
+                threading.Thread(target=_warn_idle, daemon=True).start()   # 不阻塞主循环/心跳
             return
         if verb == "close-all":
             self.dispatch_closing.set()
