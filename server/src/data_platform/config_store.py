@@ -158,6 +158,9 @@ def exec_interface_codes() -> list[str]:
     与 SA4 第四源同源（registry.exec_capable_providers），保证「下发覆盖的接口 = SA4 拉起
     td_exec 的接口」。enabled 只决定干活/空转（进程常驻），停用接口仍在集内——下发命中后由
     td_exec 按 IFACE_IDLE 明确拒（I7）。返回 code（平台唯一身份），非 int id。
+
+    provider 集来自 registry 交易域「有 execution 端口」的载体（I4）；不看 enabled/impl——
+    形态不是就绪。无载体的行（如 EMT 端口未落地）不在此集，命令不会写进无人消费的队列。
     """
     from src.registry import exec_capable_providers
     provs = sorted(exec_capable_providers())

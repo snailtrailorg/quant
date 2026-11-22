@@ -140,16 +140,27 @@ PROVIDER_MARKET: dict[str, str] = {
     "okx": "crypto",
 }
 
-# 批 83a 拆表立法（2026-09-29 用户裁定·抽象判据）：行的边界=账号，**域=表**。
-# 两个配置域 = 两张表 = 两个端点族（三者同源）。域词=表名（避免与能力 token 'trading' 撞词）。
-# 合表时代（55a external_interface）用 `'trading' = ANY(capabilities)` 域谓词临时区分两类账号；
-# 拆表后该谓词**在表层面退役**（表本身即域，消费侧零谓词）。
-DOMAIN_DATA = "data_source"          # 数据源域（拉取侧：token/限速/熔断/用量/pacer）
-DOMAIN_TRADING = "trading_account"   # 交易账号域（下单/行情侧：连接参数/资金账号/交易所覆盖）
+# 接口三分类（2026-11-22 用户裁定「彻底拆开」）：能力大类 = 接口类型 = 表 = 端点族 = UI 页签。
+# 一个 provider 在每个类各是一个实体（XTP=行情+交易两个，无数据实体）。
+IFACE_DATA = "data_source"           # 数据：hist_quote / ref_data / inst_event
+IFACE_MARKET = "market_interface"    # 行情：rt_quote
+IFACE_TRADE = "trade_interface"      # 交易：trading
+IFACES: tuple[str, ...] = (IFACE_DATA, IFACE_MARKET, IFACE_TRADE)
 
-# 域能力集（收窄立法）：写入某域行的 capabilities 必须 ⊆ 该域集。
-# 合表时代可建出「交易行挂 hist_quote」这类揉合行；拆表后写侧不可能建出（前端每页签也收窄）。
-# 两集互斥且并集=CAPABILITIES（test_markets_registry 断言守门）。
+# 三类互斥且并集=CAPABILITIES（test_markets_registry 断言守门）。
+IFACE_CAPS: dict[str, tuple[str, ...]] = {
+    IFACE_DATA: ("hist_quote", "ref_data", "inst_event"),
+    IFACE_MARKET: ("rt_quote",),
+    IFACE_TRADE: ("trading",),
+}
+IFACE_LABELS: dict[str, str] = {
+    IFACE_DATA: "数据源", IFACE_MARKET: "行情接口", IFACE_TRADE: "交易接口",
+}
+
+# —— FROZEN（legacy config-plane）：config_store 旧 CRUD / mgmt 旧路由仍引用两域名，
+#    删除条件=旧 CRUD 与旧路由退役（批189-M6b 收口）。新栈一律用上面的 IFACE_*。 ——
+DOMAIN_DATA = "data_source"
+DOMAIN_TRADING = "trading_account"
 DOMAIN_CAPS: dict[str, tuple] = {
     DOMAIN_DATA: ("hist_quote", "ref_data", "inst_event"),
     DOMAIN_TRADING: ("rt_quote", "trading"),

@@ -1,6 +1,7 @@
 """批189 三实体接口路由（md/td/data-source）。鉴权在此，SQL 在 iface_store。"""
 from __future__ import annotations
 
+import logging
 import subprocess
 
 from fastapi import APIRouter, Body, Depends
@@ -10,27 +11,27 @@ from src.data_platform import iface_store as S
 from ..auth import require_perm
 from ..errors import ApiError
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 def _probe(role: str, provider: str) -> bool:
-    """载体探针（层 4 组装）：registry 插件 ∪ legacy md_gateway 注册。"""
+    """启用前载体探针：该 provider 在对应域是否**有实际端口**（不是仅有实体）。
+
+    仅在 enabled 时经 validate_payload 调用：无端口的实体（如 EMT 交易 P4c 前）是可保存
+    的「待接入」草稿，但不可启用——否则 enabled=true 却没有进程消费命令 = 静默丢单。
+    """
     try:
         import src.providers as _p
         _p.ensure_registered()
-        from src.registry import pick
-        pick(domain=role, caps={"market_data" if role == "market" else "execution"},
-             provider=provider)
+        from src.registry import DOMAIN_MARKET, DOMAIN_TRADING, pick
+        domain, need = ((DOMAIN_MARKET, {"market_data"}) if role == "market"
+                        else (DOMAIN_TRADING, {"execution"}))
+        pick(domain, provider, need, "plugin")
         return True
-    except Exception:  # noqa: BLE001
-        pass
-    if role == "market":
-        try:
-            from src.strategy_framework.md_gateway import list_md_gateway_providers
-            return provider in set(list_md_gateway_providers())
-        except Exception:  # noqa: BLE001
-            return False
-    return False
+    except Exception as e:  # noqa: BLE001 —— 未登记/无端口=无载体（留痕：接线错误不得静默成 400）
+        logger.warning("载体探针失败 provider=%s role=%s: %s", provider, role, e)
+        return False
 
 
 def _stop(unit: str) -> None:
@@ -52,6 +53,27 @@ def _wrap(fn, *a, **kw):
 KIND_PATHS = {"md": "/api/md-interfaces", "td": "/api/td-interfaces", "ds": "/api/data-sources"}
 
 
+def _providers(role: str) -> list[dict]:
+    """该域已登记的 provider 及端口就绪态（registry 派生；目录不写死字面量）。
+
+    ready=False = 有实体但无端口（EMT 交易 P4c 前）：UI 标「待接入」，可存草稿不可启用。
+    """
+    import src.providers as p
+    p.ensure_registered()
+    from src.registry import DOMAIN_MARKET, DOMAIN_TRADING, pick, registered
+    domain, need = ((DOMAIN_MARKET, {"market_data"}) if role == "market"
+                    else (DOMAIN_TRADING, {"execution"}))
+    out = []
+    for prov in sorted({name for (dom, name) in registered() if dom == domain}):
+        try:
+            pick(domain, prov, need, "plugin")
+            ready = True
+        except Exception:  # noqa: BLE001 —— 实体在、端口缺 = 待接入
+            ready = False
+        out.append({"provider": prov, "ready": ready})
+    return out
+
+
 @router.get("/api/md-interfaces")
 def list_md(enabled: bool | None = None, market: str | None = None,
             _u=Depends(require_perm("read"))):
@@ -68,6 +90,26 @@ def list_td(enabled: bool | None = None, market: str | None = None,
 def list_ds(enabled: bool | None = None, market: str | None = None,
             _u=Depends(require_perm("read"))):
     return {"items": _wrap(S.list_interfaces, "ds", enabled=enabled, market=market)}
+
+
+@router.get("/api/interfaces/status")
+def iface_status(kind: str, _u=Depends(require_perm("read"))):
+    """接口运行态只读（M6a 状态卡）：running/working/connected，不判活不做阈值。"""
+    from src.data_platform.iface_status import status_of
+    if kind not in ("md", "td"):
+        raise ApiError(400, "KIND_UNKNOWN", kind)
+    codes = [r["code"] for r in _wrap(S.list_interfaces, kind)]
+    return {"items": status_of(kind, codes)}
+
+
+@router.get("/api/md-interfaces/providers")
+def md_providers(_u=Depends(require_perm("read"))):
+    return {"items": _providers("market")}
+
+
+@router.get("/api/td-interfaces/providers")
+def td_providers(_u=Depends(require_perm("read"))):
+    return {"items": _providers("trade")}
 
 
 @router.post("/api/md-interfaces")

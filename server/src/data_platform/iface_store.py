@@ -84,6 +84,31 @@ def get_interface(kind: str, code: str) -> dict:
     return dict(zip(("code",) + keys, r))
 
 
+def _get_interface_raw(kind: str, code: str) -> dict:
+    """内部读：含 credentials_encrypted 原文（仅供合并/校验/login_key 派生，绝不回 API）。"""
+    t, _, cols = _tbl(kind)
+    with get_conn() as conn:
+        r = conn.execute(f"SELECT code,{','.join(cols)} FROM {t} WHERE code=%s", (code,)).fetchone()
+    if not r:
+        raise IfaceError("IFACE_NOT_FOUND", 404, code)
+    return dict(zip(("code",) + cols, r))
+
+
+def _cred_value(payload: dict) -> str | None:
+    """写侧凭证：`credentials`（明文 JSON，首选）或旧键 `credentials_encrypted`，落库前加密。"""
+    raw = payload.get("credentials")
+    if raw is None:
+        raw = payload.get("credentials_encrypted")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    import json
+
+    from src.quant_common.crypto import encrypt
+    if isinstance(raw, (dict, list)):
+        raw = json.dumps(raw, ensure_ascii=False)
+    return encrypt(str(raw))
+
+
 def get_td_identity(td_code: str) -> dict | None:
     """M5 身份解析：按 td_code 取交易接口身份字段（含 login_key/凭证/impl）。
 
@@ -126,12 +151,23 @@ def _login_key(kind: str, provider: str, account_key: str | None, creds: str | N
     return f"{provider}|legacy"          # M0 §1：同 provider 仅一行空 key 时回落
 
 
+def _bump() -> None:
+    """配置变更广播（各常驻进程据此重读行；不 bump 则启用/停用/换凭证对在跑进程不可见）。"""
+    from src.data_platform.routing import bump_config_version
+    bump_config_version()
+
+
 def create_interface(kind: str, payload: dict, carrier_probe: Callable[[str, str], bool]) -> dict:
     t, _, cols = _tbl(kind)
     code = (payload.get("code") or "").strip()
     check_code(kind, code)
     data = {c: payload.get(c) for c in cols if c in payload}
+    data.pop("credentials_encrypted", None)
+    cred = _cred_value(payload)
+    if cred is not None:
+        data["credentials_encrypted"] = cred
     if kind != "ds":
+        data.setdefault("impl", "plugin")   # 新建=插件载体（legacy 仅迁移期已有行）
         data["login_key"] = _login_key(kind, data.get("provider", ""), data.get("account_key"),
                                        data.get("credentials_encrypted"), bool(data.get("is_virtual")))
     data.setdefault("enabled", False)
@@ -143,6 +179,7 @@ def create_interface(kind: str, payload: dict, carrier_probe: Callable[[str, str
         with get_conn() as conn:
             conn.execute(sql, tuple([code] + [data[k] for k in data]))
             conn.commit()
+            _bump()
     except Exception as e:  # noqa: BLE001
         if getattr(e, "sqlstate", None) == "23505" or getattr(e, "pgcode", "") == "23505":
             raise IfaceError("CODE_CONFLICT", 409, code) from e
@@ -153,10 +190,14 @@ def create_interface(kind: str, payload: dict, carrier_probe: Callable[[str, str
 def update_interface(kind: str, code: str, patch: dict,
                      carrier_probe: Callable[[str, str], bool]) -> dict:
     t, _, cols = _tbl(kind)
-    cur = get_interface(kind, code)          # 不存在 → 404
+    cur = _get_interface_raw(kind, code)     # 含凭证原文——合并/校验/login_key 都不丢列
     if "code" in patch and patch["code"] != code:
         raise IfaceError("CODE_IMMUTABLE", 400, "code 不可修改")
     upd = {c: patch[c] for c in cols if c in patch}
+    upd.pop("credentials_encrypted", None)
+    cred = _cred_value(patch)
+    if cred is not None:
+        upd["credentials_encrypted"] = cred
     merged = {**cur, **upd}
     if kind != "ds":
         upd["login_key"] = _login_key(kind, merged.get("provider", ""), merged.get("account_key"),
@@ -165,17 +206,25 @@ def update_interface(kind: str, code: str, patch: dict,
     if merged.get("enabled"):
         validate_payload(kind, merged, carrier_probe)
     if not upd:
-        return cur
+        return get_interface(kind, code)   # 空 patch 不得回显密文
     sets = ",".join(f"{k}=%s" for k in upd)
     with get_conn() as conn:
         conn.execute(f"UPDATE {t} SET {sets}, updated_at=now() WHERE code=%s",
                      tuple(list(upd.values()) + [code]))
         conn.commit()
+        _bump()
     return get_interface(kind, code)
 
 
 def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], bool]) -> None:
     """启用前校验（建/改/启用共用）。失败不改 enabled。"""
+    # 三分类能力校验（先于载体/凭证）：ds 只能声明数据能力、md 只能 rt_quote、td 只能 trading
+    from src.data_platform.capabilities import check_iface_capabilities
+    declared = set(row.get("capabilities") or [])
+    if declared:
+        ok, msg = check_iface_capabilities(kind, declared)
+        if not ok:
+            raise IfaceError("CAPABILITY_INVALID", 400, msg)
     if kind == "ds":
         # 数据源=拉取侧适配器（非 registry 载体、无 login_key/account_key）——只校验能力非空
         # （M0 §2.1 ds 保留 capabilities）。原误走 trade carrier_probe ⇒ ds 恒 PROVIDER_UNSUPPORTED 不可启用。
@@ -190,9 +239,9 @@ def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], b
             raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "交易接口缺凭证")
     if not row.get("login_key"):
         raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "login_key 缺失")
-    # |legacy 只允许迁移期产生；运行期启用必须有稳定物理账号键
-    if not row.get("account_key") and not (kind == "md" and not row.get("credentials_encrypted")):
-        raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "account_key 为空（仅迁移期允许 legacy）")
+    # 迁移期例外：0192 未回填 account_key 的行（login_key 已是 provider|legacy）仍可启用——
+    # 否则「停用即不可逆」（生产 td-xtp 即此形态）。login_key 存在即视为有稳定登录身份；
+    # account_key 回填是独立数据治理项（M8）。
 
 
 def delete_interface(kind: str, code: str, stop_unit: Callable[[str], None],
@@ -223,6 +272,7 @@ def delete_interface(kind: str, code: str, stop_unit: Callable[[str], None],
             conn.execute("DELETE FROM td_md_map WHERE md_code=%s", (code,))
         conn.execute(f"DELETE FROM {t} WHERE code=%s", (code,))
         conn.commit()
+        _bump()
 
 
 def set_mappings(td_code: str, items: Iterable[dict]) -> None:
@@ -239,6 +289,7 @@ def set_mappings(td_code: str, items: Iterable[dict]) -> None:
             conn.execute("INSERT INTO td_md_map(td_code,md_code,priority) VALUES (%s,%s,%s)",
                          (td_code, it["md_code"], int(it["priority"])))
         conn.commit()
+        _bump()
 
 
 def list_mappings(kind: str, code: str) -> list[dict]:

@@ -90,7 +90,9 @@ select_hub_units() {
     "SELECT (to_regclass('market_interface') IS NOT NULL)::int::text")
   if [ "$has_market" = "1" ]; then
     # 新态：行情接口 code，provider 白名单过滤由调用方（release.yml）负责，此处取全部
-    echo "SELECT code || '|' || provider FROM market_interface WHERE enabled"
+    # I4：进程 ⇔ 行存在 ∧ provider 声明该角色载体——enabled 只管干活/空转，不参与起停。
+    # 载体集由调用方 provider 白名单（deploy_hub_md_providers）过滤。
+    echo "SELECT code || '|' || provider FROM market_interface ORDER BY code"
   else
     # 旧态回退（0115/0116/0122 形态）：沿用 select_trading_table 的两态判定
     local hub_tbl
@@ -133,7 +135,8 @@ case "$which_arg" in
   td)
     # 批189 后：交易执行单元素材=trade_interface.code（exec 接口）；排除 virtual（paper 不走 td_exec）。
     # 仅阶段5.5（迁移后，trade_interface 在位）调用；preflight 仍按 active 枚举旧实例供 7.6 停。
-    sql="SELECT code || '|' || provider FROM trade_interface WHERE enabled AND NOT is_virtual AND impl='plugin' ORDER BY code"
+    # I4：同上——有执行载体的行都建进程（不看 enabled/impl）；虚拟账户无载体（paper 不在白名单）。
+    sql="SELECT code || '|' || provider FROM trade_interface WHERE NOT is_virtual ORDER BY code"
     ;;
 esac
 

@@ -33,6 +33,7 @@ import time
 logger = logging.getLogger("td_exec")
 
 EX_CONFIG = 78  # 永久配置错误 → RestartPreventExitStatus=78（对齐既有单元语义）
+EX_TEMPFAIL = 75  # 会话被占/DB 不可用 → 退避重试（同 strategy_runner 语义）
 
 CMD_KEY = "td:cmd:{account}"
 ALIVE_KEY = "iface:hb:td:{account}"
@@ -78,6 +79,9 @@ class TdExec:
         self._quote_md_code = td_code   # 取价主 MD code（M5：td_md_map 反查，见 _load_account）
         self._row: dict = {}
         self._td_window: tuple[int, int] | None = None   # XTP 每日连接窗（lead, lag）
+        self._enabled = True                             # 配置启用态（I4：只决定干活/空转）
+        self._slot = None                                # 会话租约（builder 产出；本进程负责续租/释放）
+        self._exit_code = 0                              # 停机退出码（租约被抢=75）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
         self._conn_announced = False                     # 连上沿已对账（XTP 登录异步，靠轮询沿）
         self._last_flush = 0.0                           # 账户/持仓快照 60s 刷新节流
@@ -88,8 +92,10 @@ class TdExec:
         ident = get_td_identity(self.td_code)
         if not ident:
             raise RuntimeError(f"trade_interface {self.td_code} 不存在——拒绝启动")
-        if not ident.get("enabled"):
-            raise RuntimeError(f"trade_interface {self.td_code} 未启用——拒绝启动")
+        # I4：enabled 只管干活/空转——停用接口仍常驻（不建连、不下单、下发按 IFACE_IDLE 拒）
+        self._enabled = bool(ident.get("enabled"))
+        if not self._enabled:
+            logger.info("接口 %s 已停用：进程常驻空转（不建连/不下单）", self.td_code)
         # I6/E1：取价主 MD code 由 td_md_map 派生（quote_account_id 已退役）
         maps = list_mappings("td", self.td_code)
         self._quote_md_code = maps[0]["md_code"] if maps else ""
@@ -107,10 +113,8 @@ class TdExec:
 
         from src.strategy_runner.td_registry import code_terminal
         provider = self._row.get("provider")
-        impl = self._row.get("impl") or "plugin"
-        if impl != "plugin":
-            raise RuntimeError(
-                f"接口 {self.td_code} impl={impl!r}：legacy TD 路径已删，须 impl=plugin")
+        # impl 只是迁移期形态标记，不是就绪条件（I4）：载体由 builder/pick 决定，
+        # 存量 impl=legacy 的行也走唯一插件路径，不得在此 78 把发布波次拖进回滚。
         ee = make_event_engine()
         ee.start()
         self._ee = ee
@@ -125,6 +129,7 @@ class TdExec:
         self._td_api = rt["td_api"]
         self._gw = rt.get("gw")
         self._exec_port = rt.get("exec_port")
+        self._slot = rt.get("session_slot")       # 常驻进程须自续租（不续=45s 后号段可被并发抢占）
         self._adapter.account_id = self.td_code   # write_trade_log 归属真源（现为 code）
         if self._exec_port is None:
             raise RuntimeError(f"接口 {self.td_code} 无 exec_port（plugin 端口缺失）——拒绝启动")
@@ -178,6 +183,10 @@ class TdExec:
         XTP 登录是**异步**的（connect() 返回时 connect_status 仍 False），故连上沿观测心跳式轮询：
         每 tick 看 connected，False→True 的沿做一次对账（补宕机窗成交），并只在沿上打日志。
         """
+        if not getattr(self, "_enabled", True):
+            return
+        if getattr(self, "_exec_port", None) is None:
+            return
         win = self._td_window
         if not win or self._exec_port is None:
             return
@@ -210,6 +219,33 @@ class TdExec:
         except Exception as e:  # noqa: BLE001
             logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
 
+    def _config_digest(self):
+        """接口行身份/凭证/启用态摘要（配置面 bump 后重读；变更=带码重启生效）。"""
+        from src.data_platform.iface_store import get_td_identity
+        ident = get_td_identity(self.td_code) or {}
+        return (ident.get("provider"), ident.get("credentials_encrypted"),
+                ident.get("params"), bool(ident.get("enabled")))
+
+    def _reload_iface(self) -> None:
+        if self._config_digest() != getattr(self, "_cfg_digest", None):
+            logger.info("接口行配置变更（provider/凭证/启用态）——退出码 9 重启生效")
+            os._exit(9)
+
+    def _renew_slot(self) -> None:
+        """会话租约续租（10s 节拍，TTL 45s）。被抢=立即停机：双会话比停机危险。"""
+        if self._slot is None:
+            return
+        from src.strategy_runner.session_slot import SessionLost, SessionSlotAllocator, SessionUnavailable
+        try:
+            SessionSlotAllocator.renew(self._slot)
+        except SessionLost:
+            logger.error("会话号被抢占（terminal_id=%s）——立即停机避免双会话",
+                         self._slot.terminal_id)
+            self._exit_code = 75
+            self._stop.set()
+        except SessionUnavailable as e:  # noqa: BLE001 —— DB 抖动：下轮重试
+            logger.warning("会话租约续租失败（下轮重试）: %s", e)
+
     def _maybe_flush_positions(self) -> None:
         """60s 账户+持仓快照刷新（live_task 退役后由本进程承接；复用 trading.snapshot_cycle）。
 
@@ -239,7 +275,7 @@ class TdExec:
             base=lambda: {"account_code": self.td_code,
                           "provider": self._row.get("provider") or "",
                           "quote_md_code": self._quote_md_code})
-        self._hb.beat()
+        self._hb.beat(enabled=int(self._enabled), working=0, connected=0)
 
     def _reject(self, cmd: dict) -> None:
         """close 进行中：主循环直接写 reject 回执（不投线程、不排队）。"""
@@ -289,6 +325,12 @@ class TdExec:
     def _dispatch(self, cmd: dict) -> None:
         verb = cmd.get("verb") or ""
         req_id = cmd.get("req_id") or ""
+        if not getattr(self, "_enabled", True):
+            from src.strategy_runner import trading
+            trading.write_cmd_result(req_id, {
+                "req_id": req_id, "verb": verb, "phase": "done", "accepted": False,
+                "code": "IFACE_IDLE", "reason": "接口已停用（空闲）"})
+            return
         if verb == "close-all":
             self.dispatch_closing.set()
             self._close_thread = threading.Thread(
@@ -309,12 +351,18 @@ class TdExec:
 
     def run(self) -> None:
         self._row = self._load_account()
-        self._build()
+        if self._enabled:
+            self._build()
+        else:
+            # 停用/草稿行：不组装运行时（无凭证也能常驻空转，不建连、不下单）
+            logger.info("td_exec 空转启动 td_code=%s（接口停用）", self.td_code)
         self._start_heartbeat()
         key = CMD_KEY.format(account=self.td_code)
         logger.info("td_exec 启动 td_code=%s provider=%s quote_md=%s",
                     self.td_code, self._row.get("provider"), self._quote_md_code)
         last_hb = time.time()
+        last_cfg = time.time()
+        self._cfg_digest = self._config_digest()
         while not self._stop.is_set():
             try:
                 item = self._r.blpop(key, timeout=1)
@@ -330,10 +378,19 @@ class TdExec:
                 else:
                     logger.warning("命令解析失败（丢弃）: %r", item)
             now = time.time()
+            if now - last_cfg >= 15:
+                self._reload_iface()
+                last_cfg = now
             if now - last_hb >= 10:
+                self._renew_slot()
                 self._maybe_connect()
                 self._maybe_flush_positions()
-                self._hb.beat()
+                try:
+                    _conn = bool(self._exec_port.connected)
+                except Exception:  # noqa: BLE001
+                    _conn = False
+                self._hb.beat(working=int(getattr(self, "_enabled", True) and _conn),
+                              connected=int(_conn), enabled=int(getattr(self, "_enabled", True)))
                 try:
                     from src.quant_common.guard import sd_notify as _sd_notify
                     _sd_notify("WATCHDOG=1")   # systemd 看门狗喂狗（无 NOTIFY_SOCKET 时静默）
@@ -348,6 +405,10 @@ class TdExec:
             self._close_thread.join(timeout=10)
             if self._close_thread.is_alive():
                 logger.warning("close 线程未在 10s 内结束（systemd 兜底强杀）")
+        _slot = getattr(self, "_slot", None)
+        if _slot is not None:
+            from src.strategy_runner.session_slot import SessionSlotAllocator
+            SessionSlotAllocator.release(_slot)   # 带 holder 条件，不会删抢到者的行
         try:
             self._r.delete(ALIVE_KEY.format(account=self.td_code))
         except Exception:  # noqa: S110
@@ -362,7 +423,7 @@ class TdExec:
         except Exception:  # noqa: S110
             pass
         logging.shutdown()
-        os._exit(0)
+        os._exit(getattr(self, "_exit_code", 0))
 
 
 def _install_signal(stop: threading.Event) -> None:
@@ -389,10 +450,20 @@ def main() -> None:
         sys.exit(EX_CONFIG)
     ex = TdExec(code)
     _install_signal(ex._stop)
+    from src.strategy_runner.session_slot import (
+        SessionBusy, SessionConfigError, SessionUnavailable,
+    )
     try:
         ex.run()
     except RuntimeError as e:
         logger.error("td_exec 启动失败（配置错误）: %s", e)
+        sys.exit(EX_CONFIG)
+    except (SessionBusy, SessionUnavailable) as e:
+        # 瞬时（号段被占/DB 抖）→ 75 让 systemd 退避重拉；按 1（非约定码）退出会误触 StartLimit
+        logger.error("td_exec 会话不可用（退避重试）: %s", e)
+        sys.exit(EX_TEMPFAIL)
+    except SessionConfigError as e:
+        logger.error("td_exec 会话配置错误（不重试）: %s", e)
         sys.exit(EX_CONFIG)
 
 

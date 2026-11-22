@@ -16,16 +16,29 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any, Mapping
 
+# 域 = 接口类型（2026-11-22 用户裁定：彻底拆开）。一个 provider 在不同域是两个独立实体
+# （XTP = 行情实体 + 交易实体，各注册一次；它没有数据实体）。
 DOMAIN_DATA = "data_source"
-DOMAIN_TRADING = "trading_account"
+DOMAIN_MARKET = "market_interface"
+DOMAIN_TRADING = "trade_interface"
 DOMAIN_RESEARCH = "research"
 
-DOMAINS: frozenset[str] = frozenset({DOMAIN_DATA, DOMAIN_TRADING, DOMAIN_RESEARCH})
+DOMAINS: frozenset[str] = frozenset(
+    {DOMAIN_DATA, DOMAIN_MARKET, DOMAIN_TRADING, DOMAIN_RESEARCH})
 
 # 端口域词表（与数据域 CAPABILITIES 分离：后者是 DataKind 的派生归类视图）
 PORT_CAPS: frozenset[str] = frozenset({
     "execution", "market_data", "research", "history", "account",
 })
+
+# 域 × 允许的端口能力（注册时校验）：实体只能声明本域该有的端口。
+# 行情实体拿不到 execution、交易实体拿不到 market_data——XTP 的「无数据能力」由此结构化。
+DOMAIN_PORT_CAPS: dict[str, frozenset[str]] = {
+    DOMAIN_DATA: frozenset({"history"}),
+    DOMAIN_MARKET: frozenset({"market_data"}),
+    DOMAIN_TRADING: frozenset({"execution", "account"}),
+    DOMAIN_RESEARCH: frozenset({"research"}),
+}
 
 _REGISTRY: dict[tuple[str, str], Any] = {}
 _LEGACY: set[tuple[str, str]] = set()
@@ -76,6 +89,11 @@ def register(domain: str, provider: str, plugin: Any, *, legacy_only: bool = Fal
     unknown = caps - PORT_CAPS
     if unknown:
         raise ValueError(f"({domain}, {provider}) 声明了未定义的端口能力：{sorted(unknown)}")
+    off_domain = caps - DOMAIN_PORT_CAPS[domain]
+    if off_domain:
+        raise ValueError(
+            f"({domain}, {provider}) 声明了不属于该域的端口能力：{sorted(off_domain)}"
+            f"（{domain} 只允许 {sorted(DOMAIN_PORT_CAPS[domain])}）")
     if not callable(getattr(plugin, "build", None)):
         raise ValueError(f"({domain}, {provider}) 的 plugin 缺少可调用的 build()")
     declared_id = _manifest_field(plugin, "id")

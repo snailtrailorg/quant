@@ -1,8 +1,5 @@
 <template>
   <div>
-    <el-radio-group v-if="modes.length > 1" v-model="kind" @change="load" class="mb">
-      <el-radio-button v-for="k in modes" :key="k" :value="k">{{ labelOf(k) }}</el-radio-button>
-    </el-radio-group>
     <div v-if="canWrite" class="mb">
       <el-button type="primary" size="small" @click="openCreate">新增{{ labelOf(kind) }}</el-button>
     </div>
@@ -26,6 +23,9 @@
         <template #default="{ row }">{{ (row.capabilities || []).join(', ') }}</template>
       </el-table-column>
       <el-table-column v-else prop="impl" label="impl" min-width="70" />
+      <el-table-column v-if="kind !== 'ds'" label="载体" min-width="90">
+        <template #default="{ row }"><span :class="carrierOf(row.provider) === '就绪' ? 'on' : 'off'">{{ carrierOf(row.provider) }}</span></template>
+      </el-table-column>
       <el-table-column label="启用" min-width="80">
         <template #default="{ row }">
           <el-switch :model-value="row.enabled" :disabled="!canWrite" @change="v => toggle(row, v)" />
@@ -45,17 +45,34 @@
     </el-table>
 
     <el-dialog v-model="dlg" :title="(form._create ? '新增' : '编辑') + labelOf(kind)" :width="560">
-      <el-form label-width="90px">
+      <el-form label-width="100px">
         <el-form-item label="code">
           <el-input v-if="form._create" v-model="form.code" :placeholder="prefixOf(kind) + 'xxx（小写字母数字-，不可改）'" />
           <el-input v-else :model-value="form.code" disabled />
         </el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item label="provider"><el-input v-model="form.provider" :disabled="!form._create" /></el-form-item>
+        <el-form-item label="provider">
+          <el-select v-if="providers.length" v-model="form.provider" :disabled="!form._create" filterable allow-create>
+            <el-option v-for="x in providers" :key="x.provider" :label="x.provider" :value="x.provider" />
+          </el-select>
+          <el-input v-else v-model="form.provider" :disabled="!form._create" placeholder="ds-* 由数据源注册表提供" />
+        </el-form-item>
         <el-form-item label="市场"><el-input v-model="form.market" :disabled="!form._create" /></el-form-item>
-        <el-form-item v-if="kind === 'ds'" label="能力"><el-input v-model="form.capabilities" placeholder="逗号分隔，如 hist_quote,ref_data" /></el-form-item>
-        <el-form-item v-if="kind === 'td'" label="account_key"><el-input v-model="form.account_key" placeholder="物理资金账号（凭证内优先）" /></el-form-item>
-        <el-form-item label="凭证 JSON"><el-input v-model="form.credentials" type="textarea" :rows="3" placeholder='{"app_id":...,"app_secret":...}（留空不改）' /></el-form-item>
+        <el-form-item v-if="kind === 'ds'" label="能力">
+          <el-input v-model="form.capabilities" placeholder="逗号分隔，如 hist_quote,ref_data" />
+        </el-form-item>
+        <el-form-item v-if="kind === 'td'" label="account_key">
+          <el-input v-model="form.account_key" placeholder="物理资金账号（凭证内优先）" />
+        </el-form-item>
+        <el-form-item v-if="kind === 'td'" label="虚拟账户">
+          <el-switch v-model="form.is_virtual" :disabled="!form._create" />
+        </el-form-item>
+        <el-form-item label="凭证 JSON">
+          <el-input v-model="form.credentials" type="textarea" :rows="3" placeholder='{"app_id":...,"app_secret":...}（留空不改）' />
+        </el-form-item>
+        <el-form-item v-if="kind !== 'ds'" label="参数 JSON">
+          <el-input v-model="form.params" type="textarea" :rows="3" placeholder='{"td_host":"host:port"}（留空不改）' />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dlg = false">取消</el-button>
@@ -70,68 +87,87 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import api, { apiErr, meOnce } from '../api'
 
-const props = defineProps({ modes: { type: Array, default: () => ['td', 'md'] } })
+const props = defineProps({ kind: { type: String, required: true } })
 const emit = defineEmits(['loaded'])
-const kind = ref(props.modes[0])
 const rows = ref([])
 const maps = ref({})
+const providers = ref([])
 const perms = ref([])
 const dlg = ref(false)
 const form = ref({})
 
 const canWrite = computed(() => perms.value.includes('system_config'))
 const base = k => (k === 'td' ? '/td-interfaces' : k === 'md' ? '/md-interfaces' : '/data-sources')
-const labelOf = k => (k === 'td' ? '交易接口 (TD)' : k === 'md' ? '行情接口 (MD)' : '数据源')
+const labelOf = k => (k === 'td' ? '交易接口' : k === 'md' ? '行情接口' : '数据源')
 const prefixOf = k => (k === 'td' ? 'td-' : k === 'md' ? 'md-' : 'ds-')
+const carrierOf = p => {
+  const x = providers.value.find(v => v.provider === p)
+  return !x ? '未知' : (x.ready ? '就绪' : '待接入')
+}
 
 async function load() {
   try {
-    const r = await api.get(base(kind.value))
+    const r = await api.get(base(props.kind))
     rows.value = r.items || []
     maps.value = {}
-    if (kind.value !== 'ds') {
+    if (props.kind !== 'ds') {
       for (const row of rows.value) {
-        try { maps.value[row.code] = (await api.get(base(kind.value) + '/' + row.code + '/mappings')).items || [] }
+        try { maps.value[row.code] = (await api.get(base(props.kind) + '/' + row.code + '/mappings')).items || [] }
         catch { maps.value[row.code] = [] }
       }
     }
     emit('loaded', rows.value)
   } catch (e) { ElMessage.error(apiErr(e)); rows.value = [] }
 }
+async function loadProviders() {
+  if (props.kind === 'ds') return
+  try { providers.value = (await api.get(base(props.kind) + '/providers')).items || [] } catch { providers.value = [] }
+}
 function openCreate() {
-  form.value = { _create: true, code: '', name: '', provider: '', market: 'astock', account_key: '', capabilities: '', credentials: '' }
+  form.value = { _create: true, code: '', name: '', provider: '', market: 'astock',
+                 account_key: '', is_virtual: false, capabilities: '', credentials: '', params: '' }
   dlg.value = true
 }
 function openEdit(row) {
   form.value = { _create: false, code: row.code, name: row.name, provider: row.provider, market: row.market,
-                 account_key: row.account_key || '', capabilities: (row.capabilities || []).join(','), credentials: '' }
+                 account_key: row.account_key || '', is_virtual: !!row.is_virtual,
+                 capabilities: (row.capabilities || []).join(','),
+                 credentials: '', params: JSON.stringify(row.params || {}, null, 0) }
   dlg.value = true
 }
 async function save() {
   const p = { name: form.value.name }
   if (form.value._create) { p.code = form.value.code; p.provider = form.value.provider; p.market = form.value.market }
-  if (kind.value === 'ds' && form.value.capabilities !== undefined)
-    p.capabilities = form.value.capabilities.split(',').map(s => s.trim()).filter(Boolean)
-  if (kind.value === 'td' && form.value.account_key !== undefined) p.account_key = form.value.account_key
-  if (form.value.credentials && form.value.credentials.trim()) p.credentials_encrypted = form.value.credentials.trim()
+  if (props.kind === 'ds') p.capabilities = form.value.capabilities.split(',').map(s => s.trim()).filter(Boolean)
+  if (props.kind === 'td') {
+    p.account_key = form.value.account_key
+    if (form.value._create) p.is_virtual = form.value.is_virtual
+  }
+  if (form.value.credentials && form.value.credentials.trim()) p.credentials = form.value.credentials.trim()
+  if (props.kind !== 'ds' && form.value.params && form.value.params.trim()) {
+    try { p.params = JSON.parse(form.value.params) } catch { ElMessage.error('参数不是合法 JSON'); return }
+  }
   try {
-    if (form.value._create) await api.post(base(kind.value), p)
-    else await api.patch(base(kind.value) + '/' + form.value.code, p)
+    if (form.value._create) await api.post(base(props.kind), p)
+    else await api.patch(base(props.kind) + '/' + form.value.code, p)
     dlg.value = false; ElMessage.success('已保存'); load()
   } catch (e) { ElMessage.error(apiErr(e)) }
 }
 async function toggle(row, v) {
   try {
-    if (kind.value === 'ds') await api.patch(base(kind.value) + '/' + row.code, { enabled: v })
-    else await api.post(base(kind.value) + '/' + row.code + '/enable', { enabled: v })
+    if (props.kind === 'ds') await api.patch(base(props.kind) + '/' + row.code, { enabled: v })
+    else await api.post(base(props.kind) + '/' + row.code + '/enable', { enabled: v })
     row.enabled = v
   } catch (e) { ElMessage.error(apiErr(e)); load() }
 }
 async function del(row) {
-  try { await api.delete(base(kind.value) + '/' + row.code); ElMessage.success('已删除'); load() }
+  try { await api.delete(base(props.kind) + '/' + row.code); ElMessage.success('已删除'); load() }
   catch (e) { ElMessage.error(apiErr(e)) }
 }
-onMounted(async () => { try { perms.value = (await meOnce()).perms || [] } catch { perms.value = [] } load() })
+onMounted(async () => {
+  try { perms.value = (await meOnce())?.permissions || [] } catch { perms.value = [] }
+  loadProviders(); load()
+})
 </script>
 
 <style scoped>
@@ -139,4 +175,6 @@ onMounted(async () => { try { perms.value = (await meOnce()).perms || [] } catch
 .pad { padding: var(--sp-2) var(--sp-3); }
 .muted { color: var(--text-3); }
 .mtag { margin-left: var(--sp-1); }
+.on { color: var(--success); }
+.off { color: var(--text-3); }
 </style>

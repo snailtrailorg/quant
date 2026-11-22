@@ -65,22 +65,17 @@ def build_td_runtime(provider, ee, tid, td_code: str, boot_epoch,
 
 @register_td_builder("xtp")
 def _build_xtp_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
-    """XTP TD 运行时组装（P3 收口：唯一路径=providers/xtp 插件端口）。
+    """XTP TD 运行时组装（唯一路径=providers/xtp 端口）。
 
     旧 ThinTdGateway + XtpTdApi + XTPAdapter 组装已于批 172d 删除；
-    impl!='plugin' 的行在此 fail-fast（main 转 EX_CONFIG=78），不静默回落已删路径。
+    impl 只是迁移期形态标记，不在此做就绪门（存量 legacy 行走同一路径，否则发布回滚）。
     返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter, exec_port, session_slot}。
     row_id=account_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
     """
-    # 实现形态门 + login_key 取自接口行（legacy 已删，取数/建连之前就拒）
+    # login_key 取自接口行；impl 不参与组装（legacy 代码路径已物理删除，无回落可能）
     from src.data_platform.iface_store import get_td_identity
     ident = get_td_identity(td_code)
-    _impl = (ident or {}).get("impl") or "legacy"
     _login_key = (ident or {}).get("login_key") or td_code
-    if _impl != "plugin":
-        raise RuntimeError(
-            f"XTP 接口 {td_code} impl={_impl!r}：legacy TD 路径已于 P3 删除，须切 impl=plugin"
-        )
 
     from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
 
@@ -117,19 +112,34 @@ def _build_xtp_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, ord
 
 @register_td_builder("emt_emq")
 def _build_emt_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, order_prefix=None) -> dict:
-    """批 63 P4：EMT 极速柜台 TD 运行时（TD_BUILDERS 第二实例——D26-A 框架第一消费者）。
+    """EMT 极速柜台 TD 运行时（P4 收口：唯一路径=providers/emt 插件端口）。
 
     EmtAdapter 兼任 gw/td_api（薄壳：connect(setting)=Login；connect_status 属性——
     hub_worker 仅消费这两个面）。凭证=get_interface_row 解密（不加 EmtBroker）；
     td_host 用 _parse_host_port 拆分（md_gateway 先例）。
-    client_id 派生 (tid-1)%100+20（SDK 实测域 [1-127]——代码审 B-P1-4；真防线=tid 派生唯一性）。
+    终端号：会话槽用 code_terminal(td_code)（SessionSlot 域 2..99），EMT SDK 号段
+    20..119 由插件内部由槽号映射（tcid=(slot.terminal_id-1)%100+20，SDK 实测域 [1-127]）——
+    不在本层算偏移，否则 >99 会被 SessionSlot 号段校验拒（P4 §9.5 双域分离）。
+    client_id 不用：EMT 终端号由槽派生；XTP 的 client_id 是软件 Key（provider 内务差异）。
     连接窗：复用 A 股窗（xtp_session_lead/lag_min 自此双 provider 共用——知情接受）。
     """
     from datetime import datetime as _dt
 
-    from src.strategy_framework.adapters import EmtAdapter
-    from src.strategy_framework.broker import get_interface_row
+    from src.data_platform.iface_store import get_td_identity
+    from src.providers import ensure_registered
     from src.providers.xtp.session import is_trading_day, load_xtp_window_cfg, xtp_session_window_open
+    from src.strategy_framework.broker import get_interface_row
+    from src.strategy_runner.session_slot import SessionSlotAllocator
+
+    ensure_registered()   # import 即注册；registry 清空/重载场景幂等补齐（禁裸依赖别处先 import）
+    ident = get_td_identity(td_code) or {}
+    _impl = ident.get("impl") or "legacy"
+    _login_key = ident.get("login_key") or td_code
+    if _impl not in ("plugin", "legacy"):
+        raise RuntimeError(f"EMT 接口 {td_code} impl={_impl!r} 非法（只认 plugin/legacy）")
+    # 两值都走本函数（唯一组装路径）：EMT 执行端口（EmtExecutionPort）未落地，
+    # 故 impl 门与 td-emt-emq 的 impl=plugin 翻转一并留到端口落地时（否则 legacy 行的
+    # live_task 会直接 78，而 td_exec 又因缺 exec_port 起不来——两锁互死）。
 
     row = get_interface_row(code=td_code)
     cred = row.get("credentials") or {}
@@ -143,14 +153,21 @@ def _build_emt_runtime(ee, tid, td_code: str, boot_epoch, *, client_id=None, ord
     lead, lag = load_xtp_window_cfg()
     td_open = xtp_session_window_open(_dt.now(), lead, lag, trading_day=is_trading_day())
 
-    _prefix = order_prefix or f"t{tid}:e{boot_epoch}:"
-    _tcid = client_id if client_id is not None else (tid - 1) % 100 + 20
-    adapter = EmtAdapter(event_engine=ee, order_prefix=_prefix, td_client_id=_tcid)
-    if td_open:
-        adapter.connect(setting)   # Login fail-fast raise → main EX_CONFIG
-    else:
-        adapter.remember_login(setting)
-        logger.info("EMT TD 窗关启动（lead=%d/lag=%d），连接待窗开沿", lead, lag)
-    # gw/td_api 均 adapter（hub_worker: connect_status 消费面；main: gw.connect 窗开沿）
+    slot = SessionSlotAllocator.acquire(_login_key, "emt_emq", "td", tid, boot_epoch, td_open,
+                                        terminal_id=code_terminal(td_code))
+
+    from src.registry import DOMAIN_TRADING, pick
+    plugin = pick(DOMAIN_TRADING, "emt_emq", set(), "plugin")   # 端口未落地：按实体取插件，不声明 execution
+    _prefix = order_prefix if order_prefix is not None else f"t{tid}:e{boot_epoch}:"
+    if client_id is not None:
+        logger.info("EMT 终端号由会话槽派生（忽略 client_id=%s）", client_id)
+    adapter = plugin.build(None, "td", slot, event_engine=ee, setting=setting, order_prefix=_prefix)
+    logger.info("EMT 接口 %s 走插件端口（terminal_id=%s）", td_code, slot.terminal_id)
+    # gw/td_api 均 adapter（hub_worker: connect_status 消费面；main: gw.connect 窗开沿）。
+    # 不返回 exec_port：EmtAdapter 只有 connect/connect_status，不是 ports.ExecutionPort；
+    # live_task 侧缺省即回落 LegacyExecutionPort(adapter)（行为等价），td_exec 侧显式
+    # 拒绝启动（无端口=不可执行，等 EmtExecutionPort 落地）。给个裸 adapter 会在
+    # subscribe_order/connected 处 AttributeError。
     return {"gw": adapter, "td_api": adapter, "adapter": adapter, "setting": setting,
-            "td_open": td_open, "lead": lead, "lag": lag, "cfg_adapter": "emt_emq"}
+            "td_open": td_open, "lead": lead, "lag": lag, "cfg_adapter": "emt_emq",
+            "session_slot": slot}

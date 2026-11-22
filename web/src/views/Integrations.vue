@@ -13,7 +13,8 @@ import { meOnce } from '../api'
 import TabsShell from '../components/TabsShell.vue'
 import EmptyState from '../components/EmptyState.vue'
 import DataSources from './DataSources.vue'
-import TradingAccounts from './TradingAccounts.vue'
+import MarketInterfaces from './MarketInterfaces.vue'
+import TradeInterfaces from './TradeInterfaces.vue'
 import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
 import SmsCard from '../components/SmsCard.vue'
@@ -26,8 +27,10 @@ const ALL_TABS = [
     { key: 'mail', i18nKey: 'tabs.mail', c: SmtpCard, perm: 'user_mgmt' },
     { key: 'sms', i18nKey: 'tabs.sms', c: SmsCard, perm: 'alerts_config' },   // 批37 迁入
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels, perm: 'llm_config' },
-    { key: 'dataSources', i18nKey: 'tabs.dataSources', c: DataSources, perm: 'system_config' },
-    { key: 'tradingAccounts', i18nKey: 'tabs.tradingAccounts', c: TradingAccounts, perm: 'system_config' },
+    // 批189 R2：交易账号页签拆「行情接口」「交易接口」；D6：读权限即可见（写按钮另由 system_config 门）
+    { key: 'dataSources', i18nKey: 'tabs.dataSources', c: DataSources, perm: 'read' },
+    { key: 'marketInterfaces', i18nKey: 'tabs.marketInterfaces', c: MarketInterfaces, perm: 'read' },
+    { key: 'tradeInterfaces', i18nKey: 'tabs.tradeInterfaces', c: TradeInterfaces, perm: 'read' },
     // 批102a：代理出口。写在数据源/交易账号之后（域上是它们的**下游配置**：先有源，才轮到
     // 给这个源配出口）。perm 复用 system_config（后端 proxies 路由同键，不新增 perm 键）。
     { key: 'proxy', i18nKey: 'tabs.proxy', c: ProxyCard, perm: 'system_config' },

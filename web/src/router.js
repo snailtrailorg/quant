@@ -66,14 +66,14 @@ const routes = [
       { path: 'reconcile', name: 'reconcile', component: () => import('./views/Reconcile.vue') },
 
       // 系统 (Admin)
-      { path: 'account', redirect: '/integrations?tab=interfaces' },  // 批16：API 密钥能力在集成中心·交易账户
+      { path: 'account', redirect: '/integrations?tab=tradeInterfaces' },  // 批189 R2：账户/密钥归交易接口页
       { path: 'logs', redirect: '/observe?tab=logs' },
       { path: 'data-manage', redirect: '/dataops/sync' },   // 批166 子路径化
       { path: 'data-integrity', redirect: '/dataops/quality' },   // 批166：并入数据检查页
       { path: 'data-manage/:syncId', name: 'symbol-manage', component: () => import('./views/SymbolManage.vue'), meta: { admin: true } },
       { path: 'audit', redirect: '/observe?tab=audit' },
       { path: 'llm-models', redirect: '/integrations?tab=llm' },
-      { path: 'data-sources', redirect: '/integrations?tab=interfaces' },
+      { path: 'data-sources', redirect: '/integrations?tab=dataSources' },
       { path: 'tasks', redirect: '/dataops/sched' },   // 批166 子路径化
       { path: 'channels', redirect: '/integrations?tab=push' },
       { path: 'brokers', redirect: '/integrations?tab=brokers' },

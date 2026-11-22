@@ -213,6 +213,139 @@ def test_shutdown_stops_engine_and_exits():
     ex._r.delete.assert_called_once()
 
 
+def test_build_accepts_legacy_impl_marker():
+    """P0 回归：存量 impl=legacy 行不得在 td_exec 组装层 78（wrapper 已不再按 impl 过滤）。"""
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.td_code = "td-xtp"
+    ex._row = {"provider": "xtp", "impl": "legacy"}
+    ex._quote_md_code = "md-xtp"
+    ex._td_window = None
+    rt = {"adapter": MagicMock(), "td_api": MagicMock(), "gw": MagicMock(),
+          "exec_port": MagicMock(), "session_slot": MagicMock(), "setting": {}}
+    with patch("src.strategy_runner.main.make_event_engine", return_value=MagicMock()), \
+         patch("src.strategy_runner.td_registry.code_terminal", return_value=2), \
+         patch("src.strategy_runner.td_registry.build_td_runtime", return_value=rt), \
+         patch("src.strategy_runner.trading.reconcile_orders"), \
+         patch("src.strategy_runner.hub_worker.EmergencyWorker"):
+        ex._build()
+    assert ex._exec_port is rt["exec_port"] and ex._adapter.account_id == "td-xtp"
+
+
+def test_config_change_exits_9_for_restart():
+    """启用/凭证变更对常驻进程可见（I4）：带码 9 重启，不靠人工 systemctl restart。"""
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.td_code = "td-xtp"
+    ex._cfg_digest = ("xtp", "old", {}, True)
+    with patch.object(ex, "_config_digest", return_value=("xtp", "new", {}, True)), \
+         patch("src.td_exec.main.os._exit") as ex9:
+        ex._reload_iface()
+    ex9.assert_called_once_with(9)
+
+
+def test_disabled_starts_without_building_runtime():
+    """停用/草稿行：常驻但零组装（无凭证也不 78——否则发布波次把单元拉成 failed）。"""
+    import threading
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.td_code = "td-xtp"
+    ex._enabled = False
+    ex._quote_md_code = ""
+    ex._stop = threading.Event()
+    ex._stop.set()             # 循环立即退出
+    with patch.object(ex, "_load_account", return_value={"provider": "xtp"}), \
+         patch.object(ex, "_build") as bld, \
+         patch.object(ex, "_start_heartbeat"), \
+         patch.object(ex, "_shutdown"):
+        ex.run()
+    bld.assert_not_called()
+
+
+def test_dispatch_rejects_when_iface_disabled():
+    """I4：停用接口常驻空转——下发明确 IFACE_IDLE 拒（不留 order_log、不投线程）。"""
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.td_code = "td-xtp"
+    ex._enabled = False
+    with patch("src.strategy_runner.trading.write_cmd_result") as wcr:
+        ex._dispatch({"verb": "place-order", "req_id": "r1"})
+    d = wcr.call_args[0][1]
+    assert d["accepted"] is False and d["code"] == "IFACE_IDLE"
+
+
+def test_renew_slot_keeps_lease_alive():
+    """常驻进程必须自续租（live_task 的 renew 钩子不在本进程里）。"""
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex._slot = MagicMock()
+    ex._slot.terminal_id = 2
+    with patch("src.strategy_runner.session_slot.SessionSlotAllocator.renew") as rn:
+        ex._renew_slot()
+    rn.assert_called_once_with(ex._slot)
+
+
+def test_renew_slot_lost_stops_process_with_75():
+    """号段被抢=立即停机（75）：继续跑会与另一实例双会话。"""
+    import threading as _t
+    from src.strategy_runner.session_slot import SessionLost
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex._slot = MagicMock()
+    ex._slot.terminal_id = 2
+    ex._stop = _t.Event()
+    ex._exit_code = 0
+    with patch("src.strategy_runner.session_slot.SessionSlotAllocator.renew",
+               side_effect=SessionLost("taken")):
+        ex._renew_slot()
+    assert ex._stop.is_set() and ex._exit_code == 75
+
+
+def test_shutdown_releases_slot():
+    from src.td_exec import main as M
+    ex = M.TdExec.__new__(M.TdExec)
+    ex.td_code = "td-xtp"
+    ex._r = MagicMock()
+    ex._close_thread = None
+    ex._ee = MagicMock()
+    ex._slot = MagicMock()
+    ex._exit_code = 0
+    with patch("src.td_exec.main.os._exit"), \
+         patch("src.strategy_runner.session_slot.SessionSlotAllocator.release") as rl:
+        ex._shutdown()
+    rl.assert_called_once_with(ex._slot)
+
+
+def test_main_maps_slot_busy_to_75():
+    """会话被占=瞬时：75 退避重拉（退 1 会误触 StartLimit → unit Failed + 误告警）。"""
+    from src.strategy_runner.session_slot import SessionBusy
+    from src.td_exec import main as M
+    with patch.dict("os.environ", {"TD_CODE": "td-xtp"}), \
+         patch.object(M.TdExec, "run", side_effect=SessionBusy("busy")), \
+         patch.object(M, "_install_signal"):
+        with pytest.raises(SystemExit) as ei:
+            M.main()
+    assert ei.value.code == 75
+
+
+def test_exec_interface_codes_follow_carriers():
+    """下发集=有执行载体的 provider（I4）；不看 enabled/impl（形态不是就绪）。"""
+    from src.data_platform import config_store
+    cur = MagicMock()
+    cur.fetchall.return_value = [("td-xtp",)]
+    conn = MagicMock()
+    conn.execute.return_value = cur
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx), \
+         patch("src.registry.exec_capable_providers", return_value={"xtp", "emt_emq"}):
+        out = config_store.exec_interface_codes()
+    sql = conn.execute.call_args[0][0]
+    assert "impl" not in sql and "enabled" not in sql
+    assert out == ["td-xtp"]
+
+
 def test_dispatch_paths_ensure_registry():
     """钉反面：web 进程 registry 未加载 → exec_capable_providers() 空 → 下发 0 账号但 200 done
     （prod 实录：一键清仓「成功」而 td_exec 没收到命令）。两条下发路径 + 监控期望集都必须先注册。"""

@@ -77,14 +77,16 @@ def test_registry_registered_with_manifest():
     import src.providers as P
 
     P.ensure_registered()
-    from src.registry import get
+    from src.registry import DOMAIN_MARKET, DOMAIN_TRADING, get
 
-    plugin = get("trading_account", "xtp")
-    assert plugin.manifest.port_caps == {"execution", "market_data", "account"}
+    trade = get(DOMAIN_TRADING, "xtp")
+    assert trade.manifest.port_caps == {"execution", "account"}   # 行情能力不在此实体
+    market = get(DOMAIN_MARKET, "xtp")
+    assert market.manifest.port_caps == {"market_data"}
     with pytest.raises(ValueError):
-        plugin.build({}, "td", _slot(), event_engine=None)
+        trade.build({}, "td", _slot(), event_engine=None)
     with pytest.raises(UnsupportedCapability):
-        plugin.build({}, "research", _slot())
+        trade.build({}, "research", _slot())
 
 
 # ── S7：下单/撤单等价 ────────────────────────────────────
@@ -219,8 +221,11 @@ def test_md_port_delegates_to_gateway(monkeypatch):
         def snapshot(self, symbol):
             return None
 
-    monkeypatch.setattr(G, "XtpMdGateway", FakeGw)
-    port = get("trading_account", "xtp").build({}, "md", _slot())
+    # 行情实体走 create_md_gateway（载体真源=通用 md_gateway 注册表），故换注册表项
+    import src.strategy_framework.md_gateway as MG
+    monkeypatch.setitem(MG._REGISTRY, "xtp", FakeGw)
+    from src.registry import DOMAIN_MARKET
+    port = get(DOMAIN_MARKET, "xtp").build({}, "md", _slot())
     port.poll_supervise(True, False)
     port.subscribe(["600000.XSHG"])
     assert seen["gw"].calls[0] == (True, False)

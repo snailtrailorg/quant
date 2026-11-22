@@ -47,6 +47,40 @@ def check_capability_domain(domain: str, declared: set[str]) -> tuple[bool, str]
     return True, ""
 
 
+# ——— 接口三分类维（2026-11-22：能力大类 = 接口类型）———
+_KIND2IFACE = {"ds": "data_source", "md": "market_interface", "td": "trade_interface"}
+
+
+def iface_capabilities(kind: str) -> set[str]:
+    """接口类型的能力集。kind 接受 ds/md/td 或 IFACE_* 值；未知=空集（上层另判）。"""
+    from src.quant_common.markets import IFACE_CAPS
+    key = _KIND2IFACE.get(kind, kind)
+    return set(IFACE_CAPS.get(key, ()))
+
+
+def iface_kinds_of(provider: str) -> set[str]:
+    """provider 覆盖的接口类型集合（XTP={market_interface, trade_interface}；无数据）。
+
+    与 provider_domain 的区别：后者是 legacy 单域目录（跨域返 None）；本函数按三分类
+    返回**集合**——一个 provider 可同时是行情实体和交易实体。
+    """
+    import src.data_platform.adapters  # noqa: F401 —— 导入即注册（_ADAPTERS 靠 import 副作用填充）
+    from src.quant_common.markets import IFACE_CAPS
+    caps = provider_capabilities(provider)
+    if not caps:
+        return set()
+    return {k for k, allowed in IFACE_CAPS.items() if caps & set(allowed)}
+
+
+def check_iface_capabilities(kind: str, declared: set[str]) -> tuple[bool, str]:
+    """声明能力 ⊆ 该接口类型的能力集（写侧校验）。"""
+    allowed = iface_capabilities(kind)
+    excess = set(declared) - allowed
+    if excess:
+        return False, f"{sorted(excess)} 不属于「{kind}」能力集 {sorted(allowed)}——每行单一接口类型"
+    return True, ""
+
+
 def provider_domain(provider: str) -> str | None:
     """provider 归属域(83a):按代码能力集 ⊆ 单一域能力集推导。
 

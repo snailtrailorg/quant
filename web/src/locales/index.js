@@ -100,7 +100,7 @@ export default {
       astock: 'A股', cb: '可转债', etf: '场内基金',
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 mail: '邮件 SMTP',
-      llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
+      llm: 'LLM 模型', dataSources: '数据源', marketInterfaces: '行情接口', tradeInterfaces: '交易接口', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
  alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
       run: '运行配置',   // 批 171g 补回：批 165 孤儿清理误删（Settings.vue tabs.run 动态引用 i18nKey 形态静态扫不到——非孤儿）
     },
@@ -1575,7 +1575,7 @@ mail: '邮件 SMTP',
       astock: 'A-Shares', cb: 'Convertibles', etf: 'Listed Funds',
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 mail: 'Email SMTP',
-      llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
+      llm: 'LLM Models', dataSources: 'Data Sources', marketInterfaces: 'Market Interfaces', tradeInterfaces: 'Trading Interfaces', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
  alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
       run: 'Run Config',   // 批 171g 补回（同 zh 侧）
     },
@@ -3035,7 +3035,8 @@ mail: 'Email SMTP',
         "mail": "郵件 SMTP",
         "llm": "LLM 模型",
         "dataSources": "資料源",
-        "tradingAccounts": "交易帳號",
+        "marketInterfaces": "行情接口",
+        "tradeInterfaces": "交易接口",
         "sms": "簡訊通道",
         "proxy": "代理出口",
         "alerts": "告警通道",

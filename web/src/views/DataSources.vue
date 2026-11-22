@@ -17,7 +17,7 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="166" />
       </TableShell>
     </el-card>
-    <InterfacesManager :modes="['ds']" @loaded="onRowsChanged" />
+    <InterfacesManager kind="ds" @loaded="onRowsChanged" />
     <template v-if="tushareExists">
       <el-divider />
       <el-collapse>

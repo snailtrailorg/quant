@@ -20,6 +20,24 @@ def test_registry_shapes():
     assert set(KIND_CAP_CLASS.values()) == set(CAPABILITIES)  # 归类值域=能力集且每类非空
 
 
+def test_iface_categories_partition_capabilities():
+    """三分类（数据/行情/交易）互斥且并集=能力集——接口类型/表/端点/UI 页签的唯一维度。"""
+    from src.quant_common.markets import IFACE_CAPS, IFACE_DATA, IFACE_LABELS, IFACE_MARKET, IFACE_TRADE, CAPABILITIES
+    assert set(IFACE_CAPS) == {IFACE_DATA, IFACE_MARKET, IFACE_TRADE}
+    assert IFACE_CAPS[IFACE_MARKET] == ("rt_quote",) and IFACE_CAPS[IFACE_TRADE] == ("trading",)
+    flat = [c for caps in IFACE_CAPS.values() for c in caps]
+    assert len(flat) == len(set(flat)) and set(flat) == set(CAPABILITIES)
+    assert set(IFACE_LABELS) == set(IFACE_CAPS)
+
+
+def test_iface_kinds_of_provider():
+    """XTP 同时是行情实体与交易实体；tushare 只有数据实体。"""
+    from src.data_platform.capabilities import iface_kinds_of
+    from src.quant_common.markets import IFACE_DATA, IFACE_MARKET, IFACE_TRADE
+    assert iface_kinds_of("xtp") == {IFACE_MARKET, IFACE_TRADE}
+    assert iface_kinds_of("tushare") == {IFACE_DATA}
+
+
 def test_capability_map_and_subset():
     from src.data_platform.capabilities import provider_capabilities, check_capability_subset
     assert provider_capabilities("tushare") == {"hist_quote", "ref_data", "inst_event"}  # MAP 归一（0094+0106；批 171b +suspend_d_sync→inst_event）

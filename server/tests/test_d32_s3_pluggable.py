@@ -14,6 +14,7 @@ import pytest
 
 from src.registry import (
     DOMAIN_DATA,
+    DOMAIN_MARKET,
     DOMAIN_RESEARCH,
     DOMAIN_TRADING,
     PORT_CAPS,
@@ -49,17 +50,28 @@ def test_register_and_get():
     assert (DOMAIN_TRADING, "xtp") in registered()
 
 
-def test_domains_are_three():
-    assert {DOMAIN_DATA, DOMAIN_TRADING, DOMAIN_RESEARCH} == {
-        "data_source", "trading_account", "research",
+def test_domains_are_interface_types():
+    """域=接口类型：数据/行情/交易三域 + 研究域；一个 provider 每域一个实体。"""
+    assert {DOMAIN_DATA, DOMAIN_MARKET, DOMAIN_TRADING, DOMAIN_RESEARCH} == {
+        "data_source", "market_interface", "trade_interface", "research",
     }
     assert PORT_CAPS == {"execution", "market_data", "research", "history", "account"}
 
 
 def test_pick_by_capability():
-    p = _Plugin({"execution", "market_data"})
-    register(DOMAIN_TRADING, "xtp", p)
-    assert pick(DOMAIN_TRADING, "xtp", {"execution"}, "plugin") is p
+    p = _Plugin({"market_data"})
+    register(DOMAIN_MARKET, "xtp", p)
+    assert pick(DOMAIN_MARKET, "xtp", {"market_data"}, "plugin") is p
+
+
+def test_domain_caps_are_enforced_at_registration():
+    """行情实体不得声明 execution、交易实体不得声明 market_data（XTP 无数据/行情互斥）。"""
+    with pytest.raises(ValueError, match="不属于该域"):
+        register(DOMAIN_TRADING, "xtp", _Plugin({"market_data"}))
+    with pytest.raises(ValueError, match="不属于该域"):
+        register(DOMAIN_MARKET, "xtp", _Plugin({"execution"}))
+    with pytest.raises(ValueError, match="不属于该域"):
+        register(DOMAIN_DATA, "binance", _Plugin({"market_data"}))
 
 
 def test_pick_rejects_missing_capability():
@@ -85,12 +97,13 @@ def test_invalid_domain_rejected():
 
 
 def test_same_provider_two_domains_are_independent():
-    """`binance`（数据源）与 `binance_perp`（交易通道）是两把键，互不覆盖。"""
-    register(DOMAIN_DATA, "binance", _Plugin({"history"}))
-    register(DOMAIN_TRADING, "binance_perp", _Plugin({"execution"}))
-    assert get(DOMAIN_DATA, "binance") is not get(DOMAIN_TRADING, "binance_perp")
+    """同一 provider 在行情/交易是两个实体（XTP 两条），互不覆盖。"""
+    m, t = _Plugin({"market_data"}), _Plugin({"execution"})
+    register(DOMAIN_MARKET, "xtp", m)
+    register(DOMAIN_TRADING, "xtp", t)
+    assert get(DOMAIN_MARKET, "xtp") is m and get(DOMAIN_TRADING, "xtp") is t
     with pytest.raises(UnknownProvider):
-        get(DOMAIN_TRADING, "binance")
+        get(DOMAIN_DATA, "xtp")   # XTP 没有数据能力/数据实体
 
 
 def test_registry_view_is_read_only():

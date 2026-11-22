@@ -12,9 +12,9 @@ def _r(version):
     return r
 
 
-def _iface(provider, credentials=None):
+def _iface(provider, credentials=None, enabled=True):
     return {"provider": provider, "credentials": credentials or {"app_id": "A", "app_secret": "S"},
-            "params": {}, "market": "astock", "capabilities": ["trading"]}
+            "params": {}, "market": "astock", "capabilities": ["trading"], "enabled": enabled}
 
 
 def test_first_poll_baseline():
@@ -78,8 +78,8 @@ def test_version_change_provider_same_cred_same():
 
 def test_version_change_cred_rotated_switches():
     """批 66a 钉：版本变化 + provider 不变但凭证轮换 → 切换 True（exit 9 重启重读）。"""
-    from src.md_hub.main import _poll_iface_switch, _cred_hash
-    prev_hash = _cred_hash({"app_id": "A", "app_secret": "OLD"})
+    from src.md_hub.main import _poll_iface_switch, _cred_hash, _cfg_digest_of
+    prev_hash = _cred_hash(_cfg_digest_of(_iface("xtp", {"app_id": "A", "app_secret": "OLD"})))
     with patch("src.strategy_framework.broker.get_interface_row",
                return_value=_iface("xtp", {"app_id": "A", "app_secret": "NEW"})):
         v, h, switched = _poll_iface_switch(_r("6"), "5", None, "xtp", prev_hash)
@@ -93,6 +93,16 @@ def test_cred_baseline_none_no_false_trigger():
                return_value=_iface("xtp", {"app_id": "A", "app_secret": "NEW"})):
         v, h, switched = _poll_iface_switch(_r("6"), "5", None, "xtp", None)
     assert switched is False and h is not None
+
+
+def test_enabled_toggle_switches():
+    """I4：enabled 改动也须被 hub 对账检出（exit 9 重启成空转/工作态）。"""
+    from src.md_hub.main import _poll_iface_switch, _cred_hash, _cfg_digest_of
+    h_old = _cred_hash(_cfg_digest_of(_iface("xtp", enabled=True)))
+    with patch("src.strategy_framework.broker.get_interface_row",
+               return_value=_iface("xtp", enabled=False)):
+        v, h, switched = _poll_iface_switch(_r("6"), "5", None, "xtp", h_old)
+    assert switched is True and h != h_old
 
 
 def test_valkey_fail_keeps_prev():
@@ -114,8 +124,8 @@ def test_get_iface_fail_defers_version_recheck():
 
 def test_cred_rotation_on_flaky_db_not_lost():
     """版本变化轮 DB 瞬断不吞轮换：读失败轮版本顺延 → 下轮重读 → 轮换检出。"""
-    from src.md_hub.main import _poll_iface_switch, _cred_hash
-    h_old = _cred_hash({"app_id": "A", "app_secret": "OLD"})
+    from src.md_hub.main import _poll_iface_switch, _cred_hash, _cfg_digest_of
+    h_old = _cred_hash(_cfg_digest_of(_iface("xtp", {"app_id": "A", "app_secret": "OLD"})))
     # ① 轮换发生（v6）但读行瞬断 → 版本顺延
     with patch("src.strategy_framework.broker.get_interface_row", side_effect=Exception("db down")):
         v1, h1, s1 = _poll_iface_switch(_r("6"), "5", None, "xtp", h_old)

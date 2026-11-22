@@ -20,7 +20,9 @@ deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显�
 deploy_td_exec_units: []              # 批188：preflight 枚举在跑 td-exec 实例后覆写（无实例=空波跳过）
 # 批189：td_exec 期望单元的 provider 白名单 = 有 TD builder 的 provider（xtp/emt_emq）；加密 P5 前不拉。
 # 同步义务：须 ⊆ server/src/strategy_runner/td_registry.TD_BUILDERS 键。
-deploy_td_exec_providers: [xtp, emt_emq]
+# 交易执行载体 provider 集（= registry 交易域「有 execution 端口」的 provider；守门测试对齐）
+# EMT 的 execution 端口在 P4c 落地后加入，同时翻 trade_interface.impl=plugin。
+deploy_td_exec_providers: [xtp]
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
 deploy_sync_whitelist:

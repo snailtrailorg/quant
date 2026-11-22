@@ -59,20 +59,13 @@ def _patch_db_impl(impl: str):
     )
 
 
-def test_xtp_builder_requires_plugin_impl():
-    """P3 收口：legacy TD 路径已删 —— impl!='plugin' 必须 fail-fast（main 转 78），
-    不得静默回落到已删除的组装路径。"""
-    with _patch_db_impl("legacy"):
-        with pytest.raises(RuntimeError, match="legacy TD 路径已于 P3 删除"):
-            build_td_runtime("xtp", MagicMock(), 7, "td-xtp", 99)
-
-
-def test_xtp_builder_plugin_shape():
-    """插件路径八键 + exec_port/session_slot 形状（窗开=建连、窗关=不连由 td_open 透传）。"""
+@pytest.mark.parametrize("impl", ["plugin", "legacy"])
+def test_xtp_builder_shape_regardless_of_impl(impl):
+    """impl 只是形态标记（I4）：存量 legacy 行也走唯一插件路径，不得 78。"""
     fake_setting = {"账号": "acct", "密码": "pw", "客户号": "42", "交易地址": "tcp://x", "交易端口": "1"}
     slot = MagicMock()
     slot.terminal_id = 19
-    with _patch_db_impl("plugin"), \
+    with _patch_db_impl(impl), \
          patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
          patch("src.providers.xtp.session.is_trading_day", return_value=True), \
          patch("src.providers.xtp.session.load_xtp_window_cfg", return_value=(7, 3)), \

@@ -13,18 +13,22 @@ class EmtPlugin:
 
     def build(self, account: Any, role: str, slot: Any, *,
               event_engine: Any = None, guard_factory: Callable | None = None,
-              setting: dict | None = None) -> Any:
+              setting: dict | None = None, order_prefix: str | None = None) -> Any:
         """role='td' → ExecutionPort（EmtAdapter 薄壳：兼 gw/td_api）；MD 仍走 legacy（P4 范围仅 TD）。"""
         if role == "td":
             if event_engine is None:
                 raise ValueError("EmtPlugin.build(td) 需要 event_engine")
             # 惰导入：adapters 会连带 vnpy/emt SDK——只在真正构建运行时导入（守「import providers 不导 vnpy」）
             from src.strategy_framework.adapters import EmtAdapter
-            tcid = (int(getattr(slot, "tid", 20)) - 1) % 100 + 20
+            # 槽号（SessionSlot 域 2..99）→ EMT SDK 终端号（20..119，SDK 实测域 [1-127]）；
+            # 只在插件内算一次：平台层不持有 provider 私有号段语义。
+            _tid = int(getattr(slot, "terminal_id", getattr(slot, "tid", 1)))
+            tcid = (_tid - 1) % 100 + 20
+            _prefix = order_prefix if order_prefix is not None else getattr(slot, "order_prefix", "")
             adapter = EmtAdapter(event_engine=event_engine,
-                                 order_prefix=getattr(slot, "order_prefix", ""),
+                                 order_prefix=_prefix,
                                  td_client_id=tcid)
-            if setting:
+            if setting is not None:
                 if getattr(slot, "window_open", False):
                     adapter.connect(setting)          # Login fail-fast → 入口 78
                 else:

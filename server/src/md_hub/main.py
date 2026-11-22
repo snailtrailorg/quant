@@ -74,6 +74,11 @@ def _cred_hash(credentials: dict) -> str:
     return hashlib.sha256(_json.dumps(credentials or {}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _cfg_digest_of(iface: dict) -> dict:
+    """对账摘要含启用态——enabled 改动也须重启生效（I4：进程常驻、启停由配置面驱动）。"""
+    return {"credentials": iface.get("credentials") or {}, "enabled": bool(iface.get("enabled"))}
+
+
 def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash=None):
     """批 64+66a：对账 trading_account 行——返回 (新版本, 新凭证摘要, 是否切换)。
 
@@ -95,7 +100,7 @@ def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash
         # 第一次真实凭证轮换会被 prev_hash=None 不比对漏掉）
         try:
             iface = get_interface_row(row_id, md_only=True)
-            return v, _cred_hash(iface["credentials"]), False
+            return v, _cred_hash(_cfg_digest_of(iface)), False
         except Exception as e:
             logger.warning("首发凭证基线读取失败（版本不固化，下轮重走首发）: %s", e)
             return None, prev_cred_hash, False   # 版本顺延 None=下轮仍走本分支重建（固化 v 会短路死锁基线——盲审 A-P1）
@@ -106,27 +111,9 @@ def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash
     except Exception as e:
         logger.warning("对账接口行失败（版本顺延下轮重读——固化新版本+旧摘要会漏掉本轮即轮换的检测）: %s", e)
         return prev_version, prev_cred_hash, False
-    new_hash = _cred_hash(iface["credentials"])
+    new_hash = _cred_hash(_cfg_digest_of(iface))
     switched = (iface["provider"] != current_provider) or (prev_cred_hash is not None and new_hash != prev_cred_hash)
     return v, new_hash, switched
-
-
-class _LegacyMdShim:
-    """legacy MdGateway → MarketDataPort 形状（subscribe/unsubscribe 收 list）。"""
-
-    def __init__(self, gw):
-        self._gw = gw
-
-    def subscribe(self, symbols):
-        for s in (symbols if isinstance(symbols, (list, tuple, set)) else [symbols]):
-            self._gw.subscribe(s)
-
-    def unsubscribe(self, symbols):
-        for s in (symbols if isinstance(symbols, (list, tuple, set)) else [symbols]):
-            self._gw.unsubscribe(s)
-
-    def __getattr__(self, name):
-        return getattr(self._gw, name)
 
 
 def main() -> None:
@@ -252,31 +239,20 @@ def main() -> None:
         iface = get_interface_row(row_id, md_only=True)
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
         _iface_enabled = bool(iface.get("enabled", True))   # C4 心跳 enabled/working 真源
-        from src.strategy_framework.md_gateway import create_md_gateway
         import src.providers as _providers
-        from src.registry import UnsupportedCapability, UnknownProvider, pick
+        from src.registry import DOMAIN_MARKET, pick
 
-        _providers.ensure_registered()   # P3：插件注册（懒导入 vnpy）
-        _impl = "legacy"
-        try:
-            from src.data_platform.db import get_conn as _gc
-            with _gc() as _c:
-                _r = _c.execute("SELECT impl FROM market_interface WHERE code=%s", (row_id,)).fetchone()
-            _impl = (_r[0] if _r else "legacy")
-        except Exception:   # noqa: BLE001 —— 读不到按 legacy
-            _impl = "legacy"
-        if _impl == "plugin":
-            try:
-                _plugin = pick("trading_account", iface["provider"], {"market_data"}, impl="plugin")
-                md_gw = _plugin.build(counters, "md", None)   # build(account=counters, role, slot) → build_md(counters, slot)
-                logger.info("[gw] provider=%s 走插件 MarketDataPort（account=%s）", iface["provider"], row_id)
-            except (UnknownProvider, UnsupportedCapability) as e:
-                logger.warning("[gw] provider=%s 无 MD 插件（%s），回落 legacy 注册表", iface["provider"], e)
-                md_gw = _LegacyMdShim(create_md_gateway(iface["provider"], counters))
-        else:
-            md_gw = _LegacyMdShim(create_md_gateway(iface["provider"], counters))
+        _providers.ensure_registered()   # 插件注册（行情实体由 market_bridge 投影；懒导入 vnpy）
+        # 唯一路径：行情实体（domain=market_interface）→ MarketDataPort；无载体=78（不静默回落）
+        _plugin = pick(DOMAIN_MARKET, iface["provider"], {"market_data"}, impl="plugin")
+        md_gw = _plugin.build(counters, "md", None)
+        logger.info("[gw] provider=%s 走行情实体端口（account=%s）", iface["provider"], row_id)
         md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
-        md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）
+        # I4：停用=常驻空转（进程活着、不建连、不订阅）；启用才建连
+        if _iface_enabled:
+            md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）
+        else:
+            logger.info("行情接口 %s 已停用：hub 空转（不建连/不订阅）", row_id)
     except Exception as e:
         logger.error("行情网关初始化失败（md_code=%s），exit 78: %s", row_id, e)
         raise SystemExit(78)
@@ -299,6 +275,8 @@ def main() -> None:
     _license_denied_seen: set[str] = set()   # 172d：已告警过的未授权标的（防每 15s 刷屏）
 
     def _desired_symbols() -> set[str]:
+        if not _iface_enabled:
+            return set()
         """订阅真相源（四源）：running 任务标的 ∪ 持仓标的 ∪ system_config 白名单 ∪ 临时订阅。
 
         池源已移除（2026-09-04 分钟数据源重构 21 号 §3.3）：历史分钟数据改腾讯攒
@@ -369,7 +347,7 @@ def main() -> None:
 
     def _subscribe(sym: str) -> None:
         try:
-            md_gw.subscribe([sym])   # 端口形状（插件）；legacy 由 _LegacyMdShim 收 list
+            md_gw.subscribe([sym])   # 行情端口收 list（内部逐标的转发）
         except Exception as e:
             logger.warning("订阅失败 %s: %s", sym, e)
 
@@ -459,7 +437,7 @@ def main() -> None:
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0,
                 enabled=int(_iface_enabled), working=int(_iface_enabled and _connected),
-                connected=int(_connected))
+                connected=int(_connected), provider=getattr(md_gw, "provider", ""))
 
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
