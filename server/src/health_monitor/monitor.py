@@ -104,11 +104,14 @@ def _hub_expected_ids() -> list[str]:
     try:
         from src.data_platform.db import get_conn
         from src.strategy_framework.md_gateway import list_md_gateway_providers
+        from src.registry import DOMAIN_MARKET, registered
+        providers = set(list_md_gateway_providers()) | {
+            prov for (dom, prov) in registered() if dom == DOMAIN_MARKET}
         with get_conn() as conn:
+            # I4：期望=有载体的行情行（不看 enabled）
             cur = conn.execute(
-                "SELECT code FROM market_interface "
-                "WHERE enabled=true "
-                "AND provider = ANY(%s)", (list(list_md_gateway_providers()),))
+                "SELECT code FROM market_interface WHERE provider = ANY(%s)",
+                (sorted(providers),))
             return [str(x[0]) for x in cur.fetchall()]
     except Exception as e:
         logger.warning("R4 期望集查询失败（降级空集地板判定）: %s", e)
@@ -162,8 +165,8 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     hubs = snap.get("hubs") or {}
     expected: list = snap.get("hub_expected") or []
     streaks = state["hub_lost_streak"]
-    legacy_transition = 0 in hubs   # legacy 裸键收编在场=键切换/回滚过渡态——R4 豁免（终态应消失；盲审 B-P2-2 修：防迁移夜假 critical）
-    if deps.get("valkey") and not legacy_transition:
+    # C4/M8：legacy_transition 豁免已删（退役裸键不再收编为 hubs[0]）——E9 不得空集假绿
+    if deps.get("valkey"):
         for acct in expected:
             missing = acct not in hubs
             streaks[acct] = (streaks.get(acct, 0) + 1) if missing else 0

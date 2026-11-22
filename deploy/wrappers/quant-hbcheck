@@ -150,7 +150,10 @@ select_trading_table() {
 HAS_MARKET=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
   "SELECT (to_regclass('market_interface') IS NOT NULL)::int::text")
 if [ "$HAS_MARKET" = "1" ]; then
-  expect_sql="SELECT code FROM market_interface WHERE enabled"
+  # I4：期望集=有载体的行情行（去 enabled）；provider 白名单与 group_vars/deploy_hub_md_providers
+  # 等价——wrapper 独立装位，改白名单须同步本行（test_b189_deploy_carriers 守门）。
+  HB_MD_PROVIDERS="'xtp','emt_emq','binance_perp','okx_perp'"
+  expect_sql="SELECT code FROM market_interface WHERE provider IN ($HB_MD_PROVIDERS)"
   HB_PREFIX="iface:hb:md"
   NEED_FIELDS="enabled,working,subs,bars,sess_ticks,last_tick_ts,ts,pid,gen"
 else

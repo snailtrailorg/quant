@@ -12,6 +12,16 @@ def test_code_regex_and_prefix():
             S.check_code("md", bad)
     with pytest.raises(S.IfaceError):
         S.check_code("md", "td-xtp")
+    with pytest.raises(S.IfaceError) as e:
+        S.check_code("td", 1)   # C5：旧 int 身份 → PARAM_DEPRECATED
+    assert e.value.code == "PARAM_DEPRECATED"
+
+
+def test_create_interface_rejects_int_code_before_db():
+    """写路径实证：int code 在 create_interface 即 PARAM_DEPRECATED（不是 500）。"""
+    with pytest.raises(S.IfaceError) as e:
+        S.create_interface("td", {"code": 1, "provider": "xtp"}, lambda role, prov: True)
+    assert e.value.code == "PARAM_DEPRECATED"
 
 
 def test_login_key_rules():
@@ -32,6 +42,19 @@ def test_read_projection_masks_credentials():
     assert "has_credentials" in keys and "credentials_encrypted" not in keys
 
 
+def _patch_mapping(monkeypatch, has: bool = True):
+    """validate_payload 的 td 映射门用假连接（不连库；has=False 钉 MAPPING_MISSING）。"""
+    from unittest.mock import MagicMock
+    cur = MagicMock()
+    cur.fetchone.return_value = (1,) if has else None
+    conn = MagicMock()
+    conn.execute.return_value = cur
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    monkeypatch.setattr(S, "get_conn", lambda: ctx)
+
+
 def _db_up() -> bool:
     try:
         from src.data_platform.db import get_conn
@@ -47,6 +70,7 @@ def test_td_credentials_encrypted_and_enable_without_reentry():
     """P0 回归：写侧必须加密；启用（不改凭证）不得因合并丢列而 CREDENTIALS_INCOMPLETE。"""
     import uuid
     from src.data_platform import iface_store as S
+    from src.data_platform.db import get_conn
     code = "td-ut-" + uuid.uuid4().hex[:8]
     ok = lambda role, prov: True
     try:
@@ -55,6 +79,11 @@ def test_td_credentials_encrypted_and_enable_without_reentry():
                                   "credentials": '{"k":"v"}'}, ok)
         raw = S._get_interface_raw("td", code)
         assert raw["credentials_encrypted"] and raw["credentials_encrypted"] != '{"k":"v"}'
+        with get_conn() as c:   # C3：启用需有取价映射
+            md = c.execute("SELECT code FROM market_interface ORDER BY code LIMIT 1").fetchone()
+            assert md, "dev 库无行情接口行，无法钉映射门"
+            c.execute("INSERT INTO td_md_map(td_code,md_code,priority) VALUES (%s,%s,1)", (code, md[0]))
+            c.commit()
         S.update_interface("td", code, {"enabled": True}, ok)   # 旧实现此处必炸
         row = S.get_interface("td", code)
         assert row["enabled"] is True and row["has_credentials"] is True
@@ -62,6 +91,7 @@ def test_td_credentials_encrypted_and_enable_without_reentry():
     finally:
         from src.data_platform.db import get_conn
         with get_conn() as c:
+            c.execute("DELETE FROM td_md_map WHERE td_code=%s", (code,))
             c.execute("DELETE FROM trade_interface WHERE code=%s", (code,))
             c.commit()
 
@@ -93,8 +123,9 @@ def test_iface_status_projection(monkeypatch):
     assert not out[1]["running"] and out[1]["enabled"] is None
 
 
-def test_capabilities_must_belong_to_iface_kind():
+def test_capabilities_must_belong_to_iface_kind(monkeypatch):
     """写侧三分类收窄：交易行挂 rt_quote / 行情行挂 trading / 数据源挂行情能力 → 一律拒。"""
+    _patch_mapping(monkeypatch)
     ok = lambda role, prov: True
     base_td = {"provider": "xtp", "credentials_encrypted": "enc",
                "login_key": "xtp|A1", "account_key": "A1"}
@@ -110,7 +141,8 @@ def test_capabilities_must_belong_to_iface_kind():
         S.validate_payload("ds", {"provider": "tushare", "capabilities": ["rt_quote"]}, ok)
 
 
-def test_enable_requires_stable_login_key_not_account_key():
+def test_enable_requires_stable_login_key_not_account_key(monkeypatch):
+    _patch_mapping(monkeypatch)
     ok = lambda role, prov: True
     # 迁移期行（0192 未回填 account_key）仍可启用——否则停用即不可逆（生产 td-xtp 形态）
     S.validate_payload("td", {"provider": "xtp", "credentials_encrypted": "enc",
@@ -122,3 +154,22 @@ def test_enable_requires_stable_login_key_not_account_key():
     # 公开行情（md 且无凭证）允许
     S.validate_payload("md", {"provider": "binance_perp", "credentials_encrypted": None,
                               "login_key": "binance_perp|public", "account_key": None}, ok)
+
+
+def test_enable_requires_quote_mapping(monkeypatch):
+    """C3：交易接口启用前必须能用 td_md_map 取价——无映射 → MAPPING_MISSING。"""
+    _patch_mapping(monkeypatch, has=False)
+    with pytest.raises(S.IfaceError) as e:
+        S.validate_payload("td", {"code": "td-xtp", "provider": "xtp", "credentials_encrypted": "enc",
+                                  "login_key": "xtp|A1", "account_key": "A1"},
+                           lambda role, prov: True)
+    assert e.value.code == "MAPPING_MISSING"
+
+
+def test_quote_business_codes_distinguished():
+    """C5/E1：无映射=MAPPING_MISSING、无 tick=NO_QUOTE（两码不得混用）。"""
+    from src.strategy_runner.trading import _quote_business_code
+    assert _quote_business_code("mapping_missing") == "MAPPING_MISSING"
+    for reason in ("no_tick", "bad_json"):
+        assert _quote_business_code(reason) == "NO_QUOTE"
+    assert _quote_business_code("valkey_down") == ""   # 基础设施故障不占业务码（C5）

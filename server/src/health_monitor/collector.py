@@ -21,8 +21,7 @@ CORE_UNITS = [
     "quant-celery-risk@quant",
 ]
 
-HUB_HB_KEY = "quant:hb:md-hub"
-HUB_HB_PATTERN = "iface:hb:md:*"   # M4：per-md_code 在场集（SCAN；键 iface:hb:md:<code>）
+HUB_HB_PATTERN = "iface:hb:md:*"   # C4 唯一在场集（SCAN；键 iface:hb:md:<code>；退役裸键不再读）
 TASK_HB_PATTERN = "quant:hb:task:*"
 
 
@@ -285,19 +284,7 @@ def collect(now: float | None = None) -> dict:
                 "connected": int(h.get("connected") or 0),   # 批 69b：真连导出（L2 探测）
                 "tick_age": (now - last_tick) if last_tick else None,
             }
-        legacy = r.hgetall(HUB_HB_KEY)
-        if legacy and not snap["hubs"]:
-            # 66b 键切换窗过渡（回滚后亦然）：裸键收编为 account_id=0（观测面不瞬盲；终态应消失）
-            last_tick = float(legacy.get("last_tick_ts") or 0)
-            snap["hubs"][0] = {
-                "gen": int(legacy.get("gen") or 0),
-                "subs": int(legacy.get("subs") or 0),
-                "ticks": int(legacy.get("ticks") or 0),
-                "sess_ticks": int(legacy.get("sess_ticks") or 0),
-                "bars": int(legacy.get("bars") or 0),
-                "dropped_pg": int(legacy.get("dropped_pg") or 0),
-                "tick_age": (now - last_tick) if last_tick else None,
-            }
+        # C4/M8：退役裸键 quant:hb:md-hub 不再读、不再收编为 hubs[0]（旧键零读点）
         # 任务心跳（动态发现；key TTL 90s，存在=活）
         for key in r.scan_iter(TASK_HB_PATTERN, count=100):
             tid = key.rsplit(":", 1)[-1]

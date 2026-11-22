@@ -17,6 +17,16 @@ MIG = sorted((ROOT / "server" / "migrations" / "versions").glob("0192_*.py"))
 # 没有它时，单提 0192 不应把主线打进红（M1 不可单独发布，见 M1 §0）。
 MARKER = ROOT / "server" / "src" / "quant_common" / "b189.py"
 
+def test_c4_heartbeat_field_set():
+    """C4 心跳 hash 字段全集：两进程都写 seq/conn；行情侧另写 market/reset_cnt。"""
+    md = (SRC / "md_hub/main.py").read_text(encoding="utf-8")
+    td = (SRC / "td_exec/main.py").read_text(encoding="utf-8")
+    for field in ("seq=", "conn=", "market=", "reset_cnt="):
+        assert field in md, f"md_hub 心跳缺 {field}"
+    for field in ("seq=", "conn=", '"market":'):
+        assert field in td, f"td_exec 心跳缺 {field}"
+
+
 OLD_PATTERNS = [
     r"td:cmd:\{(?:int\(|account_id|_acct|aid)",
     r"td:exec:",

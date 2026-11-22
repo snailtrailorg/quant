@@ -48,7 +48,7 @@
 | D25 | 能力 token/域划分（以代码 CAPABILITIES/DOMAIN_CAPS 为准，不在本文写死数字） | 修订：三类接口各一域，互斥+并集守门保留 | R1/C6 |
 | D26 | 核心句「一账号=一行=一 hub+一套 TD，MD/TD 同凭证」 | **修订为 v6 接口级拓扑**（不退役，保引用链）；历史理由与 M5 退役保留 | 全文 |
 | D32 | manifest 单 domain | 修订：provider 可声明 md/td 双角色 | C6/D5 |
-| A06 | 波次按 DB id、wrapper 两态 | 修订：波次取在跑实例（code）、wrapper 按 marker 二选一 | C7/R8 |
+| A06 | 波次按 DB id、wrapper 两态 | 修订：波次按「有载体接口行」（code，provider 白名单；I4），wrapper 按 marker 二选一 | C7/R8 |
 | CLAUDE.md | 行边界=账号、能力 5 token | **已修订**：三类接口 + code 身份 + 常驻空转 | 已同步 |
 | D12 §2.11 | quote 默认同账号 | 修订：1:N 主备 + 空映射报错 | R4/M5 |
 
@@ -92,7 +92,7 @@
 ### R8 部署与回滚
 - 本批 schema 破坏性变更：发布 `-e allow_contract=true -e contract_reason="批189 接口三表拆表"`；**`auto_rollback_disabled` 由 playbook 在「豁免生效」时自动置位，操作者不传**；迁移由 release 阶段 5 自动执行，**不手工跑 alembic**（手工会绕过 DDL 门与留痕）；自动 rollback 不支持。
 - 回滚 = 恢复迁移前快照 + 旧版代码；**恢复路径已演练成功（2026-11-19 用户确认），窗口内由用户手动执行**；发布前只做备份产物校验（存在/大小/时间戳）。
-- 波次取「在跑实例」；wrapper 按 marker 二选一（新/旧，未知 rc=1）且先装位后发布；pinned 断言覆盖 code 实例。
+- 波次取「有载体的接口行」（I4：进程 ⇔ 行存在 ∧ provider 声明该角色载体；不看 enabled）；wrapper 按 marker 二选一（新/旧，未知 rc=1）且先装位后发布；pinned 断言覆盖 code 实例。
 
 ## 4. 影响面
 

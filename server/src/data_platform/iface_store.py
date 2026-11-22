@@ -38,6 +38,9 @@ def _tbl(kind: str) -> tuple[str, str, tuple[str, ...]]:
 
 def check_code(kind: str, code: str) -> None:
     t, prefix, _ = _tbl(kind)
+    # C5：平台身份唯一是 code；旧 int id 入参明确告知客户端升级（不混用 400 CODE_INVALID）
+    if isinstance(code, int) or (isinstance(code, str) and code.isdigit()):
+        raise IfaceError("PARAM_DEPRECATED", 400, "接口身份已改 code（md-/td-/ds-*），不接受 int id")
     if not CODE_RE.match(code or ""):
         raise IfaceError("CODE_INVALID", 400, f"code={code!r} 不合 ^[a-z][a-z0-9-]{{1,30}}$")
     if not code.startswith(prefix):
@@ -159,8 +162,9 @@ def _bump() -> None:
 
 def create_interface(kind: str, payload: dict, carrier_probe: Callable[[str, str], bool]) -> dict:
     t, _, cols = _tbl(kind)
-    code = (payload.get("code") or "").strip()
-    check_code(kind, code)
+    raw_code = payload.get("code")
+    code = raw_code.strip() if isinstance(raw_code, str) else raw_code
+    check_code(kind, code)   # int code 在此即 PARAM_DEPRECATED（不得先 .strip() 吞成 500）
     data = {c: payload.get(c) for c in cols if c in payload}
     data.pop("credentials_encrypted", None)
     cred = _cred_value(payload)
@@ -170,9 +174,9 @@ def create_interface(kind: str, payload: dict, carrier_probe: Callable[[str, str
         data.setdefault("impl", "plugin")   # 新建=插件载体（legacy 仅迁移期已有行）
         data["login_key"] = _login_key(kind, data.get("provider", ""), data.get("account_key"),
                                        data.get("credentials_encrypted"), bool(data.get("is_virtual")))
-    data.setdefault("enabled", False)
-    if data.get("enabled"):
-        validate_payload(kind, {**data, "code": code}, carrier_probe)
+    # C3：新建一律草稿（enabled=false）——交易取价映射 FK 需先有本行，故启用只能走
+    # 后续 POST /enable（validate_payload 的唯一启用入口，含映射门）。
+    data["enabled"] = False
     keys = ["code"] + list(data)
     sql = f"INSERT INTO {t} ({','.join(keys)}) VALUES ({','.join(['%s'] * len(keys))}) RETURNING code"
     try:
@@ -239,6 +243,13 @@ def validate_payload(kind: str, row: dict, carrier_probe: Callable[[str, str], b
             raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "交易接口缺凭证")
     if not row.get("login_key"):
         raise IfaceError("CREDENTIALS_INCOMPLETE", 400, "login_key 缺失")
+    # C3/M0：交易接口需取价——启用前必须有 td_md_map（无映射 → MAPPING_MISSING）
+    if kind == "td":
+        with get_conn() as conn:
+            has_map = conn.execute(
+                "SELECT 1 FROM td_md_map WHERE td_code=%s LIMIT 1", (row.get("code"),)).fetchone()
+        if not has_map:
+            raise IfaceError("MAPPING_MISSING", 400, "交易接口无取价映射（td_md_map 空）")
     # 迁移期例外：0192 未回填 account_key 的行（login_key 已是 provider|legacy）仍可启用——
     # 否则「停用即不可逆」（生产 td-xtp 即此形态）。login_key 存在即视为有稳定登录身份；
     # account_key 回填是独立数据治理项（M8）。

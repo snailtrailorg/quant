@@ -414,6 +414,15 @@ def _quote_price(sym: str, quote_code) -> tuple[dict, str]:
     return ({} if reason else tick), reason
 
 
+def _quote_business_code(reason: str) -> str:
+    """C5/E1：无映射=MAPPING_MISSING、无 tick=NO_QUOTE；valkey_down=基础设施故障不占业务码。"""
+    if reason == "mapping_missing":
+        return "MAPPING_MISSING"
+    if reason in ("no_tick", "bad_json"):
+        return "NO_QUOTE"
+    return ""   # valkey_down → 503/告警语义，不混入业务码
+
+
 def _close_client_id(req_id: str, sym: str, seq: int) -> str:
     """预生成拆单 client_id：`emc-{req_id}-{sym}-{seq}`（逐笔递增）。
 
@@ -912,8 +921,11 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                            f"account={account_id} req={req_id}；停止空转，转人工处置。",
                            code="emergency.valkey_down")
             if reason:
-                round_no_quote.append(f"{sym}:{reason}")
-                logger.warning("全平 no_quote %s：%s（不静默降级到腾讯/成本价/陈bar）", sym, reason)
+                # C5：对外只露业务码（E1 两码分清）；infra 故障保留 reason 不占业务码
+                code = _quote_business_code(reason)
+                round_no_quote.append(f"{sym}:{code or reason}")
+                logger.warning("全平 no_quote %s：%s→%s（不静默降级到腾讯/成本价/陈bar）",
+                               sym, reason, code or reason)
                 continue
             # P2b：减仓合规挂点（停牌放行、只告警；规则缺失不阻断急停）
             try:

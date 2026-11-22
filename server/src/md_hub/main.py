@@ -272,6 +272,8 @@ def main() -> None:
             exit_process(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
+    reset_cnt = 0           # C4/R6：会话重连次数（心跳 reset_cnt，E2 可观测）
+    hb_seq = 0              # C4：心跳序号（seq，单调递增；判活连续性与旧键区分）
     _license_denied_seen: set[str] = set()   # 172d：已告警过的未授权标的（防每 15s 刷屏）
 
     def _desired_symbols() -> set[str]:
@@ -381,9 +383,10 @@ def main() -> None:
     # ——— 主循环（批 2：EngineLoop 到期驱动；喂狗/事件线程存活检查内建骨架）———
     def _md_edge() -> None:
         """MD 重连沿：connected 上升沿 → 强制全量重放（XTP 重连不恢复订阅；connected 由网关插件供）。"""
-        nonlocal md_status_was
+        nonlocal md_status_was, reset_cnt
         md_status = md_gw.connected
         if md_status and not md_status_was:
+            reset_cnt += 1
             sm.on_reconnect_edge()
         md_status_was = md_status
 
@@ -432,12 +435,17 @@ def main() -> None:
 
     def _heartbeat() -> None:
         # 批 69b：connected 导出（int(bool) 形态立法——L2 真连探测/检查单消费；窗外挂起=False 属预期态）
+        nonlocal hb_seq
+        hb_seq += 1
         _connected = bool(md_gw.connected)
-        hb.beat(pid=os.getpid(), gen=gen, subs=len(sm.current),
+        # C4 字段全集：market/conn/reset_cnt/seq 补齐（connected 保留兼容旧读者）
+        hb.beat(pid=os.getpid(), gen=gen, seq=hb_seq, subs=len(sm.current),
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0,
                 enabled=int(_iface_enabled), working=int(_iface_enabled and _connected),
-                connected=int(_connected), provider=getattr(md_gw, "provider", ""))
+                connected=int(_connected), conn=int(_connected),
+                market=iface["market"], reset_cnt=reset_cnt,
+                provider=getattr(md_gw, "provider", ""))
 
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗

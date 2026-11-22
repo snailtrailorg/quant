@@ -6,6 +6,7 @@ mock XTP gateway / DB / .env，不依赖交易时段和真实凭证。
 import os
 import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
@@ -97,6 +98,13 @@ def _make_bars_df(data: list[dict]):
     return pd.DataFrame(data) if data else pd.DataFrame()
 
 
+def _make_bar_frame(data: list[dict]):
+    """DataBus.get_bars 的契约返回：11 字段 tuple 行序（暖机唯一读点，非 db.get_bars）。"""
+    cols = ("symbol", "freq", "ts", "open", "high", "low", "close",
+            "volume", "amount", "adj_factor", "source")
+    return SimpleNamespace(rows=[tuple(r.get(c) for c in cols) for r in data])
+
+
 def test_warmup_history():
     """_warmup_history 返回 dict 列表，字段正确。"""
     from src.strategy_runner.main import _warmup_history
@@ -113,8 +121,8 @@ def test_warmup_history():
          "open": 3.05, "high": 3.15, "low": 3.0, "close": 3.1, "volume": 15000,
          "amount": 45000.0, "adj_factor": None, "source": "tushare"},
     ]
-    df = _make_bars_df(rows)
-    with patch("src.data_platform.db.get_bars", return_value=df):
+    frame = _make_bar_frame(rows)
+    with patch("src.data_platform.databus.DataBus.get_bars", return_value=(frame, None)):
         history = _warmup_history("600000.XSHG")
     assert len(history) == 2
     assert history[0]["close"] == 3.05
@@ -125,8 +133,8 @@ def test_warmup_history():
 def test_warmup_history_empty():
     """get_bars 返回空 DataFrame，不抛异常。"""
     from src.strategy_runner.main import _warmup_history
-    df = _make_bars_df([])
-    with patch("src.data_platform.db.get_bars", return_value=df):
+    frame = _make_bar_frame([])
+    with patch("src.data_platform.databus.DataBus.get_bars", return_value=(frame, None)):
         history = _warmup_history("600000.XSHG")
     assert history == []
 
@@ -134,7 +142,7 @@ def test_warmup_history_empty():
 def test_warmup_history_db_error():
     """get_bars 抛异常，不抛（走 logger.warning）。"""
     from src.strategy_runner.main import _warmup_history
-    with patch("src.data_platform.db.get_bars", side_effect=Exception("PG down")):
+    with patch("src.data_platform.databus.DataBus.get_bars", side_effect=Exception("PG down")):
         history = _warmup_history("600000.XSHG")
     assert history == []
 

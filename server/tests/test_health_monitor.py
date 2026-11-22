@@ -37,6 +37,14 @@ class TestEvaluate:
         assert {f["rule_id"] for f in f2} == {"unit_down", "hub_hb_lost"}
         assert all(f["severity"] == "critical" for f in f2)
 
+    def test_legacy_transition_exemption_removed(self):
+        """C4/E9：hubs 含 0（退役裸键形态）不再豁免 hub_hb_lost（fail-loud）。"""
+        from src.health_monitor.monitor import evaluate
+        snap = _snap(hubs={0: {"gen": 5}}, hub_expected=["md-xtp"])
+        f1, s1 = evaluate(snap)
+        f2, _ = evaluate(snap, s1)
+        assert any(f["rule_id"] == "hub_hb_lost" for f in f2)
+
     def test_unit_auto_restart_skipped(self):
         """D-F2：RestartSec 窗口的 auto-restart 是设计内自愈，不告 unit_down（R2 计数沿会报）。"""
         from src.health_monitor.monitor import evaluate
@@ -544,21 +552,21 @@ import time as _t
 
 
 class TestCollectorLegacyHub:
-    def test_legacy_bare_key_collected_as_account0(self, monkeypatch):
-        """66b 键切换窗：裸键在场+per-account 全缺 → 收编 hubs[0]（观测面不瞬盲）。"""
+    def test_legacy_bare_key_not_collected(self, monkeypatch):
+        """C4/M8：退役裸键不再收编为 hubs[0]——旧键读点必须为零。"""
         from unittest.mock import MagicMock
         from src.health_monitor import collector
         r = MagicMock()
         r.ping.return_value = True
-        r.scan_iter.return_value = iter([])   # 无 per-account 键
+        r.scan_iter.return_value = iter([])   # 无 per-code 键
         r.hgetall.return_value = {"gen": "5", "subs": "3", "ticks": "9", "bars": "2",
                                   "sess_ticks": "9", "dropped_pg": "0", "last_tick_ts": str(_t.time())}
         monkeypatch.setattr(collector, "_valkey", lambda: r)
         snap = collector.collect()
-        assert 0 in snap["hubs"] and snap["hubs"][0]["gen"] == 5
+        assert snap["hubs"] == {} and 0 not in snap["hubs"]
 
     def test_per_account_preferred_over_legacy(self, monkeypatch):
-        """per-account 键在场时裸键不收编（legacy 仅过渡兜底）。"""
+        """per-code 键在场正常采集；裸键不参与。"""
         from unittest.mock import MagicMock
         from src.health_monitor import collector
         r = MagicMock()
@@ -586,6 +594,7 @@ class TestHubExpectedIds:
         monkeypatch.setattr("src.data_platform.db.get_conn", lambda: conn)
         ids = monitor._hub_expected_ids()
         assert ids == ["1", "3"]
+        assert "enabled" not in conn.execute.call_args[0][0]   # I4：停用行仍在期望集
         monkeypatch.setattr("src.data_platform.db.get_conn",
                             MagicMock(side_effect=RuntimeError("db down")))
         assert monitor._hub_expected_ids() == []

@@ -51,6 +51,16 @@ def test_hub_provider_lists_match_carriers():
         assert listed == market, f"{name}: {sorted(listed)} ≠ {sorted(market)}"
 
 
+def test_hbcheck_expected_providers_match_group_vars():
+    """hbcheck 独立装位，白名单字面量必须与 group_vars 等价（否则期望集分裂=假告警）。"""
+    listed = set(_yaml_list(DEPLOY / "inventory/group_vars/quant-prod.yml", "deploy_hub_md_providers"))
+    text = (DEPLOY / "wrappers/quant-hbcheck").read_text(encoding="utf-8")
+    m = re.search(r'HB_MD_PROVIDERS="([^"]+)"', text)
+    assert m, "hbcheck 缺行情 provider 白名单"
+    embedded = {x.strip().strip("'") for x in m.group(1).split(",")}
+    assert embedded == listed, f"hbcheck {sorted(embedded)} ≠ group_vars {sorted(listed)}"
+
+
 def test_wrapper_does_not_gate_units_on_enabled_or_impl():
     """I4：enabled 只管干活/空转；impl 只是形态标记——都不得进入单元选择条件。"""
     text = (DEPLOY / "wrappers/quant-dbro").read_text(encoding="utf-8")

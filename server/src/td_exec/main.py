@@ -82,6 +82,7 @@ class TdExec:
         self._enabled = True                             # 配置启用态（I4：只决定干活/空转）
         self._slot = None                                # 会话租约（builder 产出；本进程负责续租/释放）
         self._exit_code = 0                              # 停机退出码（租约被抢=75）
+        self._hb_seq = 0                                 # C4：心跳序号（单调递增）
         self._last_conn_ts = 0.0                         # 窗开沿建连 60s 节流
         self._conn_announced = False                     # 连上沿已对账（XTP 登录异步，靠轮询沿）
         self._last_flush = 0.0                           # 账户/持仓快照 60s 刷新节流
@@ -274,8 +275,11 @@ class TdExec:
             self._r, ALIVE_KEY.format(account=self.td_code), ttl=90,
             base=lambda: {"account_code": self.td_code,
                           "provider": self._row.get("provider") or "",
+                          "market": self._row.get("market") or "",
                           "quote_md_code": self._quote_md_code})
-        self._hb.beat(enabled=int(self._enabled), working=0, connected=0)
+        self._hb_seq += 1
+        self._hb.beat(seq=self._hb_seq, enabled=int(self._enabled), working=0,
+                      connected=0, conn=0)
 
     def _reject(self, cmd: dict) -> None:
         """close 进行中：主循环直接写 reject 回执（不投线程、不排队）。"""
@@ -389,8 +393,11 @@ class TdExec:
                     _conn = bool(self._exec_port.connected)
                 except Exception:  # noqa: BLE001
                     _conn = False
-                self._hb.beat(working=int(getattr(self, "_enabled", True) and _conn),
-                              connected=int(_conn), enabled=int(getattr(self, "_enabled", True)))
+                self._hb_seq += 1
+                self._hb.beat(seq=self._hb_seq,
+                              working=int(getattr(self, "_enabled", True) and _conn),
+                              connected=int(_conn), conn=int(_conn),
+                              enabled=int(getattr(self, "_enabled", True)))
                 try:
                     from src.quant_common.guard import sd_notify as _sd_notify
                     _sd_notify("WATCHDOG=1")   # systemd 看门狗喂狗（无 NOTIFY_SOCKET 时静默）
