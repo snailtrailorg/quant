@@ -271,6 +271,7 @@ import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
 import IconBtn from './IconBtn.vue'
+import { fmtTime } from '../utils/fmtTime'
 
 
 const { t, locale } = useI18n()
@@ -337,10 +338,7 @@ const stale = computed(() => {
   if (!snap.value?.created_at) return true
   return Date.now() - new Date(snap.value.created_at).getTime() > 26 * 3600 * 1000
 })
-const lastScanAt = computed(() => {
-  const ts = snap.value?.created_at
-  return ts ? new Date(ts).toLocaleString() : '—'
-})
+const lastScanAt = computed(() => (snap.value?.created_at ? fmtTime.m(snap.value.created_at) : '—'))
 // 批 154 补③：依赖滞后（A 区小字+D 区箭头列——检查不升级；>20 琥珀告警）
 // 键归一匹配：pip 名小写下划线/连字符混形 vs ledger 名（PyYAML/pyyaml、typing_extensions）
 // 批 154 补5：依赖滞后（A 区小字；D 区三态列直读 row.latest，服务端单源）
@@ -352,7 +350,7 @@ const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170�
 // 批 171p：部署卡辅助（staleAfterDeploy 渲染退役；2026-11-09 API 键一并删除）
 // 版本目录名形态 202611081927-cb4e36c（YYYYMMDDHHMM-sha）→ "11/08 19:27 cb4e36c"
 // 批 171p 修：当前版此前用 slice(5,10)（错位成 10819 类乱码）——统一走 deployFmt
-const deployFmt = r => r ? `${r.slice(4, 6)}/${r.slice(6, 8)} ${r.slice(8, 10)}:${r.slice(10, 12)} ${r.slice(13)}` : ''
+const deployFmt = r => r ? `${r.slice(0, 4)}-${r.slice(4, 6)}-${r.slice(6, 8)} ${r.slice(8, 10)}:${r.slice(10, 12)} ${r.slice(13)}` : ''
 const deployShort = computed(() => deployFmt(snap.value?.deploy?.current) || '—')
 const findingsAsOf = computed(() => snap.value?.findings_as_of || '')
 
@@ -498,11 +496,11 @@ const dbBuiltDate = computed(() => {
 })
 const dbBuiltTime = computed(() => {
   const s = (snap.value?.vulns_db || {}).built_at
-  return s ? new Date(s).toLocaleString() : '—'
+  return s ? fmtTime.m(s) : '—'
 })
 const dbLocalTime = computed(() => {
   const s = (snap.value?.vulns_db || {}).local_updated_at
-  return s ? new Date(s).toLocaleString() : '—'
+  return s ? fmtTime.m(s) : '—'
 })
 // 只留异常态（正常不占行，避免与上面两行重复）
 const dbStateHint = computed(() => {

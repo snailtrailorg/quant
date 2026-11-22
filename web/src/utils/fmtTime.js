@@ -15,6 +15,7 @@ const p2 = (n) => String(n).padStart(2, '0')
 export const fmtTime = {
   s: (ts) => { const d = norm(ts); return d instanceof Date ? `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` : d },
   t: (ts) => { const d = norm(ts); return d instanceof Date ? `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : d },
+  m: (ts) => { const d = norm(ts); return d instanceof Date ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` : d },
   full: (ts) => { const d = norm(ts); return d instanceof Date ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : d },
   day: (ts) => { const d = norm(ts); return d instanceof Date ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` : d },
 }
