@@ -52,6 +52,8 @@ class TestWrapperSource:
         """走 dnf check-update --security（root 特权动作本体）。"""
         src = _read(_WRAPPER)
         assert "check-update --security" in src
+        # 同包多 advisory/仓库去重（kernel-headers 重复行根因）——按 name 取最高版本
+        assert "sort -u" in src and "sort -k1,1 -k2,2V" in src
 
     def test_three_state_json_written(self):
         """三态全落文件：ok 无待更（pending_count 0）/ok 有待更（rc=100 解析包清单）/

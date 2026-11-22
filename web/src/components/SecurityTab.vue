@@ -363,8 +363,12 @@ const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170�
 // 批 171p 修：当前版此前用 slice(5,10)（错位成 10819 类乱码）——统一走 deployFmt
 const deployFmt = r => r ? `${r.slice(4, 6)}/${r.slice(6, 8)} ${r.slice(8, 10)}:${r.slice(10, 12)} ${r.slice(13)}` : ''
 const deployShort = computed(() => deployFmt(snap.value?.deploy?.current) || '—')
-const dnfPending = computed(() => (snap.value?.dnf?.packages || [])
-  .filter(p => p && p.name))
+const dnfPending = computed(() => {
+  // 同一包可被多 advisory/旧仓重复列出：按 name 去重（后端 wrapper 已聚合，此处兜底旧文件）
+  const m = new Map()
+  for (const p of (snap.value?.dnf?.packages || [])) if (p && p.name) m.set(p.name, p)
+  return [...m.values()]
+})
 const isKernelPkg = name => {
   // NEVRA 形态 kernel-5.10.134-19.10.al8.x86_64：剥 .arch 后以 kernel/kernel-core
   // + 版本号开头（tools/headers/devel/modules 等子包不匹配——只有内核本体需重启）

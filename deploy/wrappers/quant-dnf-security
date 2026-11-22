@@ -51,8 +51,13 @@ fi
 if [ "$rc" -eq 100 ]; then
   # 输出行形如 "openssl-1.1.1k-14.el8.x86_64   ALBA-2026:1234   security"；
   # 末尾空行/告警行跳过；列1=包 NEVRA、列2=公告号。
-  pkgs=$(awk 'NF>=3 && $1!~/^Last/{print $1"\t"$2}' "$tmp" | wc -l)
-  arr=$(awk 'NF>=3 && $1!~/^Last/{if(n++)printf ","; printf "{\"name\": \"%s\", \"errata\": \"%s\"}", $1, $2}' "$tmp")
+  # 同一包可被多个 advisory/仓库重复列出（kernel-headers 多行同版本、旧仓版本并存）：
+  # 按 name.arch 去重，保留最高版本（sort -V），计数=去重后条数。
+  rows=$(awk 'NF>=3 && $1!~/^Last/{print $1"\t"$2}' "$tmp" \
+    | sort -u | sort -k1,1 -k2,2V \
+    | awk -F'\t' '{v[$1]=$2} END{for(k in v) print k"\t"v[k]}' | sort)
+  pkgs=$(printf '%s\n' "$rows" | grep -c . || true)
+  arr=$(printf '%s\n' "$rows" | awk -F'\t' 'NF==2{if(n++)printf ","; printf "{\"name\": \"%s\", \"errata\": \"%s\"}", $1, $2}')
   write_json "{\"status\": \"ok\", \"checked_at\": \"$now\", \"pending_count\": ${pkgs}, \"packages\": [${arr}], \"updates\": [${arr}]}"
   echo "✓ dnf --security：${pkgs} 个待更安全更新已落 $OUT"
   exit 0
