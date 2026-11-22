@@ -488,11 +488,11 @@ const compHint = computed(() =>
 
 // A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
 // 批185（用户指定版式，四行）：
-//   ① 标题「漏洞库」 ② 上游构建**日期** ③「上游构建时间：<完整>」 ④「本机更新时间：<完整>」
+//   ① 标题「漏洞库」 ② 构建**日期** ③「构建时间：<完整>」 ④「更新时间：<完整>」
 // 全部本地时区（与「上次扫描」同款）；缺失显示 '—'，不隐藏行（版式恒定）。
 const dbBuiltDate = computed(() => {
   const s = (snap.value?.vulns_db || {}).built_at
-  return s ? new Date(s).toLocaleDateString() : '—'
+  return s ? fmtTime.day(s) : '—'
 })
 const dbBuiltTime = computed(() => {
   const s = (snap.value?.vulns_db || {}).built_at
