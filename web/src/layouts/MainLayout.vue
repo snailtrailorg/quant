@@ -136,6 +136,7 @@
             <el-menu-item index="/live-task" v-if="canPerm('live_control')"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
             <el-menu-item index="/paper-trade" v-if="canPerm('paper_trade')"><el-icon><Document /></el-icon>{{ t('nav.paperTrade') }}</el-menu-item>
             <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
+            <el-menu-item v-if="canHalt" index="/emergency"><el-icon><AlarmClock /></el-icon>{{ t('nav.emergency') }}</el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="riskgrp">
@@ -143,7 +144,6 @@
             <el-menu-item index="/risk"><el-icon><CircleCheck /></el-icon>{{ t('nav.risk') }}</el-menu-item>
             <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>{{ t('nav.reconcile') }}</el-menu-item>
             <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
-            <el-menu-item v-if="canHalt" index="/emergency"><el-icon><AlarmClock /></el-icon>{{ t('nav.emergency') }}</el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
