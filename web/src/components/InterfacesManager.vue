@@ -297,7 +297,7 @@ async function load() {
   try {
     const [list, prov] = await Promise.all([api.get(base()), api.get(base() + '/providers')])
     rows.value = list.items || []
-    providers.value = prov.items || []
+    providers.value = prov.items || prov.providers || []
     if (props.kind !== 'ds') {
       const s = await api.get('/interfaces/status', { params: { kind: props.kind } })
       status.value = Object.fromEntries((s.items || []).map(x => [x.code, x]))

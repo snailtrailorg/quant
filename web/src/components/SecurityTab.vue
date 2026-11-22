@@ -63,8 +63,7 @@
           <div class="card-head"><span class="card-name">{{ t('secpage.deploys') }}</span></div>
           <div class="card-value">
             <span class="pct small">{{ deployShort }}</span>
-            <el-tag v-if="snap.deploy?.web_same === true" size="small" type="success">web ✓</el-tag>
-            <el-tag v-else-if="snap.deploy?.web_same === false" size="small" type="warning">web ≠</el-tag>
+            <el-tag v-if="snap.deploy?.web_same === false" size="small" type="warning">web ≠</el-tag>
           </div>
           <div class="kpi-sub deploy-list">
             <div v-for="r in snap.deploy?.recent || []" :key="r"
