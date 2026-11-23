@@ -20,12 +20,12 @@
       <el-table-column prop="market" :label="t('interfaces.colMarket')" min-width="80">
         <template #default="{ row }">{{ marketName(row.market) }}</template>
       </el-table-column>
-      <el-table-column v-if="kind === 'ds'" :label="t('interfaces.colCapabilities')" min-width="200">
+      <el-table-column :label="t('interfaces.colCapabilities')" min-width="200">
         <template #default="{ row }">
-          <el-tag v-for="c in row.capabilities || []" :key="c" size="small" class="tag">{{ t('interfaces.cap_' + c) }}</el-tag>
+          <el-tag v-for="c in capsOf(row)" :key="c" size="small" class="tag">{{ t('interfaces.cap_' + c) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-else :label="t('interfaces.colCarrier')" min-width="90">
+      <el-table-column v-if="kind !== 'ds'" :label="t('interfaces.colCarrier')" min-width="90">
         <template #default="{ row }">
           <el-tag size="small" :type="carrierType(row.provider)" effect="plain">
             {{ carrier(row.provider) ? t('interfaces.carrierReady') : t('interfaces.carrierPending') }}
@@ -195,6 +195,12 @@ const title = computed(() => ({ ds: t('interfaces.cardTitleData'), md: t('interf
 const canWrite = computed(() => perms.value.includes('system_config'))
 const st = code => status.value[code] || {}
 const carrier = p => !!providers.value.find(v => v.provider === p)?.ready
+const CAP_KIND = { md: ['rt_quote', 'hist_quote', 'ref_data', 'inst_event'], td: ['trading'] }
+function capsOf(row) {
+  if (props.kind === 'ds') return row.capabilities || []
+  const p = providers.value.find(v => v.provider === row.provider)
+  return (p?.capabilities || []).filter(c => (CAP_KIND[props.kind] || []).includes(c))
+}
 const carrierType = p => (carrier(p) ? 'success' : 'warning')
 const credType = ok => (ok ? 'success' : 'info')
 const curProv = computed(() => providers.value.find(p => p.provider === form.value.provider) || {})
@@ -263,7 +269,10 @@ async function save() {
     credentials: Object.fromEntries(Object.entries(f.credentials).filter(([, v]) => v !== '' && v != null)),
     params: f.params }
   if (props.kind === 'td') { payload.account_key = f.account_key || null; payload.is_virtual = f.is_virtual }
-  if (f._create) payload.code = f.code
+  if (f._create) {
+    payload.code = f.code
+    if (props.kind === 'ds') payload.capabilities = curProv.value.capabilities || []   // 能力由 provider 派生
+  }
   saving.value = true
   try {
     if (f._create) await api.post(base(), payload)

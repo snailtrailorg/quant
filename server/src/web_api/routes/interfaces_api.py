@@ -64,6 +64,7 @@ def _providers(role: str) -> list[dict]:
     domain, need = ((DOMAIN_MARKET, {"market_data"}) if role == "market"
                     else (DOMAIN_TRADING, {"execution"}))
     from src.data_platform.interfaces import list_interface_schemas
+    from src.data_platform.capabilities import provider_capabilities
     schemas = list_interface_schemas()
     _alias = {"emt": "emt_emq"}
     out = []
@@ -74,7 +75,11 @@ def _providers(role: str) -> list[dict]:
         except Exception:  # noqa: BLE001 —— 实体在、端口缺 = 待接入
             ready = False
         sch = schemas.get(prov) or schemas.get(_alias.get(prov, ""), {})
-        out.append({"provider": prov, "ready": ready,
+        try:
+            caps = sorted(provider_capabilities(prov))
+        except Exception:  # noqa: BLE001 —— 老 provider 无能力映射 ⇒ 目录仍可用
+            caps = []
+        out.append({"provider": prov, "ready": ready, "capabilities": caps,
                     "field_schema": sch.get("field_schema", []),
                     "params_schema": sch.get("params_schema", [])})
     return out
