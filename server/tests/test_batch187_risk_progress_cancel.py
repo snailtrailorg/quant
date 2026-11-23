@@ -87,6 +87,18 @@ def test_cancel_working_orders_returns_per_order_items():
     assert all("symbol" in it for it in out["items"])
 
 
+def test_reconcile_skips_broker_inflight():
+    from src.strategy_runner import trading as T
+    a = MagicMock(); a.query_orders.return_value = []
+    cur = MagicMock(); cur.fetchall.return_value = [(1, "cid", "XTP.123", "submitted", "688018.XSHG", None, None)]
+    conn = MagicMock(); conn.execute.return_value = cur
+    ctx = MagicMock(); ctx.__enter__ = lambda s: conn; ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx):
+        out = T.reconcile_stale_orders(a, "td-xtp", threshold_s=1, now=1_800_000_000,
+                                       broker_query=lambda: {"123": {}})
+    assert out["stale"] == 0
+
+
 def test_reconcile_stale_orders_marks_unknown_and_events():
     from src.strategy_runner import trading as T
     a = MagicMock()

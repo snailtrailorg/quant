@@ -147,7 +147,7 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
 
 
 def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120.0,
-                           now: float | None = None) -> dict:
+                           now: float | None = None, broker_query=None) -> dict:
     """超时对账（阶段2）：非终态 + 有 vt 的单，超过阈值仍无券商推进 → unknown + 事件。
 
     不猜成交：仅把“长期无回报”显式化；若券商迟到终态到达，write_order_status 仍可覆盖
@@ -167,8 +167,18 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
                 "ORDER BY o.id DESC LIMIT 100",
                 (account_id, ["submitted", "submitting", "partial"])).fetchall()
         cache = {str(getattr(o, "vt_orderid", "")): o for o in (adapter.query_orders() or [])}
+        # 券商在途清单（可选）：键可能是纯 order_xtp_id，与 XTP.<id> 归一
+        inflight: set[str] = set()
+        if broker_query is not None:
+            try:
+                for k in (broker_query() or {}):
+                    inflight.add(str(k).rsplit(".", 1)[-1])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("券商在途查询失败（本轮降级缓存判定）: %s", e)
         for oid, cid, vt, status, sym, err, last_ts in rows:
             out["scanned"] += 1
+            if inflight and str(vt).rsplit(".", 1)[-1] in inflight:
+                continue   # 券商确认仍在途，正常挂单
             od = cache.get(str(vt))
             if od is not None:
                 # 缓存已有终态但库未推进（回调丢/写库失败）→ 用同一写路径补

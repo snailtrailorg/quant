@@ -407,7 +407,8 @@ class TdExec:
                 self._last_reconcile = now
                 try:
                     from src.strategy_runner.trading import reconcile_stale_orders
-                    _r = reconcile_stale_orders(self._adapter, self.td_code)
+                    _bq = getattr(self._adapter, "query_unfinished", None)
+                    _r = reconcile_stale_orders(self._adapter, self.td_code, broker_query=_bq)
                     if _r.get("stale"):
                         logger.warning("订单超时对账: scanned=%s recovered=%s stale=%s",
                                        _r.get("scanned"), _r.get("recovered"), _r.get("stale"))

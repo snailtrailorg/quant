@@ -354,6 +354,11 @@ class _LegacyCompat:
     def query_orders(self):
         return self._port.query_orders()
 
+    def query_unfinished(self):
+        """券商在途委托（queryUnfinishedOrdersEx；失败/空返回 {}）。"""
+        from .query import query_unfinished_orders
+        return query_unfinished_orders(getattr(self._port, "_api", None))
+
     def query_trades(self):
         return self._port.query_trades()
 
