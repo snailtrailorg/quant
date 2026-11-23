@@ -151,6 +151,8 @@ const fmtResult = r => {
       } else if (res.closed_requested !== undefined) {
         // 扁平主回执（本批）：closed_requested / positions_remain / retrying / interrupted
         parts.push(t('emg.finalClosed', { n: res.closed_requested }))
+        if (countOf(res.skipped_t1)) parts.push(t('emg.rSkipped', { n: countOf(res.skipped_t1) }))
+        if (countOf(res.rejected)) parts.push(t('emg.rRejected', { n: countOf(res.rejected) }))
         parts.push(t('emg.rRemain', { n: res.positions_remain ?? '?' }))
         if (res.retrying === true) parts.push(t('emg.finalRetrying'))
         if (res.interrupted === true) parts.push(t('emg.finalInterrupted'))
@@ -185,13 +187,17 @@ const fmtFinal = (id, r) => {
   // worker2 的 :final 里 retrying 是 bool 标志（非清单）——兼容 bool/非空 list 两形态
   if (r?.retrying === true || countOf(r?.retrying)) parts.push(t('emg.finalRetrying'))
   if (countOf(r?.closed_requested)) parts.push(t('emg.finalClosed', { n: countOf(r.closed_requested) }))
+  if (countOf(r?.skipped_t1)) parts.push(t('emg.rSkipped', { n: countOf(r.skipped_t1) }))
+  if (countOf(r?.rejected)) parts.push(t('emg.rRejected', { n: countOf(r.rejected) }))
+  if (r?.positions_remain > 0) parts.push(t('emg.rRemain', { n: r.positions_remain }))
   if (r?.interrupted) parts.push(t('emg.finalInterrupted'))
   const fr = String(r?.final_reason || '')
   if (fr && fr !== 'final:done') {          // 非正常终局：显因，不追加「完成」
     parts.push(t('emg.finalReason', { r: fr }))
     return parts.join('；')
   }
-  if (parts.length === 1) parts.push(t('emg.finalClean'))
+  // 只有「确无剩余/无跳过/无异常」才允许说全部完成
+  if (parts.length === 1 && !(r?.positions_remain > 0) && !countOf(r?.skipped_t1)) parts.push(t('emg.finalClean'))
   return parts.join('；')
 }
 const recentSeen = new Set()   // 防三路上屏同一 req_id 重复
