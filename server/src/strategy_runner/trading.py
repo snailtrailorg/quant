@@ -146,6 +146,61 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
         logger.warning("order_log 终态回写失败(never-raise): %s", e)
 
 
+def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120.0,
+                           now: float | None = None) -> dict:
+    """超时对账（阶段2）：非终态 + 有 vt 的单，超过阈值仍无券商推进 → unknown + 事件。
+
+    不猜成交：仅把“长期无回报”显式化；若券商迟到终态到达，write_order_status 仍可覆盖
+    （unknown 不在 ORDER_FINAL_STATES）。返回 {scanned,recovered,stale}，never-raise。
+    """
+    import time as _t
+    out = {"scanned": 0, "recovered": 0, "stale": 0}
+    try:
+        from src.data_platform.db import get_conn
+        now_ts = float(now if now is not None else _t.time())
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT o.id,o.client_order_id,o.vt_orderid,o.status,o.symbol,o.error,"
+                " COALESCE((SELECT max(e.ts) FROM order_event e WHERE e.order_id=o.id), o.ts) AS last_ts "
+                "FROM order_log o WHERE o.account_code=%s AND o.status = ANY(%s) "
+                "AND o.vt_orderid IS NOT NULL AND o.vt_orderid <> '' "
+                "ORDER BY o.id DESC LIMIT 100",
+                (account_id, ["submitted", "submitting", "partial"])).fetchall()
+        cache = {str(getattr(o, "vt_orderid", "")): o for o in (adapter.query_orders() or [])}
+        for oid, cid, vt, status, sym, err, last_ts in rows:
+            out["scanned"] += 1
+            od = cache.get(str(vt))
+            if od is not None:
+                # 缓存已有终态但库未推进（回调丢/写库失败）→ 用同一写路径补
+                try:
+                    if status_of(od) in {OrderStatus.PARTIAL, OrderStatus.ALL_TRADED,
+                                         OrderStatus.CANCELLED, OrderStatus.REJECTED}:
+                        write_order_status(od, adapter, "", "")
+                        out["recovered"] += 1
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+                continue   # 缓存仍报在途=券商已知，正常挂单，不判超时
+            age = now_ts - last_ts.timestamp() if last_ts is not None else threshold_s + 1
+            if age < threshold_s:
+                continue
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE order_log SET status='unknown', error=%s "
+                    "WHERE id=%s AND status = ANY(%s)",
+                    ("无券商回报超时（reconciler）", oid,
+                     ["submitted", "submitting", "partial"]))
+            record_order_event(stage="timeout", source="reconciler", order_id=oid,
+                               client_order_id=cid, status="unknown",
+                               detail={"symbol": sym, "vt_orderid": vt, "age_s": round(age)},
+                               error="无券商回报超时（reconciler）")
+            out["stale"] += 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning("reconcile_stale_orders 失败（不阻断）: %s", e)
+        out["error"] = str(e)[:160]
+    return out
+
+
 def record_order_event(*, stage: str, source: str, order_id: int | None = None,
                        client_order_id: str | None = None, req_id: str = "",
                        status: str | None = None, detail: dict | None = None,
@@ -426,7 +481,7 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
                     "SELECT vt_orderid, symbol FROM order_log WHERE account_code=%s "
                     "AND status = ANY(%s) AND vt_orderid IS NOT NULL AND vt_orderid <> '' "
                     "ORDER BY id DESC LIMIT 200",
-                    (account_id, ["submitted", "submitting", "partial"])).fetchall()
+                    (account_id, ["submitted", "submitting", "partial", "unknown"])).fetchall()
             logger.info("撤单 DB 兜底: account=%s rows=%d", account_id, len(rows))
             for vt, sym in rows:
                 if vt in _seen:

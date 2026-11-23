@@ -87,6 +87,25 @@ def test_cancel_working_orders_returns_per_order_items():
     assert all("symbol" in it for it in out["items"])
 
 
+def test_reconcile_stale_orders_marks_unknown_and_events():
+    from src.strategy_runner import trading as T
+    a = MagicMock()
+    a.query_orders.return_value = []
+    cur = MagicMock()
+    cur.fetchall.return_value = [(1, "cid-1", "vt-1", "submitted", "688018.XSHG", None, None)]
+    conn = MagicMock()
+    conn.execute.return_value = cur
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx), \
+         patch.object(T, "record_order_event") as ev:
+        out = T.reconcile_stale_orders(a, "td-xtp", threshold_s=60, now=1_800_000_000)
+    assert out["scanned"] == 1 and out["stale"] == 1
+    assert any("status='unknown'" in str(c.args[0]) for c in conn.execute.call_args_list)
+    assert ev.call_args.kwargs["stage"] == "timeout"
+
+
 def test_record_order_event_never_raises_on_db_error():
     from src.strategy_runner import trading as T
     with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):

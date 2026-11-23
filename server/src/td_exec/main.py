@@ -381,6 +381,7 @@ class TdExec:
                     self.td_code, self._row.get("provider"), self._quote_md_code)
         last_hb = time.time()
         last_cfg = time.time()
+        self._last_reconcile = 0.0
         self._cfg_digest = self._config_digest()
         while not self._stop.is_set():
             try:
@@ -400,6 +401,16 @@ class TdExec:
             if now - last_cfg >= 15:
                 self._reload_iface()
                 last_cfg = now
+            if now - self._last_reconcile >= 30 and getattr(self, "_adapter", None) is not None:
+                self._last_reconcile = now
+                try:
+                    from src.strategy_runner.trading import reconcile_stale_orders
+                    _r = reconcile_stale_orders(self._adapter, self.td_code)
+                    if _r.get("stale"):
+                        logger.warning("订单超时对账: scanned=%s recovered=%s stale=%s",
+                                       _r.get("scanned"), _r.get("recovered"), _r.get("stale"))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("订单超时对账异常（不阻断）: %s", e)
             if now - last_hb >= 10:
                 self._renew_slot()
                 self._maybe_connect()
