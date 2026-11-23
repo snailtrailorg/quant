@@ -114,6 +114,11 @@
             </template>
           </el-table-column>
           <el-table-column v-if="orderOn('error')" prop="error" :label="t('backtest.reason')" show-overflow-tooltip />
+          <el-table-column :label="t('trading.eventTimeline')" width="100">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEvents(row)">{{ t('trading.eventTimeline') }}</el-button>
+            </template>
+          </el-table-column>
         </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.pnl')">
@@ -125,6 +130,28 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+    <!-- 订单事件时间线（order_event 事件账，D34）：诊断 submitted 悬挂/拒单/撤单/超时 -->
+    <el-dialog v-model="eventsVisible" :title="t('trading.eventTimeline')" width="640px" destroy-on-close>
+      <div class="ev-head">
+        {{ eventsOrder.symbol }} · {{ eventsOrder.client_order_id || `#${eventsOrder.id}` }} · {{ eventsOrder.status }}
+      </div>
+      <div v-if="eventsLoading" v-loading="true" style="min-height: 80px" />
+      <div v-else-if="eventsLoadFailed" style="color: var(--danger)">{{ t('trading.loadEventsFail') }}</div>
+      <el-timeline v-else-if="eventsList.length">
+        <el-timeline-item v-for="e in eventsList" :key="e.id"
+          :timestamp="fmtTime.full(e.ts)" placement="top"
+          :color="e.status === 'rejected' || e.status === 'failed' || e.status === 'timeout' ? 'var(--danger)' : (e.status === 'all_traded' || e.status === 'trade' ? 'var(--success)' : '')">
+          <div class="ev-stage">
+            <b>{{ e.stage }}</b>
+            <el-tag v-if="e.status" size="small" class="ev-gap">{{ e.status }}</el-tag>
+            <span class="ev-src">[{{ e.source }}]</span>
+          </div>
+          <div v-if="e.detail" class="ev-detail">{{ fmtDetail(e.detail) }}</div>
+          <div v-if="e.error" class="ev-error">{{ t('trading.eventError') }}: {{ e.error }}</div>
+        </el-timeline-item>
+      </el-timeline>
+      <div v-else style="color: var(--text-secondary)">{{ t('trading.noEvents') }}</div>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -134,7 +161,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { fmtTime } from '../utils/fmtTime'
 import SellGuardBanner from '../components/SellGuardBanner.vue'
-import { getPosition, getOrders, getPnl, sse } from '../api'
+import { getPosition, getOrders, getOrderEvents, getPnl, sse } from '../api'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -165,6 +192,26 @@ const orderColDefs = computed(() => [
 ])
 const orderVisible = ref([])
 const orderOn = k => orderVisible.value.includes(k)
+// 订单事件时间线（D34）：按 order_log.id 查 order_event
+const eventsVisible = ref(false)
+const eventsLoading = ref(false)
+const eventsLoadFailed = ref(false)
+const eventsList = ref([])
+const eventsOrder = ref({})
+const fmtDetail = (d) => (d && typeof d === 'object') ? JSON.stringify(d) : String(d ?? '')
+const openEvents = async (row) => {
+  eventsOrder.value = row || {}
+  eventsList.value = []
+  eventsLoadFailed.value = false
+  if (!row?.id) { eventsVisible.value = true; return }   // 老行无 id（迁移前）
+  eventsLoading.value = true
+  eventsVisible.value = true
+  try {
+    const d = await getOrderEvents(row.id)
+    eventsList.value = d?.items || []
+  } catch { eventsLoadFailed.value = true }
+  finally { eventsLoading.value = false }
+}
 const pnlData = ref({})
 // D2：get_pnl 按 account 分组返回——粗显取首个 account 曲线（细显留后续）
 const pnlCurve = computed(() => (pnlData.value?.accounts || [])[0]?.curve || [])
@@ -245,4 +292,10 @@ onUnmounted(() => { clearInterval(pollTimer); if (sseUnsub) sseUnsub(); if (sseT
 </script>
 
 <style scoped>
+.ev-head { margin-bottom: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-foot); }
+.ev-stage { font-size: var(--fs-body); }
+.ev-gap { margin-left: var(--sp-1); }
+.ev-src { color: var(--text-secondary); margin-left: var(--sp-1); }
+.ev-detail { font-size: var(--fs-foot); color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; }
+.ev-error { font-size: var(--fs-foot); color: var(--danger); word-break: break-all; }
 </style>

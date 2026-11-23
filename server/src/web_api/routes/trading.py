@@ -634,15 +634,15 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
     """订单记录（order_log 最近 100，#6）。"""
     with get_conn() as conn:
         # 批175e：读侧归一——order_log 历史行含沪市 .SSE（审计史不改写），出参统一项目 vt
-        cur = conn.execute("SELECT ts, strategy_id, "
+        cur = conn.execute("SELECT id, ts, strategy_id, "
                            "replace(replace(replace(replace(replace(replace(symbol, "
                            "'.SSE', '.XSHG'), '.SHSE', '.XSHG'), '.SZSE', '.XSHE'), '.BSE', '.BJSE'), "
                            "'.BINANCE', '.XBIN'), '.OKX', '.XOKX') AS symbol, "
                            "action, volume, price, status, client_order_id, error "
                            "FROM order_log ORDER BY ts DESC LIMIT 100")   # wd-20 §1.4.3：补委托号/失败原因（0039 列）
         rows = cur.fetchall()
-    return {"orders": [{"ts": r[0].isoformat() if r[0] else "", "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
-                        "client_order_id": r[7], "error": r[8]} for r in rows],
+    return {"orders": [{"id": r[0], "ts": r[1].isoformat() if r[1] else "", "strategy_id": r[2], "symbol": r[3], "action": r[4], "volume": r[5], "price": float(r[6]) if r[6] else 0, "status": r[7],
+                        "client_order_id": r[8], "error": r[9]} for r in rows],
             "total": len(rows)}
 
 

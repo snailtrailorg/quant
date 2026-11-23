@@ -98,12 +98,13 @@ def test_orders_read_side_normalizes_sse():
     conn = MagicMock()
     conn.__enter__.return_value = conn
     conn.execute.return_value.fetchall.return_value = [
-        (datetime(2026, 11, 13), "manual", "600036.SSE", "BUY", 100, 44.2, "all_traded", "mo-1", None)]
+        (42, datetime(2026, 11, 13), "manual", "600036.SSE", "BUY", 100, 44.2, "all_traded", "mo-1", None)]
     with patch.object(routes, "get_conn", return_value=conn):
         out = routes.get_orders(payload={})
     sql = conn.execute.call_args.args[0]
     assert "replace(symbol, '.SSE', '.XSHG')" in sql, "读侧未归一——委托列表会继续透出 .SSE"
     assert out["orders"][0]["symbol"] == "600036.SSE"      # 归一身 SQL 侧（mock 不执行）
+    assert out["orders"][0]["id"] == 42                     # 事件时间线按 id 查（order_event）
 
 
 def test_instrument_spec_exposes_mic_code():

@@ -219,6 +219,7 @@ export const deleteSyncData = id => api.delete('/sync/data/' + id)
 // 持仓/订单/盈亏（Trading 看板）
 export const getPosition = () => api.get('/position')
 export const getOrders = () => api.get('/orders')
+export const getOrderEvents = (oid, limit = 500) => api.get(`/orders/${oid}/events`, { params: { limit } })
 export const getPnl = () => api.get('/pnl')
 
 // 邀请制用户管理
