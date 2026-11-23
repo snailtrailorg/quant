@@ -332,7 +332,7 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
     halt_state["was"] = halted_now
 
 
-def _cancel_working_orders(adapter) -> dict:
+def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
     """撤全部在场委托（F-41 提纯+一键撤单共用核心；P1b 改读 domain）。
 
     返回 {"requested": N, "failed": M, "untranslatable": U, "items": [...]}——
@@ -342,6 +342,7 @@ def _cancel_working_orders(adapter) -> dict:
     逐单 result 保留 untranslatable（不塞 failed、不静默丢）。
     """
     out = {"requested": 0, "failed": 0, "untranslatable": 0, "items": []}
+    _seen = set()
     try:
         working = {OrderStatus.SUBMITTED, OrderStatus.NOT_TRADED, OrderStatus.PARTIAL}
         for od in (adapter.query_orders() or []):
@@ -363,6 +364,7 @@ def _cancel_working_orders(adapter) -> dict:
                                      "result": "untranslatable", "detail": "缺 vt_orderid"})
                 logger.warning("在场委托缺 vt_orderid，跳过撤单")
                 continue
+            _seen.add(str(vt))
             out["requested"] += 1
             try:
                 adapter.cancel_order(vt)
@@ -375,6 +377,36 @@ def _cancel_working_orders(adapter) -> dict:
                 logger.warning("撤单失败 %s: %s", vt, ce)
     except Exception as e:
         logger.error("撤单流程异常: %s", e)
+
+    # DB 在途单兜底：adapter 缓存只含收到过回调的单；券商无回报的 SUBMITTING/SUBMITTED
+    # 只存在于 order_log（2026-11-23 实测 requested=0）。盲撤按 vt_orderid，幂等。
+    if account_id:
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT vt_orderid, symbol FROM order_log WHERE account_code=%s "
+                    "AND status = ANY(%s) AND vt_orderid IS NOT NULL AND vt_orderid <> '' "
+                    "AND ts >= now() - interval '1 day' ORDER BY id DESC LIMIT 200",
+                    (account_id, ["submitted", "submitting", "partial"])).fetchall()
+            for vt, sym in rows:
+                if vt in _seen:
+                    continue
+                _seen.add(str(vt))
+                out["requested"] += 1
+                try:
+                    adapter.cancel_order(vt)
+                    out["items"].append({"symbol": sym, "vt_orderid": str(vt),
+                                         "result": "requested", "source": "db"})
+                except Exception as ce:
+                    out["failed"] += 1
+                    out["items"].append({"symbol": sym, "vt_orderid": str(vt),
+                                         "result": "failed", "source": "db",
+                                         "detail": str(ce)[:120]})
+                    logger.warning("DB 在途单盲撤失败 %s: %s", vt, ce)
+        except Exception as e:
+            logger.warning("DB 在途单兜底查询失败: %s", e)
+            out["db_error"] = str(e)[:120]
     return out
 
 

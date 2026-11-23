@@ -87,6 +87,24 @@ def test_cancel_working_orders_returns_per_order_items():
     assert all("symbol" in it for it in out["items"])
 
 
+def test_cancel_working_orders_db_fallback_blind_cancels():
+    """缓存无单但 order_log 有 submitted：按 vt_orderid 盲撤（2026-11-23 实测 requested=0）。"""
+    from src.strategy_runner import trading as T
+    a = MagicMock()
+    a.query_orders.return_value = []
+    cur = MagicMock()
+    cur.fetchall.return_value = [("vt-db", "688018.XSHG")]
+    conn = MagicMock()
+    conn.execute.return_value = cur
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx):
+        out = T._cancel_working_orders(a, account_id="td-xtp")
+    assert out["requested"] == 1 and a.cancel_order.call_args.args[0] == "vt-db"
+    assert out["items"][0]["source"] == "db"
+
+
 def test_merge_progress_items_preserves_status_semantics():
     """逐单归并：cancel/close 两类、status 各自语义不合并。"""
     from src.strategy_runner.trading import _merge_progress_items

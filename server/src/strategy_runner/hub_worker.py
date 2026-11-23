@@ -201,7 +201,7 @@ class EmergencyWorker:
         # 复用同一 _closing Gate（短窗；close-all 分支在外层已有置位时重复 set 无害）。
         self._closing.set()
         try:
-            return trading._cancel_working_orders(self._adapter)
+            return trading._cancel_working_orders(self._adapter, account_id=self._account_id)
         finally:
             self._closing.clear()
 
