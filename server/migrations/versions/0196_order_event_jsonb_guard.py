@@ -10,6 +10,7 @@ Revises: 0195
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "0196"
 down_revision: Union[str, Sequence[str], None] = "0195"
@@ -21,9 +22,9 @@ _CONSTRAINT = "ck_order_event_detail_object"
 
 def upgrade() -> None:
     # 先证无损坏行（有则中止，不静默加约束）
-    bad = op.get_bind().execute(
+    bad = op.get_bind().execute(text(
         "SELECT id FROM order_event WHERE detail IS NOT NULL "
-        "AND jsonb_typeof(detail) <> 'object' LIMIT 5").fetchall()
+        "AND jsonb_typeof(detail) <> 'object' LIMIT 5")).fetchall()
     if bad:
         raise RuntimeError(f"0196 中止：order_event.detail 有非 object 行 {[r[0] for r in bad]}")
     op.execute(

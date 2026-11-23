@@ -66,6 +66,38 @@ def _cleanup(*, req=None, oid=None):
         conn.commit()
 
 
+def test_migrations_bind_execute_use_text_not_bare_string():
+    """SQLAlchemy 2.x：op.get_bind().execute(裸字符串) 真库上产必炸（0196 实测）。
+
+    静态守门全仓 migrations：get_bind().execute( 后必须接 text(/sa.text(。
+    """
+    import ast
+    from pathlib import Path
+    versions = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+    bad = []
+    for path in versions.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            # 匹配 get_bind().execute(...)
+            if (isinstance(f, ast.Attribute) and f.attr == "execute"
+                    and isinstance(f.value, ast.Call)
+                    and isinstance(f.value.func, ast.Attribute)
+                    and f.value.func.attr == "get_bind"):
+                if not node.args:
+                    continue
+                arg = node.args[0]
+                ok = (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
+                      and arg.func.id == "text") or \
+                     (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
+                      and arg.func.attr == "text")
+                if not ok:
+                    bad.append(f"{path.name}:{node.lineno}")
+    assert not bad, f"get_bind().execute 传裸字符串（SQLAlchemy 2.x 真库会炸）: {bad}"
+
+
 @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
 def test_record_event_really_persists(_event_table):
     """record_order_event 写后真能查到——钉「with get_conn 退出回滚」的 P0。"""
