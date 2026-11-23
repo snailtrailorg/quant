@@ -435,7 +435,7 @@ def halt_edge_cancel(adapter, halt_state: dict, sid, account_id: str | None = No
     halt_state["was"] = halted_now
 
 
-def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
+def _cancel_working_orders(adapter, account_id: str | None = None, broker_query=None) -> dict:
     """撤全部在场委托（F-41 提纯+一键撤单共用核心；P1b 改读 domain）。
 
     返回 {"requested": N, "failed": M, "untranslatable": U, "items": [...]}——
@@ -444,8 +444,19 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
     untranslatable=状态或 vt_orderid 不可读而跳过的单（可观测，不冒充撤单成功），
     逐单 result 保留 untranslatable（不塞 failed、不静默丢）。
     """
-    out = {"requested": 0, "failed": 0, "untranslatable": 0, "items": []}
+    out = {"requested": 0, "failed": 0, "untranslatable": 0,
+           "skipped_not_inflight": 0, "items": []}
     _seen = set()
+    # 券商在途集合（可选）：非空才作为过滤依据；空/失败退回缓存判定
+    inflight: set[str] | None = None
+    _bq = broker_query or getattr(adapter, "query_unfinished", None)
+    if callable(_bq):
+        try:
+            _q = _bq()
+            if isinstance(_q, dict) and _q:
+                inflight = {str(k).rsplit(".", 1)[-1] for k in _q}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("撤单前券商在途查询失败（降级缓存）: %s", e)
     try:
         working = {OrderStatus.SUBMITTED, OrderStatus.NOT_TRADED, OrderStatus.PARTIAL}
         for od in (adapter.query_orders() or []):
@@ -468,6 +479,11 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
                 logger.warning("在场委托缺 vt_orderid，跳过撤单")
                 continue
             _seen.add(str(vt))
+            if inflight is not None and str(vt).rsplit(".", 1)[-1] not in inflight:
+                out["skipped_not_inflight"] += 1
+                record_order_event(stage="cancel_skip", source="td_exec", status="not_inflight",
+                                   detail={"symbol": _sym, "vt_orderid": str(vt), "via": "cache"})
+                continue
             out["requested"] += 1
             try:
                 adapter.cancel_order(vt)
@@ -502,6 +518,11 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
                 if vt in _seen:
                     continue
                 _seen.add(str(vt))
+                if inflight is not None and str(vt).rsplit(".", 1)[-1] not in inflight:
+                    out["skipped_not_inflight"] += 1
+                    record_order_event(stage="cancel_skip", source="td_exec", status="not_inflight",
+                                       detail={"symbol": sym, "vt_orderid": str(vt), "via": "db"})
+                    continue
                 out["requested"] += 1
                 try:
                     adapter.cancel_order(vt)

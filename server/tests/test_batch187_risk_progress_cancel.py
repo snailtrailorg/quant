@@ -135,6 +135,20 @@ def test_record_order_event_never_raises_on_db_error():
         T.record_order_event(stage="send", source="td_exec", order_id=1)   # 不抛
 
 
+def test_cancel_skips_vt_not_in_broker_inflight():
+    from src.strategy_runner import trading as T
+    a = MagicMock(); a.query_orders.return_value = []
+    cur = MagicMock(); cur.fetchall.return_value = [("XTP.123", "688018.XSHG")]
+    conn = MagicMock(); conn.execute.return_value = cur
+    ctx = MagicMock(); ctx.__enter__ = lambda s: conn; ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx), \
+         patch.object(T, "record_order_event"):
+        out = T._cancel_working_orders(a, account_id="td-xtp",
+                                       broker_query=lambda: {"999": {}})
+    assert out["requested"] == 0 and out["skipped_not_inflight"] == 1
+    a.cancel_order.assert_not_called()
+
+
 def test_cancel_working_orders_db_fallback_blind_cancels():
     """缓存无单但 order_log 有 submitted：按 vt_orderid 盲撤（2026-11-23 实测 requested=0）。"""
     from src.strategy_runner import trading as T

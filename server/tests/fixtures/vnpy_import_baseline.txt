@@ -32,5 +32,5 @@ strategy_runner/main.py:19:4
 strategy_runner/main.py:332:4
 strategy_runner/main.py:355:4
 strategy_runner/main.py:364:4
-strategy_runner/trading.py:1022:4
+strategy_runner/trading.py:1043:4
 # count: 31
