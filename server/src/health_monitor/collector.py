@@ -269,7 +269,7 @@ def collect(now: float | None = None) -> dict:
         r = _valkey()
         r.ping()
         snap["deps"]["valkey"] = True
-        # 批188：td_exec 在场键扫描（td:exec:{account} 存在=进程在场）
+        # td_exec 在场键扫描（iface:hb:td:<td_code>）
         try:
             _alive = []
             _details = {}
@@ -289,8 +289,7 @@ def collect(now: float | None = None) -> dict:
             snap["td_execs"]["details"] = _details
         except Exception:
             pass
-        # hub 心跳 N 实例（批 66b：SCAN per-account 在场集——{account_id: {...}}；
-        # legacy 兼容读：键切换窗裸键在场也收编（account_id=0 表示）防观测面瞬盲）
+        # hub 心跳 N 实例（SCAN iface:hb:md:<md_code> 在场集）
         for key in list(r.scan_iter(HUB_HB_PATTERN, count=100)):
             acct = key.rsplit(":", 1)[-1]   # 接口 code（md-xtp 等）
             if not key.startswith("iface:hb:md:") or not acct:

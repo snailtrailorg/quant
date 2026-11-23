@@ -445,7 +445,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         ts_fresh = sn.get("pos_ts")
         stale = (ts_fresh is None) or (now - ts_fresh.timestamp() > 120)
         snap = sn.get("snap")
-        # 批188：执行进程在场（td:exec:{acct} 心跳键存在）——前端据此显示「执行进程离线」
+        # 执行进程在场（iface:hb:td:<td_code> 心跳键存在）——前端据此显示「执行进程离线」
         # 但**不 disable 下发**（命令进队列、自愈后消费；下发路径零判活）。
         _exec_alive = False
         if r is not None:

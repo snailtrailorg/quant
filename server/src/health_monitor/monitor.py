@@ -156,7 +156,7 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
         for _acct in sorted(_exp - _alive):
             out.append({"rule_id": "td_exec_down", "component": f"td-exec:{_acct}",
                         "severity": "critical",
-                        "detail": f"交易账号 {_acct} 的 TD 执行进程不在场（td:exec 心跳缺失）——"
+                        "detail": f"交易接口 {_acct} 的 TD 执行进程不在场（iface:hb:td 心跳缺失）——"
                                   "交易操作将入队待消费，查 systemd quant-td-exec@%s 与 SA4 期望源" % _acct})
 
     # R7 长事务预警（arch-18 §4.2，DB 优化批 2026-08-21）：idle in transaction >3min——
