@@ -1092,17 +1092,29 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                         # 否则虚报「已请求平仓」且 order_log 卡 submitting（P0 虚报成功）。
                         _close_order_mark(order_id, adapter, cid, "send_failed",
                                           error="gateway_rejected")
+                        record_order_event(stage="close_send", source="td_exec", order_id=order_id,
+                                           status="send_failed", client_order_id=cid, req_id=req_id,
+                                           error="gateway_rejected",
+                                           detail={"symbol": sym, "volume": qty, "price": rpx})
                         _rej(f"{sym}:not-sent")
                         logger.warning("全平发单未发出（网关拒/断线）%s %s cid=%s", sym, action, cid)
                         break
                     _close_order_mark(order_id, adapter, cid, "submitted")
                     vt = adapter.get_vt_orderid(cid)
+                    record_order_event(stage="close_send", source="td_exec", order_id=order_id,
+                                       status="submitted", client_order_id=cid, req_id=req_id,
+                                       detail={"symbol": sym, "volume": qty, "price": rpx,
+                                               "vt_orderid": vt})
                     if vt:
                         sent.append((vt, sym))
                     out["closed_requested"] += 1
                     logger.warning("全平发单 %s %s x%s @%.6f → cid=%s", sym, action, qty, rpx, cid)
                 except Exception as se:
                     _close_order_mark(order_id, adapter, cid, "send_failed", error=str(se)[:200])
+                    record_order_event(stage="close_send", source="td_exec", order_id=order_id,
+                                       status="send_failed", client_order_id=cid, req_id=req_id,
+                                       error=str(se)[:200],
+                                       detail={"symbol": sym, "volume": qty, "price": rpx})
                     _rej(f"{sym}:{str(se)[:60]}")
                     logger.warning("全平发单失败 %s: %s", sym, se)
                     break
