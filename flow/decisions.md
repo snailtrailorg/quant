@@ -818,3 +818,9 @@
 - **开工前实证的隐藏 P0**（此前未识别）：M3 部署链已把 unit 实例名改为 `@<code>`（dbro 输出 `code|provider`、波次拉 code 实例、停旧数字实例），但 unit 仍 `Environment=ACCOUNT_ID=%i`，且 `td_exec/main.py:383` 强制 `acc.isdigit()`→否则 exit 78；`session_slot.py` 仍 SQL 读写 `provider_session_slot.account_id`，而 0192 已 DROP 该列（PK 改 `login_key`）。**原子发布体若不改进程入口与租约，code 实例一启即 exit 78、租约 SQL 直接报错**——M5 必须连同修掉，不能只切数据层。
 - **影响面**：13 源文件 + 22 测试（M2 §3 表）+ unit 模板×2 + td_exec/main + session_slot；按「身份流」分组（下发方+消费方+数据面+入口同批），禁止按文件拆批造成半切换。
 - **Scope**：M5（TD 执行面）实施；所有改动在 M1–M5 同一原子发布体，不可分批上产。
+
+## 2026-11-23 · P4c 暂缓：先稳定 XTP 订单链路（用户裁定）
+
+- **裁定**：P4c（EMT 执行端口 + `impl` 翻转）**暂缓**，不在订单异步链路阶段 1–3 完成前启动。
+- **前置门槛**：XTP 下单/撤单/`queryUnfinishedOrdersEx` 查询/超时对账/unknown 收敛全部调试通过并有测试；再接入 EMT。
+- **影响**：`DOMAIN_TRADING` 改名与 `impl=legacy` 销账继续与 P4c 同批，不单独动。
