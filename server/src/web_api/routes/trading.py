@@ -646,6 +646,21 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
             "total": len(rows)}
 
 
+@router.get("/api/orders/{oid}/events")
+def get_order_events(oid: int, limit: int = 500, payload: dict = Depends(require_perm("read"))):
+    """单笔订单事件时间线（order_event，0195）。"""
+    limit = max(1, min(limit, 1000))
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, ts, stage, status, source, detail, error, client_order_id, req_id "
+            "FROM order_event WHERE order_id=%s ORDER BY id LIMIT %s", (oid, limit))
+        rows = cur.fetchall()
+    return {"items": [{"id": r[0], "ts": r[1].isoformat() if r[1] else "",
+                       "stage": r[2], "status": r[3], "source": r[4],
+                       "detail": r[5], "error": r[6], "client_order_id": r[7],
+                       "req_id": r[8]} for r in rows]}
+
+
 @router.get("/api/trades")
 def list_trades(limit: int = Query(200, ge=1, le=1000),
                 symbol: str | None = None,

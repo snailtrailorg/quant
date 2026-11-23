@@ -578,9 +578,9 @@ def _close_order_open(sym: str, volume, price: float, account_id, operator: str,
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             oid = conn.execute(
-                "INSERT INTO order_log (strategy_id, symbol, action, volume, price, status, "
+                "INSERT INTO order_log (ts, strategy_id, symbol, action, volume, price, status, "
                 "account_code, client_order_id) "
-                "VALUES ('emergency-close', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
+                "VALUES (now(), 'emergency-close', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
                 (sym, action, volume, price, account_id, cid)).fetchone()[0]
             conn.commit()
         return oid, cid
@@ -641,9 +641,9 @@ def manual_order_open(sym: str, volume, price: float, account_id, operator: str,
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             oid = conn.execute(
-                "INSERT INTO order_log (strategy_id, symbol, action, volume, price, status, "
+                "INSERT INTO order_log (ts, strategy_id, symbol, action, volume, price, status, "
                 "account_code, client_order_id) "
-                "VALUES ('manual', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
+                "VALUES (now(), 'manual', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
                 (sym, action, volume, price, account_id, cid)).fetchone()[0]
             conn.commit()
         return oid
@@ -740,8 +740,8 @@ def _wal_insert_order(account_id, order, signal_id, bar_fingerprint, status: str
         from src.data_platform.jsonb import jsonb
         with get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,"
-                "account_code,bar_fingerprint) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                "INSERT INTO order_log (ts,strategy_id,symbol,action,volume,price,signal_id,status,"
+                "account_code,bar_fingerprint) VALUES (now(),%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                 (order.get("strategy_id"), order.get("symbol"), order.get("action"),
                  int(order.get("volume", 0) or 0), float(order.get("price", 0) or 0),
                  signal_id, status, account_id,
