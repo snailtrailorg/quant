@@ -387,8 +387,9 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
                 rows = conn.execute(
                     "SELECT vt_orderid, symbol FROM order_log WHERE account_code=%s "
                     "AND status = ANY(%s) AND vt_orderid IS NOT NULL AND vt_orderid <> '' "
-                    "AND ts >= now() - interval '1 day' ORDER BY id DESC LIMIT 200",
+                    "ORDER BY id DESC LIMIT 200",
                     (account_id, ["submitted", "submitting", "partial"])).fetchall()
+            logger.info("撤单 DB 兜底: account=%s rows=%d", account_id, len(rows))
             for vt, sym in rows:
                 if vt in _seen:
                     continue
