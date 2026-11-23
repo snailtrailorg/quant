@@ -213,6 +213,41 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
     return out
 
 
+def resolve_unknown_orders(account_id: str) -> dict:
+    """unknown 收敛：按 trade_log 汇总已成交量，能确定就推进状态；无成交保持 unknown。"""
+    out = {"scanned": 0, "resolved": 0}
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT o.id, o.volume, o.client_order_id, o.symbol, "
+                "COALESCE(SUM(t.volume),0) AS traded "
+                "FROM order_log o LEFT JOIN trade_log t ON t.order_id=o.id "
+                "WHERE o.account_code=%s AND o.status='unknown' "
+                "GROUP BY o.id, o.volume, o.client_order_id, o.symbol LIMIT 100",
+                (account_id,)).fetchall()
+        for oid, vol, cid, sym, traded in rows:
+            out["scanned"] += 1
+            traded = int(traded or 0)
+            if traded <= 0:
+                continue
+            status = "all_traded" if traded >= int(vol or 0) else "partial"
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "UPDATE order_log SET status=%s WHERE id=%s AND status='unknown'",
+                    (status, oid))
+                conn.commit()
+            if cur.rowcount:
+                record_order_event(stage="reconcile", source="reconciler", order_id=oid,
+                                   client_order_id=cid, status=status,
+                                   detail={"symbol": sym, "traded": traded, "volume": vol})
+                out["resolved"] += 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning("resolve_unknown_orders 失败（不阻断）: %s", e)
+        out["error"] = str(e)[:160]
+    return out
+
+
 def record_order_event(*, stage: str, source: str, order_id: int | None = None,
                        client_order_id: str | None = None, req_id: str = "",
                        status: str | None = None, detail: dict | None = None,

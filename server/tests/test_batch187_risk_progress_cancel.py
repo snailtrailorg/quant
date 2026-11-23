@@ -87,6 +87,19 @@ def test_cancel_working_orders_returns_per_order_items():
     assert all("symbol" in it for it in out["items"])
 
 
+def test_resolve_unknown_orders_uses_trade_sum():
+    from src.strategy_runner import trading as T
+    sel = MagicMock(); sel.fetchall.return_value = [(1, 100, "cid", "688018.XSHG", 100)]
+    upd = MagicMock(); upd.rowcount = 1
+    conn = MagicMock(); conn.execute.side_effect = [sel, upd]
+    ctx = MagicMock(); ctx.__enter__ = lambda s: conn; ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx), \
+         patch.object(T, "record_order_event") as ev:
+        out = T.resolve_unknown_orders("td-xtp")
+    assert out["resolved"] == 1
+    assert ev.call_args.kwargs["status"] == "all_traded"
+
+
 def test_reconcile_skips_broker_inflight():
     from src.strategy_runner import trading as T
     a = MagicMock(); a.query_orders.return_value = []

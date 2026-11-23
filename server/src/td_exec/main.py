@@ -412,6 +412,11 @@ class TdExec:
                     if _r.get("stale"):
                         logger.warning("订单超时对账: scanned=%s recovered=%s stale=%s",
                                        _r.get("scanned"), _r.get("recovered"), _r.get("stale"))
+                    from src.strategy_runner.trading import resolve_unknown_orders
+                    _u = resolve_unknown_orders(self.td_code)
+                    if _u.get("resolved"):
+                        logger.warning("unknown 收敛: scanned=%s resolved=%s",
+                                       _u.get("scanned"), _u.get("resolved"))
                 except Exception as e:  # noqa: BLE001
                     logger.warning("订单超时对账异常（不阻断）: %s", e)
             if now - last_hb >= 10:
