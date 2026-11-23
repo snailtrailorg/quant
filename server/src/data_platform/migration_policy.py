@@ -178,6 +178,7 @@ LEGACY_FROZEN: frozenset[str] = frozenset({
 # 只减不增、新迁移须先经双盲审再入名单。offline-atomic 只对名单内**全新**迁移生效，防自声明软绕过。
 OFFLINE_ATOMIC_FROZEN: frozenset[str] = frozenset({
     "0192_b189_interface_split.py",
+    "0194_drop_accounts.py",   # 批189-M8：空表退役（0 行/无消费者），同发布原子
 })
 
 _DECL_RE = re.compile(r"^#\s*EXPAND-CONTRACT:\s*(.*)$")

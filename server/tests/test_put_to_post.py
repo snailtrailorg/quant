@@ -22,7 +22,6 @@ POST_ENDPOINTS = [
     "/api/user/profile",
     "/api/user/1",
     "/api/strategy/some-id",
-    "/api/account/1",
     "/api/live-trading/astock",
     "/api/llm-models/1",
     "/api/my/im-bots/1",   # 五轮：admin IM 面删除——自助端点

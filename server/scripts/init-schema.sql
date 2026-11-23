@@ -199,21 +199,6 @@ CREATE TABLE IF NOT EXISTS account_snapshot (
 ALTER TABLE account_snapshot OWNER TO quant;
 
 -- ============================================================
--- 12. accounts（交易所账户，含加密 API key/secret）
--- ============================================================
-CREATE TABLE IF NOT EXISTS accounts (
-    id SERIAL PRIMARY KEY,
-    name TEXT,
-    exchange TEXT NOT NULL,
-    api_key_enc TEXT,
-    api_secret_enc TEXT,
-    api_key_hint TEXT,
-    enabled BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-ALTER TABLE accounts OWNER TO quant;
-
--- ============================================================
 -- 13. astock_analysis（A股分析结果）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS astock_analysis (

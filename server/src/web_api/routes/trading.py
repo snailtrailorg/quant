@@ -682,60 +682,6 @@ def list_trades(limit: int = Query(200, ge=1, le=1000),
             "total": len(rows)}
 
 
-@router.get("/api/account")
-def list_accounts(payload: dict = Depends(require_perm("read"))):   # 批55b:LiveTask 建任务下拉依赖(viewer 可见掩码提示)
-    """列券商/交易所账户（密钥不返回明文）。"""
-    with get_conn() as conn:
-        try:
-            conn.execute("SELECT 1 FROM accounts LIMIT 1")
-        except Exception:
-            logger.warning("list_accounts: accounts 表不存在（需运行 alembic upgrade head）")
-        cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts ORDER BY id")
-        rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "exchange": r[2], "api_key_hint": r[3],
-             "enabled": r[4], "created_at": str(r[5])} for r in rows]
-
-
-@router.post("/api/account")
-def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("system_config"))):   # 批55b:与集成中心页签门一致
-    """P4-5 创建账户。"""
-    with get_conn() as conn:
-        k = (req.get("name", ""), req.get("exchange", ""), req.get("api_key_hint", ""), req.get("enabled", True))
-        cur = conn.execute("INSERT INTO accounts (name, exchange, api_key_hint, enabled) VALUES (%s,%s,%s,%s) RETURNING id", k)
-        conn.commit()
-        return {"id": cur.fetchone()[0]}
-
-
-@router.get("/api/account/{aid}")
-def get_account(aid: int, payload: dict = Depends(require_perm("read"))):
-    with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts WHERE id=%s", (aid,))
-        row = cur.fetchone()
-    if not row:
-        raise HTTPException(404, "账户不存在")
-    return {"id": row[0], "name": row[1], "exchange": row[2], "api_key_hint": row[3], "enabled": row[4]}
-
-
-@router.post("/api/account/{aid}")
-def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(require_perm("system_config"))):
-    """P4-5 更新账户。"""
-    with get_conn() as conn:
-        for k in ("name", "exchange", "api_key_hint", "enabled"):
-            if k in req:
-                conn.execute(f"UPDATE accounts SET {k}=%s WHERE id=%s", (req[k], aid))
-        conn.commit()
-    return {"ok": True}
-
-
-@router.delete("/api/account/{aid}")
-def delete_account(aid: int, payload: dict = Depends(require_perm("system_config"))):
-    """P4-5 删除账户。"""
-    with get_conn() as conn:
-        conn.execute("DELETE FROM accounts WHERE id=%s", (aid,))
-        conn.commit()
-    return {"ok": True}
-
-
 @router.get("/api/dashboard")
 def get_dashboard(payload: dict = Depends(require_perm("read"))):
     """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。D2（决策1）：按 account 分组返回。"""

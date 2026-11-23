@@ -60,8 +60,8 @@
 - 验收：交易接口不出现行情能力；越域保存 400。
 
 ### R2 集成中心两页签
-- 「交易账号」→「行情接口」「交易接口」；数据源页签保留；**API 密钥账户卡（AccountsCard）落到交易接口页**（现有功能不得消失）。
-- 复用 `InterfacesCard(kind)` + `ColumnSettings`；验收：两页签互不串行、AccountsCard 入口计数一致。
+- 「交易账号」→「行情接口」「交易接口」；数据源页签保留。
+- （2026-11-23 用户裁定）**API 密钥账户卡（AccountsCard）退役**：accounts 表 0 行、无消费者，凭证/参数由 provider 模板按接口行承载；不再落交易页。
 
 ### R3 进程与状态（两轴模型）
 
@@ -172,7 +172,7 @@
 | M3 进程与部署 | 期望=有载体接口（不看 enabled）；**旧消费者读路径切换（13 文件 + 22 测试）+ grep 零**；注册即 enable+start；enabled 干活/空转（**`get_interface_row` 去掉 `enabled=true` 谓词**，否则停用即 exit 78 重启环）；凭证/provider 变更检测（exit 9）；释放 slot；懒加载；删除先停；波次/wrapper；`td_exec` 登记 LAYER=3；回执/心跳写口下沉 `quant_common`；**心跳读侧全量改接**（`td:exec`→`iface:hb:td`：`routes/risk.py`、`collector`、`monitor`；MD 侧 `quant:hb:md-hub`→`iface:hb:md`：`collector`、`readyz`、`hub_worker`、`run_hub_postverify`）；**删 `legacy_transition` 豁免**；既有两条告警规则 code 化 + `evaluate` fail-loud | M2 | 两轴可复现（运行/停止 + 配置完整度）；停用无连接；改凭证后自动重建；code unit 正常；停一个 hub 下一轮出 `hub_hb_lost`；readyz 在 code 键下为 200；发布 + 备份校验 | 不做订阅模型 |
 | M4 MD 数据面 | 订阅按接口/provider/market；映射解析（`MAPPING_MISSING`/`NO_QUOTE` 分码）；bar 归属；data_license；**两 bug（含 `strategy_framework/md_gateway.py` 的 `_SWAP_OKX` 生成点）**；心跳加 `subs/bars/reset_cnt` | M3 | OKX/币安断言（reset_cnt/bars 可观测）；worker 正常收 bar；取价日志含 `quote_key` | 不做 TD 执行 |
 | M5 TD 执行面 | 映射消费（1:N 主备）、取价降级、空闲不登录、working；**三处 `td:cmd` 直写点改 code**（`strategy.py` / `scheduler/tasks.py` / `routes/risk.py`）；**dispatch 入口判 enabled/连接态 → `IFACE_IDLE` 短路且不写 order_log**；`hub_quote` 入参由 account_id 改 md_code（三种 `_unavailable` 不合并） | M4 | 映射切换生效；空映射/无行情/空闲下发三码分清；策略单/定时急停/手工单三路可消费 | 不做 UI |
-| M6a 三页签（**并入原子单元**） | 集成中心三页签（数据源/行情/交易）+ 类型化表单 + AccountsCard 落交易页 + **映射只读列表** + 状态只读卡 | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期走 M2 映射 API，见总体架构 §3） |
+| M6a 三页签（**并入原子单元**） | 集成中心三页签（数据源/行情/交易）+ 类型化表单 + **映射只读列表** + 状态只读卡（AccountsCard 2026-11-23 退役） | M2 | CRUD/入口计数 + build 门；映射与状态可看 | 映射编辑表单在 M6b（过渡期走 M2 映射 API，见总体架构 §3） |
 | M6b 映射与状态 | 映射编辑器 + 两轴状态卡 | M5 | 主备配置 + 状态正确 | 不含监控规则（M7） |
 | M7 观测 | 接口卡片 + 新增三条告警（`subscription_fail`/`mapping_missing`/`iface_idle_dispatch`） | M4/M5 | 各出一次告警 | 不新建框架；既有两条规则已在原子单元 code 化 |
 | M8 收口 | wrapper code-only、删残留键读、**`DOMAIN_TRADING` 域词改名**、**legacy 载体销账（registry only）**、文档同步（D26 v6/A02/D25/D32/A06/D12） | M1–M7 | 全量绿 + pinned 单版；**旧键可证伪判据**：旧键常量（`HUB_HB_KEY`/`HUB_HB_PATTERN`/`td:exec` 字面量）零定义 + 读点清单逐项核对（不靠正则匹配 f-string 键）+ registry-only | 不改语义 |

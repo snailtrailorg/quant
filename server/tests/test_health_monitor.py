@@ -74,7 +74,7 @@ class TestEvaluate:
     def test_legacy_transition_exemption_removed(self):
         """C4/E9：hubs 含 0（退役裸键形态）不再豁免 hub_hb_lost（fail-loud）。"""
         from src.health_monitor.monitor import evaluate
-        snap = _snap(hubs={0: {"gen": 5}}, hub_expected=["md-xtp"])
+        snap = _snap(hubs={0: {"gen": 5, "sess_ticks": 0}}, hub_expected=["md-xtp"])
         f1, s1 = evaluate(snap)
         f2, _ = evaluate(snap, s1)
         assert any(f["rule_id"] == "hub_hb_lost" for f in f2)

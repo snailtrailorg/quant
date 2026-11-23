@@ -93,7 +93,6 @@ export const getUsers = () => api.get('/user')
 export const createUser = (username, password, role) =>
   api.post('/user', { username, password, role })
 
-export const getAccounts = () => api.get('/account')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
 // 批28-3：deleteNotifications 退役（NotificationTable 删除后 UI 无消费；后端 /notifications/delete 端点保留——require_perm 保护，UI 孤儿无害）
 export const listSmtpProviders = () => api.get('/smtp-providers')
