@@ -134,14 +134,18 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
             _args += [row[0], list(ORDER_FINAL_STATES)]
             cur = conn.execute(
                 f"UPDATE order_log SET {_sets} WHERE id=%s AND status <> ALL(%s)", tuple(_args))
-            if cur.rowcount:
+            advanced = cur.rowcount > 0
+            if advanced:
                 logger.info("order_log 终态: #%s → %s (%s)", row[0], new_status, getattr(d, "symbol", symbol))
             conn.commit()
-        record_order_event(stage="broker", source="broker", order_id=row[0],
-                           status=new_status, error=error,
-                           detail={"vt_orderid": vt, "symbol": getattr(d, "symbol", symbol),
-                                   "volume": getattr(d, "volume", None),
-                                   "price": getattr(d, "price", None)})
+        # 只写「真正推进了状态」的事件：重复/迟到被 SQL 闭包挡下的回调不污染事件账
+        # （故障注入实测：重复 all_traded、撤单后迟到 all_traded 都会写重复/虚假终态事件）
+        if advanced:
+            record_order_event(stage="broker", source="broker", order_id=row[0],
+                               status=new_status, error=error,
+                               detail={"vt_orderid": vt, "symbol": getattr(d, "symbol", symbol),
+                                       "volume": getattr(d, "volume", None),
+                                       "price": getattr(d, "price", None)})
     except Exception as e:
         logger.warning("order_log 终态回写失败(never-raise): %s", e)
 

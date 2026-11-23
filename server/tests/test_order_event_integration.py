@@ -145,6 +145,104 @@ def test_reconcile_really_marks_unknown(_event_table):
         _cleanup(oid=oid)
 
 
+def _order_state(status, vt):
+    from src.quant_common.domain import Direction, OrderState
+    return OrderState(orderid="", vt_orderid=vt, symbol="600000.XSHG",
+                      direction=Direction.LONG, status=status, volume=100,
+                      traded=0, price=10.0)
+
+
+def _insert_order(status, vt):
+    cid = "itest-fault-" + uuid.uuid4().hex[:10]
+    with get_conn() as conn:
+        oid = conn.execute(
+            "INSERT INTO order_log (ts, strategy_id, symbol, action, volume, price, status, "
+            "account_code, client_order_id, vt_orderid) "
+            "VALUES (now(), 'itest-fault', '600000.XSHG', 'BUY', 100, 10.0, %s, "
+            "'td-xtp', %s, %s) RETURNING id", (status, cid, vt)).fetchone()[0]
+        conn.commit()
+    return oid
+
+
+def _status_and_events(oid):
+    with get_conn() as conn:
+        st = conn.execute("SELECT status FROM order_log WHERE id=%s", (oid,)).fetchone()[0]
+        evs = [r[0] for r in conn.execute(
+            "SELECT stage||':'||COALESCE(status,'') FROM order_event WHERE order_id=%s ORDER BY id",
+            (oid,)).fetchall()]
+    return st, evs
+
+
+class TestCallbackFaultInjection:
+    """异步回调乱序/重复/迟到打在真库订单行上，验状态机收敛（D34 §8）。"""
+
+    @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
+    def test_duplicate_all_traded_writes_once(self, _event_table):
+        from src.quant_common.domain import OrderStatus
+        from src.strategy_runner.trading import write_order_status
+        from unittest.mock import MagicMock
+        vt = "XTP.ITEST" + uuid.uuid4().hex[:8]
+        oid = _insert_order("submitted", vt)
+        try:
+            d = _order_state(OrderStatus.ALL_TRADED, vt)
+            write_order_status(d, MagicMock(), "", "")
+            write_order_status(d, MagicMock(), "", "")   # 重复回调
+            st, evs = _status_and_events(oid)
+            assert st == "all_traded"
+            assert evs.count("broker:all_traded") == 1, "重复回调写了重复事件"
+        finally:
+            _cleanup(oid=oid)
+
+    @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
+    def test_late_all_traded_after_cancel_keeps_cancel(self, _event_table):
+        """先撤单终态，迟到全成回调不得冲掉（只进不退）。"""
+        from src.quant_common.domain import OrderStatus
+        from src.strategy_runner.trading import write_order_status
+        from unittest.mock import MagicMock
+        vt = "XTP.ITEST" + uuid.uuid4().hex[:8]
+        oid = _insert_order("submitted", vt)
+        try:
+            write_order_status(_order_state(OrderStatus.CANCELLED, vt), MagicMock(), "", "")
+            write_order_status(_order_state(OrderStatus.ALL_TRADED, vt), MagicMock(), "", "")  # 迟到
+            st, evs = _status_and_events(oid)
+            assert st == "cancelled", f"迟到全成冲掉撤单终态: {st}"
+            assert "broker:all_traded" not in evs, "被挡的终态仍写了事件"
+        finally:
+            _cleanup(oid=oid)
+
+    @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
+    def test_late_partial_after_all_traded_keeps_all_traded(self, _event_table):
+        """先全成，迟到部分成交片段不得回退。"""
+        from src.quant_common.domain import OrderStatus
+        from src.strategy_runner.trading import write_order_status
+        from unittest.mock import MagicMock
+        vt = "XTP.ITEST" + uuid.uuid4().hex[:8]
+        oid = _insert_order("submitted", vt)
+        try:
+            write_order_status(_order_state(OrderStatus.ALL_TRADED, vt), MagicMock(), "", "")
+            write_order_status(_order_state(OrderStatus.PARTIAL, vt), MagicMock(), "", "")  # 迟到片段
+            st, _ = _status_and_events(oid)
+            assert st == "all_traded"
+        finally:
+            _cleanup(oid=oid)
+
+    @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
+    def test_unknown_corrected_by_late_terminal(self, _event_table):
+        """unknown 不在终态集，迟到券商终态可纠正（否则永久 unknown）。"""
+        from src.quant_common.domain import OrderStatus
+        from src.strategy_runner.trading import write_order_status
+        from unittest.mock import MagicMock
+        vt = "XTP.ITEST" + uuid.uuid4().hex[:8]
+        oid = _insert_order("unknown", vt)
+        try:
+            write_order_status(_order_state(OrderStatus.REJECTED, vt), MagicMock(), "", "")
+            st, evs = _status_and_events(oid)
+            assert st == "rejected"
+            assert "broker:rejected" in evs
+        finally:
+            _cleanup(oid=oid)
+
+
 @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
 def test_resolve_unknown_really_advances(_event_table):
     """resolve_unknown_orders 真按 trade_log 成交量推进 all_traded。"""
