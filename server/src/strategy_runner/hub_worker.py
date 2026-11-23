@@ -1054,7 +1054,7 @@ def run(ctx: dict) -> None:
     def _halt_edge_guarded():
         if closing.is_set():   # 批 171s：急停期跳过熔断沿撤单（撤单归专用线程）
             return
-        trading.halt_edge_cancel(adapter, halt_state, sid)
+        trading.halt_edge_cancel(adapter, halt_state, sid, account_id=self._account_id)
 
     loop.every("snapshot", 60.0, _snapshot_guarded)   # 快照+持仓批（旧 12 拍=60s）
     loop.every("halt-edge", 0.0, _halt_edge_guarded)  # 熔断沿撤在场单

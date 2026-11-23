@@ -106,6 +106,17 @@ def test_reconcile_stale_orders_marks_unknown_and_events():
     assert ev.call_args.kwargs["stage"] == "timeout"
 
 
+def test_record_order_event_commits():
+    from src.strategy_runner import trading as T
+    conn = MagicMock()
+    ctx = MagicMock()
+    ctx.__enter__ = lambda s: conn
+    ctx.__exit__ = lambda *a: False
+    with patch("src.data_platform.db.get_conn", return_value=ctx):
+        T.record_order_event(stage="send", source="td_exec", order_id=1)
+    assert conn.commit.called
+
+
 def test_record_order_event_never_raises_on_db_error():
     from src.strategy_runner import trading as T
     with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):

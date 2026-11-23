@@ -401,7 +401,9 @@ class TdExec:
             if now - last_cfg >= 15:
                 self._reload_iface()
                 last_cfg = now
-            if now - self._last_reconcile >= 30 and getattr(self, "_adapter", None) is not None:
+            _recon_conn = bool(getattr(getattr(self, "_exec_port", None), "connected", False))
+            if (now - self._last_reconcile >= 30 and getattr(self, "_adapter", None) is not None
+                    and _recon_conn):
                 self._last_reconcile = now
                 try:
                     from src.strategy_runner.trading import reconcile_stale_orders

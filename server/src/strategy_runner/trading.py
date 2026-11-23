@@ -173,7 +173,7 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
             if od is not None:
                 # 缓存已有终态但库未推进（回调丢/写库失败）→ 用同一写路径补
                 try:
-                    if status_of(od) in {OrderStatus.PARTIAL, OrderStatus.ALL_TRADED,
+                    if status_of(od) in {OrderStatus.ALL_TRADED,
                                          OrderStatus.CANCELLED, OrderStatus.REJECTED}:
                         write_order_status(od, adapter, "", "")
                         out["recovered"] += 1
@@ -185,16 +185,18 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
             if age < threshold_s:
                 continue
             with get_conn() as conn:
-                conn.execute(
+                _cur = conn.execute(
                     "UPDATE order_log SET status='unknown', error=%s "
                     "WHERE id=%s AND status = ANY(%s)",
                     ("无券商回报超时（reconciler）", oid,
                      ["submitted", "submitting", "partial"]))
-            record_order_event(stage="timeout", source="reconciler", order_id=oid,
-                               client_order_id=cid, status="unknown",
-                               detail={"symbol": sym, "vt_orderid": vt, "age_s": round(age)},
-                               error="无券商回报超时（reconciler）")
-            out["stale"] += 1
+                conn.commit()
+            if _cur.rowcount:
+                record_order_event(stage="timeout", source="reconciler", order_id=oid,
+                                   client_order_id=cid, status="unknown",
+                                   detail={"symbol": sym, "vt_orderid": vt, "age_s": round(age)},
+                                   error="无券商回报超时（reconciler）")
+                out["stale"] += 1
     except Exception as e:  # noqa: BLE001
         logger.warning("reconcile_stale_orders 失败（不阻断）: %s", e)
         out["error"] = str(e)[:160]
@@ -219,6 +221,7 @@ def record_order_event(*, stage: str, source: str, order_id: int | None = None,
                 "source, detail, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (order_id, client_order_id or None, req_id or None, stage, status,
                  source, jsonb(detail) if detail else None, error or None))
+            conn.commit()
     except Exception as e:  # noqa: BLE001 —— 事件账不得阻断交易
         logger.warning("order_event 写入失败 stage=%s order=%s: %s", stage, order_id, e)
 
@@ -268,13 +271,15 @@ def write_trade_log(d: Trade, adapter, sid: str, symbol: str) -> None:
             if cur.fetchone():
                 logger.info("成交入库: %s %s %s@%s (order_db=%s)", getattr(d, "symbol", symbol),
                             action, getattr(d, "volume", 0), getattr(d, "price", 0), order_db_id)
-            conn.commit()
-        record_order_event(stage="trade", source="broker", order_id=order_db_id,
-                           client_order_id=cid or None, status="trade",
-                           detail={"symbol": getattr(d, "symbol", symbol), "action": action,
-                                   "volume": getattr(d, "volume", 0),
-                                   "price": getattr(d, "price", 0),
-                                   "tradeid": getattr(d, "tradeid", "")})
+                conn.commit()
+                record_order_event(stage="trade", source="broker", order_id=order_db_id,
+                                   client_order_id=cid or None, status="trade",
+                                   detail={"symbol": getattr(d, "symbol", symbol), "action": action,
+                                           "volume": getattr(d, "volume", 0),
+                                           "price": getattr(d, "price", 0),
+                                           "tradeid": getattr(d, "tradeid", "")})
+            else:
+                conn.commit()
     except Exception as e:
         logger.warning("trade_log 写入失败: %s", e)
 
@@ -402,7 +407,7 @@ def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
         logger.warning("写 account_snapshot 失败: %s", e)
 
 
-def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
+def halt_edge_cancel(adapter, halt_state: dict, sid, account_id: str | None = None) -> None:
     """SB2 熔断沿：进入熔断的瞬间撤全部在场委托（F-41——熔断只拦新单不撤旧单=熔断期间仍建仓）。
 
     批 171n：撤单核心已提纯 `_cancel_working_orders`（本函数留沿判定+告警壳——F-41
@@ -416,7 +421,7 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
     if halted_now and not halt_state["was"]:
         logger.critical("检测到熔断，撤销全部在场委托")
         _alert(f"熔断触发，已自动撤销在场委托: {sid}", "check_order 已拒新单；在场委托撤销结果见 journalctl。", code="risk.halt-edge")
-        _cancel_working_orders(adapter)
+        _cancel_working_orders(adapter, account_id=account_id)
     halt_state["was"] = halted_now
 
 
@@ -797,12 +802,17 @@ def execute_place_order(adapter, *, account_id, order, signal_id=None,
         return {"accepted": False, "reason": f"RISK_ERROR: {e}"}
     if not decision.approved:
         _wal_insert_order(account_id, order, signal_id, bar_fingerprint, "rejected")
+        record_order_event(stage="risk_reject", source="td_exec", status="rejected",
+                           req_id=req_id, detail={"symbol": order.get("symbol")},
+                           error=decision.reason)
         return {"accepted": False, "reason": decision.reason}
     final = decision.adjusted if decision.adjusted is not None else order
 
     # 2. WAL order_log(submitting)
     oid = _wal_insert_order(account_id, final, signal_id, bar_fingerprint, "submitting")
     if oid is None:
+        record_order_event(stage="wal_error", source="td_exec", req_id=req_id,
+                           detail={"symbol": final.get("symbol")})
         return {"accepted": False, "reason": "WAL_FAILED"}
 
     # 3. 合规校验
@@ -832,9 +842,17 @@ def execute_place_order(adapter, *, account_id, order, signal_id=None,
         return {"accepted": False, "reason": "SEND_ERROR"}
     if not client_id:
         _update_order_status_row(oid, "send_failed", error="adapter 返回空委托号（委托未发出）")
+        record_order_event(stage="send", source="td_exec", order_id=oid, status="send_failed",
+                           req_id=req_id, error="adapter 返回空委托号",
+                           detail={"symbol": final.get("symbol"), "volume": final.get("volume"),
+                                   "price": final.get("price")})
         return {"accepted": False, "reason": "NOT_SENT"}
     vt = adapter.get_vt_orderid(client_id)
     _update_order_status_row(oid, "submitted", client_order_id=client_id, vt_orderid=vt)
+    record_order_event(stage="send", source="td_exec", order_id=oid, status="submitted",
+                       client_order_id=client_id, req_id=req_id,
+                       detail={"symbol": final.get("symbol"), "volume": final.get("volume"),
+                               "price": final.get("price"), "vt_orderid": vt})
     return {"accepted": True, "client_id": client_id, "order_row_id": oid, "vt_orderid": vt}
 
 def write_cmd_result(req_id: str, result: dict, *, final: bool = False) -> None:
@@ -1024,7 +1042,7 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             final_reason = "final:cancelled"
             break
         # ——— 每轮：撤未成交单（上一轮重挂的单先撤，再用新价重挂）———
-        _cancel_info = _cancel_working_orders(adapter)
+        _cancel_info = _cancel_working_orders(adapter, account_id=account_id)
         round_cancel_items = _cancel_info.get("items", []) if isinstance(_cancel_info, dict) else []
         round_no_quote: list[str] = []
         round_priced = False
