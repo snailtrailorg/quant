@@ -25,6 +25,12 @@ from tests.fixtures import legacy_trading as OLD
 from tests.fixtures.vnpy_events import account_data, order_data, trade_data
 
 
+@pytest.fixture(autouse=True)
+def _no_order_events(monkeypatch):
+    """事件账 0195 是旁路；等价测试只看 order/trade 写路径，屏蔽事件插入。"""
+    monkeypatch.setattr(NEW, "record_order_event", lambda **k: None)
+
+
 class _Cur:
     def __init__(self, row=None, rowcount=1):
         self._row = row

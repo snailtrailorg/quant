@@ -137,8 +137,35 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
             if cur.rowcount:
                 logger.info("order_log 终态: #%s → %s (%s)", row[0], new_status, getattr(d, "symbol", symbol))
             conn.commit()
+        record_order_event(stage="broker", source="broker", order_id=row[0],
+                           status=new_status, error=error,
+                           detail={"vt_orderid": vt, "symbol": getattr(d, "symbol", symbol),
+                                   "volume": getattr(d, "volume", None),
+                                   "price": getattr(d, "price", None)})
     except Exception as e:
         logger.warning("order_log 终态回写失败(never-raise): %s", e)
+
+
+def record_order_event(*, stage: str, source: str, order_id: int | None = None,
+                       client_order_id: str | None = None, req_id: str = "",
+                       status: str | None = None, detail: dict | None = None,
+                       error: str = "") -> None:
+    """订单事件账（0195）：append-only，never-raise。
+
+    stage 例：wal/risk_reject/send/sent/broker/cancel_request/cancel_result/trade/timeout。
+    source：web/td_exec/broker/reconciler。detail 存非敏感上下文（symbol/volume/price/vt 等）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        from src.data_platform.jsonb import jsonb
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO order_event (order_id, client_order_id, req_id, stage, status, "
+                "source, detail, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (order_id, client_order_id or None, req_id or None, stage, status,
+                 source, jsonb(detail) if detail else None, error or None))
+    except Exception as e:  # noqa: BLE001 —— 事件账不得阻断交易
+        logger.warning("order_event 写入失败 stage=%s order=%s: %s", stage, order_id, e)
 
 
 def write_trade_log(d: Trade, adapter, sid: str, symbol: str) -> None:
@@ -187,6 +214,12 @@ def write_trade_log(d: Trade, adapter, sid: str, symbol: str) -> None:
                 logger.info("成交入库: %s %s %s@%s (order_db=%s)", getattr(d, "symbol", symbol),
                             action, getattr(d, "volume", 0), getattr(d, "price", 0), order_db_id)
             conn.commit()
+        record_order_event(stage="trade", source="broker", order_id=order_db_id,
+                           client_order_id=cid or None, status="trade",
+                           detail={"symbol": getattr(d, "symbol", symbol), "action": action,
+                                   "volume": getattr(d, "volume", 0),
+                                   "price": getattr(d, "price", 0),
+                                   "tradeid": getattr(d, "tradeid", "")})
     except Exception as e:
         logger.warning("trade_log 写入失败: %s", e)
 
@@ -368,10 +401,15 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
             out["requested"] += 1
             try:
                 adapter.cancel_order(vt)
+                record_order_event(stage="cancel_request", source="td_exec", status="requested",
+                                   detail={"symbol": _sym, "vt_orderid": str(vt), "via": "cache"})
                 out["items"].append({"symbol": _sym, "vt_orderid": str(vt),
                                      "result": "requested"})
             except Exception as ce:
                 out["failed"] += 1
+                record_order_event(stage="cancel_request", source="td_exec", status="failed",
+                                   error=str(ce)[:120],
+                                   detail={"symbol": _sym, "vt_orderid": str(vt), "via": "cache"})
                 out["items"].append({"symbol": _sym, "vt_orderid": str(vt),
                                      "result": "failed", "detail": str(ce)[:120]})
                 logger.warning("撤单失败 %s: %s", vt, ce)
@@ -397,10 +435,15 @@ def _cancel_working_orders(adapter, account_id: str | None = None) -> dict:
                 out["requested"] += 1
                 try:
                     adapter.cancel_order(vt)
+                    record_order_event(stage="cancel_request", source="td_exec", status="requested",
+                                       detail={"symbol": sym, "vt_orderid": str(vt), "via": "db"})
                     out["items"].append({"symbol": sym, "vt_orderid": str(vt),
                                          "result": "requested", "source": "db"})
                 except Exception as ce:
                     out["failed"] += 1
+                    record_order_event(stage="cancel_request", source="td_exec", status="failed",
+                                       error=str(ce)[:120],
+                                       detail={"symbol": sym, "vt_orderid": str(vt), "via": "db"})
                     out["items"].append({"symbol": sym, "vt_orderid": str(vt),
                                          "result": "failed", "source": "db",
                                          "detail": str(ce)[:120]})
@@ -594,6 +637,9 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
           "reason": "manual_order", "operator": operator, "account_id": account_id}
     d = RiskControl.get().check_order(od, account_id=account_id)
     if not d.approved:
+        record_order_event(stage="risk_reject", source="td_exec", status="rejected",
+                           client_order_id=cid, req_id=req_id,
+                           detail={"symbol": sym, "action": action}, error=d.reason)
         return {"accepted": False, "reason": d.reason, "client_order_id": cid}
     if isinstance(getattr(d, "adjusted", None), dict):
         volume = int(d.adjusted.get("volume", volume))
@@ -601,6 +647,8 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
 
     oid = manual_order_open(sym, volume, price, account_id, operator, req_id, action, cid)
     if oid is None:
+        record_order_event(stage="wal_error", source="td_exec", client_order_id=cid,
+                           req_id=req_id, detail={"symbol": sym})
         return {"accepted": False, "reason": "WAL_FAILED", "client_order_id": cid}
     try:
         from src.strategy_framework.adapters import Order
@@ -608,13 +656,23 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
                                        price=price, order_type="limit", client_id=cid))
         if not ret:
             _close_order_mark(oid, adapter, cid, "send_failed", error="gateway_rejected")
+            record_order_event(stage="send", source="td_exec", order_id=oid, status="send_failed",
+                               client_order_id=cid, req_id=req_id, error="gateway_rejected",
+                               detail={"symbol": sym, "volume": volume, "price": price})
             return {"accepted": False, "reason": "NOT_SENT", "client_order_id": cid}
         _close_order_mark(oid, adapter, cid, "submitted")
+        record_order_event(stage="send", source="td_exec", order_id=oid, status="submitted",
+                           client_order_id=cid, req_id=req_id,
+                           detail={"symbol": sym, "volume": volume, "price": price,
+                                   "vt_orderid": adapter.get_vt_orderid(cid)})
         return {"accepted": True, "client_order_id": cid,
                 "vt_orderid": adapter.get_vt_orderid(cid),
                 "volume": volume, "price": price}
     except Exception as e:
         _close_order_mark(oid, adapter, cid, "send_failed", error=str(e)[:200])
+        record_order_event(stage="send", source="td_exec", order_id=oid, status="send_failed",
+                           client_order_id=cid, req_id=req_id, error=str(e)[:200],
+                           detail={"symbol": sym, "volume": volume, "price": price})
         return {"accepted": False, "reason": "SEND_ERROR", "client_order_id": cid}
 
 

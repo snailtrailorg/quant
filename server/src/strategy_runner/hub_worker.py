@@ -212,7 +212,7 @@ class EmergencyWorker:
             return {"error": "td_disconnected",
                     "detail": "TD 会话断线——缓存不可信（持仓清空=假清仓/委托=残影），"
                               "拒绝执行；恢复连接后重试"}
-        trading._cancel_working_orders(self._adapter)   # 撤在场单
+        trading._cancel_working_orders(self._adapter, account_id=self._account_id)   # 撤在场单
         time.sleep(2.0)   # 撤→平稳定窗（frozen 释放；专用线程内，主循环零 sleep）
         try:
             from src.data_platform.hub_quote import get_retry_config

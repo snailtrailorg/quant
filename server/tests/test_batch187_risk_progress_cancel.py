@@ -87,6 +87,12 @@ def test_cancel_working_orders_returns_per_order_items():
     assert all("symbol" in it for it in out["items"])
 
 
+def test_record_order_event_never_raises_on_db_error():
+    from src.strategy_runner import trading as T
+    with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
+        T.record_order_event(stage="send", source="td_exec", order_id=1)   # 不抛
+
+
 def test_cancel_working_orders_db_fallback_blind_cancels():
     """缓存无单但 order_log 有 submitted：按 vt_orderid 盲撤（2026-11-23 实测 requested=0）。"""
     from src.strategy_runner import trading as T
