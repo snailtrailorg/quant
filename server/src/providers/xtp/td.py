@@ -19,9 +19,39 @@ from . import _transport, translate
 
 logger = logging.getLogger(__name__)
 
-# 批174：最近一次「交易委托失败」详情（write_error 写、_on_order 拒单时消费落 order_log.error）。
-# 同一 onOrderEvent 回调内先 write_error 再推 EVENT_ORDER，时间差 <1ms ⇒ 2s 窗内视为同笔。
+# 批174：最近一次「交易委托失败」详情（兜底；无法按键时按 2s 窗配对）。
 _LAST_REJECT: dict = {"ts": 0.0, "detail": ""}
+# 2026-11-23：按 vt/orderid 键存的拒因，解决并发拒单错配（onOrderEvent 拦截层写入）。
+_REJECT_BY_VT: dict[str, tuple[float, str]] = {}
+
+
+def _norm_oid(v) -> str:
+    s = str(v or "")
+    return s.rsplit(".", 1)[-1] if "." in s else s
+
+
+def _put_reject(oid, detail: str) -> None:
+    key = _norm_oid(oid)
+    if not key or not detail:
+        return
+    try:
+        _REJECT_BY_VT[key] = (time.time(), detail)
+        if len(_REJECT_BY_VT) > 500:   # 容量上限：清 1h 前的旧键
+            cutoff = time.time() - 3600
+            for k in [k for k, (t, _) in _REJECT_BY_VT.items() if t < cutoff]:
+                _REJECT_BY_VT.pop(k, None)
+    except Exception:   # noqa: BLE001
+        pass
+
+
+def _pop_reject(vt, window_s: float = 120.0) -> str:
+    try:
+        item = _REJECT_BY_VT.pop(_norm_oid(vt), None)
+        if item and time.time() - item[0] <= window_s:
+            return item[1]
+    except Exception:   # noqa: BLE001
+        pass
+    return ""
 
 
 def _fmt_error(msg: str, error) -> str:
@@ -69,6 +99,7 @@ class XtpExecutionPort:
         self._ee = event_engine
         self._gw = gateway
         self._api = td_api
+        self._install_reject_hook()
         self.slot = slot
         self._setting = setting or {}
         self._guard = guard_factory
@@ -86,14 +117,47 @@ class XtpExecutionPort:
         self._ee.register(ev["position"], self._on_position)
         self._ee.register(ev["account"], self._on_account)
 
+    def _install_reject_hook(self) -> None:
+        """包装 td_api.onOrderEvent，在 error 到达时按 order_xtp_id 存拒因。
+
+        vnpy 的 XtpTdApi.onOrderEvent(data, error, session) 同时拿到 data(含 order_xtp_id)
+        与 error；而 write_error 只收到 error（无单号）⇒ 原全局 _LAST_REJECT 在并发拒单时
+        会错配。此处拦截层按键写，编排层 pop_order_error(vt) 精确取；失败不影响原回调。
+        """
+        api = self._api
+        if api is None or getattr(api, "_reject_hooked", False):
+            return
+        orig = getattr(api, "onOrderEvent", None)
+        if not callable(orig):
+            return
+
+        def _wrapped(data, error, session):
+            try:
+                if isinstance(error, dict) and error.get("error_id"):
+                    oid = data.get("order_xtp_id", "") if isinstance(data, dict) else ""
+                    _put_reject(oid, _fmt_error("交易委托失败", error))
+            except Exception:   # noqa: BLE001 —— 回调链禁抛
+                pass
+            return orig(data, error, session)
+
+        try:
+            api.onOrderEvent = _wrapped
+            api._reject_hooked = True
+        except Exception:   # noqa: BLE001 —— 不可写则退回全局兜底
+            pass
+
     # ── 事件缓存 ──────────────────────────────────────────
     def _on_order(self, event: Any) -> None:
         d = event.data
         with self._lock:
             self._orders[d.vt_orderid] = d
 
-    def pop_order_error(self) -> str:
-        """批174：拒因查询接口（插件不写业务库；编排层 write_order_status 消费落库）。"""
+    def pop_order_error(self, vt_orderid: str = "") -> str:
+        """拒因查询：先按键精确取（并发安全），无键命中再退回 2s 全局兜底。"""
+        if vt_orderid:
+            detail = _pop_reject(vt_orderid)
+            if detail:
+                return detail
         return pop_last_reject()
 
     def _on_trade(self, event: Any) -> None:

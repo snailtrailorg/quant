@@ -94,6 +94,38 @@ def test_write_order_status_writes_reject_error():
     assert any("error=%s" in c.args[0] and "交易委托失败" in str(c.args[1]) for c in upd)
 
 
+def test_keyed_reject_pops_exact_vt_not_wrong_order():
+    """并发拒单：按 order_xtp_id 键存/取，A 单拒因不会被 B 单消费。"""
+    xtp_td._REJECT_BY_VT.clear()
+    xtp_td._put_reject("111", "A 拒因")
+    xtp_td._put_reject("XTP.222", "B 拒因")
+    assert xtp_td._pop_reject("XTP.111") == "A 拒因"
+    assert xtp_td._pop_reject("222") == "B 拒因"
+    assert xtp_td._pop_reject("333") == ""      # 取不到不串到别的单
+
+
+def test_reject_hook_installs_once_and_records_key():
+    """onOrderEvent 拦截层：有 error_id 时按 order_xtp_id 键存，且只装一次。"""
+    calls = []
+
+    class _Api:
+        _reject_hooked = False
+        def onOrderEvent(self, data, error, session):
+            calls.append((data, error, session))
+
+    api = _Api()
+    port = object.__new__(xtp_td.XtpExecutionPort)
+    port._api = api
+    xtp_td._REJECT_BY_VT.clear()
+    port._install_reject_hook()
+    port._install_reject_hook()   # 幂等
+    assert api._reject_hooked is True
+    assert len([c for c in calls]) == 0
+    api.onOrderEvent({"order_xtp_id": "555"}, {"error_id": 1, "error_msg": "bad"}, 0)
+    assert len(calls) == 1
+    assert "bad" in xtp_td._pop_reject("XTP.555")
+
+
 def test_sell_matches_shse_sse_alias():
     """持仓 vnpy 口径 .SSE、委托项目口径 .XSHG → 双写候选匹配（否则沪市手动卖恒拒 NO_SELLABLE）。"""
     from src.strategy_runner import trading

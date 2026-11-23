@@ -142,7 +142,7 @@ class TdExec:
                 if getattr(d, "status", None) == OrderStatus.REJECTED:
                     fn = getattr(self._exec_port, "pop_order_error", None)
                     if callable(fn):
-                        _err = fn() or ""
+                        _err = fn(getattr(d, "vt_orderid", "")) or ""
             except Exception:  # noqa: BLE001
                 _err = ""
             trading.write_order_status(d, self._adapter, "", "", error=_err)

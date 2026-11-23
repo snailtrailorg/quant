@@ -387,7 +387,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
             if getattr(d, "status", None) == OrderStatus.REJECTED:
                 _fn = getattr(exec_port, "pop_order_error", None)
                 if callable(_fn):
-                    _err = _fn() or ""
+                    _err = _fn(getattr(d, "vt_orderid", "")) or ""
         except Exception:   # noqa: BLE001 —— 取拒因失败不阻断回写
             _err = ""
         trading.write_order_status(d, _adapter_holder["a"], sid, symbol, error=_err)
