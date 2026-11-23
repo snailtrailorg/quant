@@ -12,7 +12,7 @@ from src.web_api.routes import risk as risk_routes
 from src.strategy_runner import trading, hub_worker
 
 
-GOOD = {"account_id": 1, "symbol": "600000.SSE", "action": "BUY",
+GOOD = {"account_id": "td-xtp", "symbol": "600000.SSE", "action": "BUY",
         "volume": 500, "price": 10.38, "confirm": "CONFIRM"}
 
 
@@ -24,7 +24,7 @@ def _payload():
 
 @pytest.mark.parametrize("bad,code", [
     ({"confirm": "NO"}, "MANUAL_CONFIRM_REQUIRED"),
-    ({"account_id": 0}, "BAD_ACCOUNT_ID"),
+    ({"account_id": "bad"}, "BAD_ACCOUNT_ID"),
     ({"symbol": "BAD"}, "BAD_SYMBOL"),
     ({"action": "HOLD"}, "BAD_ACTION"),
     ({"volume": 150}, "BAD_VOLUME"),
@@ -58,13 +58,13 @@ def test_account_not_exec_400():
 def test_dispatch_writes_cmd():
     fake_r = MagicMock()
     fake_r.get.return_value = None
-    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["1"]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["td-xtp"]), \
          patch.object(risk_routes, "audit_log") as al, \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r):
         out = risk_routes._dispatch_manual_cmd(GOOD, _payload())
     assert out["status"] == "dispatched"
     key, raw = fake_r.lpush.call_args_list[0].args
-    assert key == "td:cmd:1"   # 批188：账号维度队列
+    assert key == "td:cmd:td-xtp"   # 189：交易接口 code 队列
     import json
     cmd = json.loads(raw)
     assert cmd["verb"] == "manual-order"
@@ -80,7 +80,7 @@ def test_duplicate_cid_400():
     fake_r = MagicMock()
     fake_r.set.return_value = False   # nx 失败
     body = {**GOOD, "client_order_id": "mo-fixed-1"}
-    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["1"]), \
+    with patch("src.data_platform.config_store.exec_interface_codes", return_value=["td-xtp"]), \
          patch("src.quant_common.redis_client.business_redis", return_value=fake_r), \
          patch.object(risk_routes, "audit_log"):
         with pytest.raises(ApiError) as e:
@@ -106,13 +106,13 @@ def test_rejected_by_risk_never_sends():
     with patch("src.risk_control.risk.RiskControl.get") as get, \
          patch.object(trading, "manual_order_open") as wal:
         get.return_value.check_order.return_value = dec
-        out = trading.submit_manual_order(a, 1, "admin", "r1", dict(GOOD))
+        out = trading.submit_manual_order(a, "td-xtp", "admin", "r1", dict(GOOD))
     assert out["accepted"] is False
     a.send_order.assert_not_called()
     wal.assert_not_called()
     # 且 order dict 带 account_id / reason / operator（服务端钉死）
     od = get.return_value.check_order.call_args.args[0]
-    assert od["account_id"] == 1 and od["reason"] == "manual_order"
+    assert od["account_id"] == "td-xtp" and od["reason"] == "manual_order"
 
 
 # ——— WAL 先于 send（F-4 时序） ———
@@ -135,7 +135,7 @@ def test_wal_before_send():
          patch.object(trading, "manual_order_open", side_effect=wal), \
          patch.object(trading, "_close_order_mark"):
         get.return_value.check_order.return_value = dec
-        out = trading.submit_manual_order(a, 1, "admin", "r1", dict(GOOD))
+        out = trading.submit_manual_order(a, "td-xtp", "admin", "r1", dict(GOOD))
     assert out["accepted"] is True
     assert calls == ["wal", "send"]
 
@@ -148,7 +148,7 @@ def test_wal_failed_no_send():
     with patch("src.risk_control.risk.RiskControl.get") as get, \
          patch.object(trading, "manual_order_open", return_value=None):
         get.return_value.check_order.return_value = dec
-        out = trading.submit_manual_order(a, 1, "admin", "r1", dict(GOOD))
+        out = trading.submit_manual_order(a, "td-xtp", "admin", "r1", dict(GOOD))
     assert out["accepted"] is False and out["reason"] == "WAL_FAILED"
     a.send_order.assert_not_called()
 
@@ -160,7 +160,7 @@ def test_send_none_marks_send_failed():
          patch.object(trading, "manual_order_open", return_value=42), \
          patch.object(trading, "_close_order_mark") as mark:
         get.return_value.check_order.return_value = dec
-        out = trading.submit_manual_order(a, 1, "admin", "r1", dict(GOOD))
+        out = trading.submit_manual_order(a, "td-xtp", "admin", "r1", dict(GOOD))
     assert out["accepted"] is False and out["reason"] == "NOT_SENT"
     assert mark.call_args.args[3] == "send_failed"
 
@@ -212,7 +212,7 @@ def test_consume_risk_cmd_passes_order():
 
 def test_manual_order_branch_no_final():
     w = hub_worker.EmergencyWorker(adapter=MagicMock(), td_api=MagicMock(),
-                                   account_id=1, tid="19",
+                                   account_id="td-xtp", tid="19",
                                    closing=__import__("threading").Event())
     cmd = {"req_id": "r1", "verb": "manual-order", "operator": "admin",
            "order": {"symbol": "600000.SSE", "action": "BUY", "volume": 500,

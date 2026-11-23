@@ -743,8 +743,8 @@ def manual_order(body: dict = Body(default={}),
         raise ApiError(400, "MANUAL_CONFIRM_REQUIRED",
                        "手动单需 body {\"confirm\":\"CONFIRM\"} 二次确认")
     aid = body.get("account_id")
-    if not isinstance(aid, int) or isinstance(aid, bool) or aid <= 0:
-        raise ApiError(400, "BAD_ACCOUNT_ID", "account_id 须为正整数")
+    if not isinstance(aid, str) or not _re.fullmatch(r"td-[a-z0-9-]+", aid):
+        raise ApiError(400, "BAD_ACCOUNT_ID", "account_id 须为交易接口 code（td-*）")
     sym = str(body.get("symbol") or "").strip()
     if not _re.fullmatch(r"[0-9A-Za-z]{6}\.[A-Za-z]{3,4}", sym):
         raise ApiError(400, "BAD_SYMBOL", "symbol 格式非法（须 6 位代码.交易所）")
