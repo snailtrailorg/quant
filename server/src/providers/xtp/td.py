@@ -217,6 +217,10 @@ class XtpExecutionPort:
             type=c.OrderType.MARKET if str(order.order_type).lower().endswith("market") else c.OrderType.LIMIT,
             volume=order.volume, price=order.price, offset=c.Offset.NONE, reference=client_id,
         )
+        # 诊断：记录实际发出的报文（方向/价格类型/标度）——排查“有 vt 无成交/无回报”
+        logger.info("XTP 发单报文 symbol=%s ex=%s dir=%s type=%s vol=%s price=%s cid=%s",
+                    order.symbol, ex, getattr(req.direction, "name", req.direction),
+                    getattr(req.type, "name", req.type), order.volume, order.price, client_id)
         vt = self._gw.send_order(req)
         orderid_part = vt.rsplit(".", 1)[-1] if vt else ""
         if not vt or orderid_part == "0":
