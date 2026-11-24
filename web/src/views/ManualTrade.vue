@@ -347,6 +347,9 @@ const startPoll = (reqId) => {
 .mt-f-account { flex: 112 1 0; }
 .mt-f-symbol { flex: 168 1 0; }
 .mt-f-dir { flex: 104 1 0; }
+.mt-f-dir :deep(.el-radio-group) { display: flex; width: 100%; }
+.mt-f-dir :deep(.el-radio-button) { flex: 1 1 0; }
+.mt-f-dir :deep(.el-radio-button__inner) { width: 100%; }
 .mt-f-vol { flex: 120 1 0; }
 .mt-f-price { flex: 120 1 0; }
 .mt-f-btns { flex: 0 0 128px; }
