@@ -1,60 +1,61 @@
 <template>
-  <ContentCard :title="t('manualTrade.cardTitle')">
+  <div class="mt-page">
+  <ContentCard :title="t('manualTrade.cardTitle')" class="mt-form-card">
     <template #actions>
       <IconBtn :icon="Refresh" :title="t('manualTrade.refresh')" @click="reload" />
     </template>
 
     <!-- 顶部单行工具条：接口/标的/方向/数量/价格/下单/重置 -->
     <el-form ref="formRef" :model="form" :rules="rules" inline class="mt-toolbar" @submit.prevent>
-      <el-form-item :label="t('manualTrade.account')" prop="account_id">
-        <el-select v-model="form.account_id" :placeholder="t('manualTrade.accountPh')" class="mt-w-account">
+      <el-form-item :label="t('manualTrade.account')" prop="account_id" class="mt-f-account">
+        <el-select v-model="form.account_id" :placeholder="t('manualTrade.accountPh')">
           <el-option v-for="a in tdAccounts" :key="a.code" :label="a.code" :value="a.code" />
         </el-select>
       </el-form-item>
-      <el-form-item :label="t('manualTrade.symbol')" prop="symbol">
+      <el-form-item :label="t('manualTrade.symbol')" prop="symbol" class="mt-f-symbol">
         <el-select v-model="form.symbol" filterable remote :remote-method="searchSymbols"
-          :loading="symbolLoading" :placeholder="t('manualTrade.symbolPh')" class="mt-w-symbol"
+          :loading="symbolLoading" :placeholder="t('manualTrade.symbolPh')"
           @change="onSymbolChange" allow-create>
           <el-option v-for="s in symbolOptions" :key="s" :label="s" :value="s" />
         </el-select>
       </el-form-item>
-      <el-form-item :label="t('manualTrade.action')">
-        <el-radio-group v-model="form.action" class="mt-w-dir">
+      <el-form-item :label="t('manualTrade.action')" class="mt-f-dir">
+        <el-radio-group v-model="form.action">
           <el-radio-button value="BUY">{{ t('dashboard.buy') }}</el-radio-button>
           <el-radio-button value="SELL">{{ t('dashboard.sell') }}</el-radio-button>
         </el-radio-group>
       </el-form-item>
-      <el-form-item :label="`${t('manualTrade.volume')}（${marketUnit}）`" prop="volume">
-        <el-input-number v-model="form.volume" :min="100" :step="100" :max="100000" class="mt-w-num" />
+      <el-form-item :label="`${t('manualTrade.volume')}（${marketUnit}）`" prop="volume" class="mt-f-vol">
+        <el-input-number v-model="form.volume" :min="100" :step="100" :max="100000" />
       </el-form-item>
-      <el-form-item :label="t('manualTrade.price')" prop="price">
-        <el-input-number v-model="form.price" :min="0.01" :precision="tickDecimals" :step="0.01" class="mt-w-num" />
+      <el-form-item :label="t('manualTrade.price')" prop="price" class="mt-f-price">
+        <el-input-number v-model="form.price" :min="0.01" :precision="tickDecimals" :step="0.01" />
       </el-form-item>
-      <el-form-item class="mt-btns">
+      <el-form-item class="mt-f-btns">
         <el-button type="primary" :loading="submitting" class="mt-btn" @click="submitOrder">{{ t('manualTrade.submit') }}</el-button>
         <el-button class="mt-btn" @click="resetForm">{{ t('manualTrade.reset') }}</el-button>
       </el-form-item>
     </el-form>
+  </ContentCard>
 
-    <!-- 左右结构：行情自适应 + 盘口窄列 -->
-    <div class="mt-main">
-      <div class="mt-chart-col">
-        <div class="mt-chart-head">
-          <el-radio-group v-model="chartMode" size="small" @change="onChartMode">
-            <el-radio-button value="day">{{ t('manualTrade.dayK') }}</el-radio-button>
-            <el-radio-button value="intraday">{{ t('manualTrade.intraday') }}</el-radio-button>
-          </el-radio-group>
-          <span class="mt-muted">{{ quote?.source || '-' }}</span>
-        </div>
-        <div v-loading="chartLoading" class="mt-chart">
-          <v-chart v-if="chartMode==='day' && klineData.length" :option="klineOption" autoresize class="mt-chart-canvas" />
-          <v-chart v-else-if="chartMode==='intraday' && intradayPoints.length" :option="intradayOption" autoresize class="mt-chart-canvas" />
-          <EmptyState v-else :description="t('manualTrade.noChart')" size="small" />
-        </div>
+  <!-- 行情/盘口两张卡，等高 -->
+  <div class="mt-main">
+    <ContentCard :title="t('manualTrade.chartTitle')" class="mt-chart-card">
+      <div class="mt-chart-head">
+        <el-radio-group v-model="chartMode" size="small" @change="onChartMode">
+          <el-radio-button value="day">{{ t('manualTrade.dayK') }}</el-radio-button>
+          <el-radio-button value="intraday">{{ t('manualTrade.intraday') }}</el-radio-button>
+        </el-radio-group>
       </div>
+      <div v-loading="chartLoading" class="mt-chart">
+        <v-chart v-if="chartMode==='day' && klineData.length" :option="klineOption" autoresize class="mt-chart-canvas" />
+        <v-chart v-else-if="chartMode==='intraday' && intradayPoints.length" :option="intradayOption" autoresize class="mt-chart-canvas" />
+        <EmptyState v-else :description="t('manualTrade.noChart')" size="small" />
+      </div>
+    </ContentCard>
 
-      <div class="mt-depth-col">
-        <div class="mt-section-title">{{ t('manualTrade.depth') }}</div>
+    <ContentCard :title="t('manualTrade.depth')" class="mt-depth-card">
+      <div class="mt-depth-body">
         <table v-if="quote?.bid?.length" class="mt-depth">
           <thead>
             <tr>
@@ -80,9 +81,9 @@
           </tbody>
         </table>
         <EmptyState v-else :description="t('manualTrade.noDepth')" size="small" />
-        <div class="mt-muted">{{ t('manualTrade.depthTip') }}</div>
       </div>
-    </div>
+    </ContentCard>
+  </div>
 
     <!-- 下方仅状态行 -->
     <div class="mt-status">
@@ -95,7 +96,7 @@
       </template>
       <span v-else class="mt-muted">—</span>
     </div>
-  </ContentCard>
+  </div>
 </template>
 
 <script setup>
@@ -337,21 +338,29 @@ const startPoll = (reqId) => {
 </script>
 
 <style scoped>
-.mt-toolbar { display: flex; flex-wrap: nowrap; align-items: flex-end; gap: var(--sp-2); }
-.mt-toolbar :deep(.el-form-item) { margin: 0; }
-.mt-w-account { width: 112px; }
-.mt-w-symbol { width: 168px; }
-.mt-w-dir { width: 104px; }
-.mt-w-num { width: 120px; }
+.mt-page { display: flex; flex-direction: column; gap: var(--sp-3); }
+.mt-form-card { flex: 0 0 auto; }
+.mt-toolbar { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: var(--sp-2); }
+.mt-toolbar :deep(.el-form-item) { margin: 0; min-width: 0; }
+.mt-toolbar :deep(.el-form-item__content) { flex: 1 1 auto; min-width: 0; }
+.mt-toolbar :deep(.el-select), .mt-toolbar :deep(.el-input-number) { width: 100%; }
+.mt-f-account { flex: 112 1 0; }
+.mt-f-symbol { flex: 168 1 0; }
+.mt-f-dir { flex: 104 1 0; }
+.mt-f-vol { flex: 120 1 0; }
+.mt-f-price { flex: 120 1 0; }
+.mt-f-btns { flex: 0 0 128px; }
+.mt-f-btns :deep(.el-form-item__content) { gap: var(--sp-1); flex-wrap: nowrap; }
 .mt-btn { width: 60px; }
-.mt-btns :deep(.el-form-item__content) { gap: var(--sp-1); }
-.mt-main { display: flex; gap: var(--sp-3); height: 420px; margin-top: var(--sp-3); }
-.mt-chart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mt-main { display: flex; gap: var(--sp-3); height: 420px; align-items: stretch; }
+.mt-chart-card { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mt-depth-card { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column; }
+.mt-chart-card :deep(.el-card__body),
+.mt-depth-card :deep(.el-card__body) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .mt-chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-1); }
 .mt-chart { flex: 1; min-height: 0; }
 .mt-chart-canvas { width: 100%; height: 100%; }
-.mt-depth-col { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column; }
-.mt-section-title { font-size: var(--fs-body); font-weight: 600; margin-bottom: var(--sp-1); }
+.mt-depth-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 .mt-depth { width: 100%; border-collapse: collapse; font-size: var(--fs-foot); }
 .mt-depth th { padding: var(--sp-1) 0; color: var(--text-secondary); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border); }
 .mt-depth th:first-child, .mt-depth td:first-child { text-align: left; }
@@ -364,8 +373,8 @@ const startPoll = (reqId) => {
 .mt-depth tr.off { color: var(--text-secondary); cursor: default; }
 .mt-depth tr.mid td { text-align: center; color: var(--text-secondary); border-block: 1px solid var(--border); }
 .mt-muted { color: var(--text-secondary); font-size: var(--fs-foot); }
-.mt-status { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-3); font-size: var(--fs-foot); color: var(--text-secondary); }
+.mt-status { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; font-size: var(--fs-foot); color: var(--text-secondary); }
 .mt-err { color: var(--danger); }
-@media (max-width: 1400px) { .mt-depth-col { flex-basis: 200px; } }
-@media (max-width: 1279px) { .mt-toolbar { flex-wrap: wrap; } }
+@media (max-width: 1400px) { .mt-depth-card { flex-basis: 200px; } }
+@media (max-width: 1279px) { .mt-toolbar { flex-wrap: wrap; } .mt-f-btns { flex: 0 0 auto; } }
 </style>
