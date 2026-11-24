@@ -9,6 +9,8 @@ export const STATUS_META = {
   ok:{dot:'success'},       warn:{dot:'warn'},       stuck:{dot:'critical'},  completed:{dot:'neutral'},
   terminated:{dot:'neutral'}, paused:{dot:'warn'}, disabled:{dot:'neutral'},
   skipped:{dot:'neutral'},   // 批 171g（DEF-04）：空窗已追平/未发布等待——正常态非作业
+  accepted:{dot:'success'}, rejected:{dot:'critical'}, dispatched:{dot:'warn'},
+  part_cancelled:{dot:'warn'},   // XTP status 3：部成后撤/剩余不排队
 }
 export const statusMeta = (r, t) => {
   const m = STATUS_META[r] || { dot: 'neutral' }

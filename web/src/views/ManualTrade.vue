@@ -1,117 +1,117 @@
 <template>
-  <div class="mt-page">
-    <el-card>
-      <template #header>
-        <div class="mt-head">
-          <span>{{ t('nav.manualTrade') }}</span>
-          <span class="mt-hint">{{ t('manualTrade.hint') }}</span>
-        </div>
-      </template>
+  <ContentCard :title="t('manualTrade.cardTitle')">
+    <template #actions>
+      <IconBtn :icon="Refresh" :title="t('manualTrade.refresh')" @click="reload" />
+    </template>
 
-      <!-- 接口 + 标的 -->
-      <el-row :gutter="16" class="mt-row">
-        <el-col :xs="24" :md="8">
-          <div class="mt-label">{{ t('manualTrade.account') }}</div>
-          <el-select v-model="form.account_id" :placeholder="t('manualTrade.accountPh')" style="width:100%">
-            <el-option v-for="a in tdAccounts" :key="a.code" :label="a.code" :value="a.code" />
-          </el-select>
-        </el-col>
-        <el-col :xs="24" :md="10">
-          <div class="mt-label">{{ t('manualTrade.symbol') }}</div>
-          <el-select v-model="form.symbol" filterable remote :remote-method="searchSymbols"
-            :loading="symbolLoading" :placeholder="t('manualTrade.symbolPh')" style="width:100%"
-            @change="onSymbolChange" allow-create>
-            <el-option v-for="s in symbolOptions" :key="s" :label="s" :value="s" />
-          </el-select>
-        </el-col>
-        <el-col :xs="24" :md="6">
-          <div class="mt-label">{{ t('manualTrade.marketHint') }}</div>
-          <div class="mt-unit">{{ marketUnit }}</div>
-        </el-col>
-      </el-row>
+    <!-- 顶部单行工具条：接口/标的/方向/数量/价格/下单/重置 -->
+    <el-form ref="formRef" :model="form" :rules="rules" inline class="mt-toolbar" @submit.prevent>
+      <el-form-item :label="t('manualTrade.account')" prop="account_id">
+        <el-select v-model="form.account_id" :placeholder="t('manualTrade.accountPh')" class="mt-w-account">
+          <el-option v-for="a in tdAccounts" :key="a.code" :label="a.code" :value="a.code" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('manualTrade.symbol')" prop="symbol">
+        <el-select v-model="form.symbol" filterable remote :remote-method="searchSymbols"
+          :loading="symbolLoading" :placeholder="t('manualTrade.symbolPh')" class="mt-w-symbol"
+          @change="onSymbolChange" allow-create>
+          <el-option v-for="s in symbolOptions" :key="s" :label="s" :value="s" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('manualTrade.action')">
+        <el-radio-group v-model="form.action" class="mt-w-dir">
+          <el-radio-button value="BUY">{{ t('dashboard.buy') }}</el-radio-button>
+          <el-radio-button value="SELL">{{ t('dashboard.sell') }}</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item :label="`${t('manualTrade.volume')}（${marketUnit}）`" prop="volume">
+        <el-input-number v-model="form.volume" :min="100" :step="100" :max="100000" class="mt-w-num" />
+      </el-form-item>
+      <el-form-item :label="t('manualTrade.price')" prop="price">
+        <el-input-number v-model="form.price" :min="0.01" :precision="tickDecimals" :step="0.01" class="mt-w-num" />
+      </el-form-item>
+      <el-form-item class="mt-btns">
+        <el-button type="primary" :loading="submitting" class="mt-btn" @click="submitOrder">{{ t('manualTrade.submit') }}</el-button>
+        <el-button class="mt-btn" @click="resetForm">{{ t('manualTrade.reset') }}</el-button>
+      </el-form-item>
+    </el-form>
 
-      <!-- 行情区（左，同一空间日K/分时切换） + L1 盘口（右，全部可点） -->
-      <el-row :gutter="16" class="mt-chart-row">
-        <el-col :xs="24" :md="17">
-          <div class="mt-chart-head">
-            <el-radio-group v-model="chartMode" size="small" @change="onChartMode">
-              <el-radio-button value="day">{{ t('manualTrade.dayK') }}</el-radio-button>
-              <el-radio-button value="intraday">{{ t('manualTrade.intraday') }}</el-radio-button>
-            </el-radio-group>
-            <span class="mt-chart-src">{{ quote?.source || '-' }}</span>
-          </div>
-          <div v-loading="chartLoading" class="mt-chart">
-            <v-chart v-if="chartMode==='day' && klineData.length" :option="klineOption" autoresize />
-            <v-chart v-else-if="chartMode==='intraday' && intradayPoints.length" :option="intradayOption" autoresize />
-            <el-empty v-else :description="t('manualTrade.noChart')" :image-size="50" />
-          </div>
-        </el-col>
-        <el-col :xs="24" :md="7">
-          <div class="mt-label">{{ t('manualTrade.depth') }}</div>
-          <div v-if="quote?.bid?.length" class="mt-depth">
-            <div v-for="i in 5" :key="'a'+i" class="mt-depth-row ask" @click="pickPrice(quote.ask?.[5-i])">
-              <span>{{ t('manualTrade.ask') }}{{ 6-i }}</span>
-              <b>{{ fmtDepth(quote.ask?.[5-i]) }}</b>
-              <span>{{ fmtDepth(quote.ask_v?.[5-i]) }}</span>
-            </div>
-            <div class="mt-depth-mid">{{ fmtDepth(quote.last) }}</div>
-            <div v-for="i in 5" :key="'b'+i" class="mt-depth-row bid" @click="pickPrice(quote.bid?.[i-1])">
-              <span>{{ t('manualTrade.bid') }}{{ i }}</span>
-              <b>{{ fmtDepth(quote.bid?.[i-1]) }}</b>
-              <span>{{ fmtDepth(quote.bid_v?.[i-1]) }}</span>
-            </div>
-          </div>
-          <el-empty v-else :description="t('manualTrade.noDepth')" :image-size="50" />
-          <div class="mt-depth-tip">{{ t('manualTrade.depthTip') }}</div>
-        </el-col>
-      </el-row>
-
-      <!-- 下单 -->
-      <el-row :gutter="16" class="mt-row">
-        <el-col :xs="24" :md="6">
-          <div class="mt-label">{{ t('manualTrade.action') }}</div>
-          <el-radio-group v-model="form.action">
-            <el-radio-button value="BUY">{{ t('dashboard.buy') }}</el-radio-button>
-            <el-radio-button value="SELL">{{ t('dashboard.sell') }}</el-radio-button>
+    <!-- 左右结构：行情自适应 + 盘口窄列 -->
+    <div class="mt-main">
+      <div class="mt-chart-col">
+        <div class="mt-chart-head">
+          <el-radio-group v-model="chartMode" size="small" @change="onChartMode">
+            <el-radio-button value="day">{{ t('manualTrade.dayK') }}</el-radio-button>
+            <el-radio-button value="intraday">{{ t('manualTrade.intraday') }}</el-radio-button>
           </el-radio-group>
-        </el-col>
-        <el-col :xs="24" :md="6">
-          <div class="mt-label">{{ t('manualTrade.volume') }}（{{ marketUnit }}）</div>
-          <el-input-number v-model="form.volume" :min="100" :step="100" :max="100000" style="width:100%" />
-        </el-col>
-        <el-col :xs="24" :md="6">
-          <div class="mt-label">{{ t('manualTrade.price') }}</div>
-          <el-input-number v-model="form.price" :min="0.01" :precision="3" :step="0.01" style="width:100%" />
-        </el-col>
-        <el-col :xs="24" :md="6">
-          <div class="mt-label">&nbsp;</div>
-          <el-button type="primary" :loading="submitting" @click="submitOrder">{{ t('manualTrade.submit') }}</el-button>
-          <el-button @click="resetForm">{{ t('manualTrade.reset') }}</el-button>
-        </el-col>
-      </el-row>
-
-      <!-- 回执 -->
-      <div v-if="receipt" class="mt-receipt">
-        <el-tag :type="receipt.status === 'accepted' ? 'success' : receipt.status === 'rejected' ? 'danger' : 'warning'">
-          {{ receipt.status }}
-        </el-tag>
-        <span class="mt-receipt-txt">req={{ receipt.req_id }}</span>
-        <span v-if="receipt.vt_orderid" class="mt-receipt-txt">vt={{ receipt.vt_orderid }}</span>
-        <span v-if="receipt.reason || receipt.error" class="mt-receipt-err">{{ receipt.reason || receipt.error }}</span>
+          <span class="mt-muted">{{ quote?.source || '-' }}</span>
+        </div>
+        <div v-loading="chartLoading" class="mt-chart">
+          <v-chart v-if="chartMode==='day' && klineData.length" :option="klineOption" autoresize class="mt-chart-canvas" />
+          <v-chart v-else-if="chartMode==='intraday' && intradayPoints.length" :option="intradayOption" autoresize class="mt-chart-canvas" />
+          <EmptyState v-else :description="t('manualTrade.noChart')" size="small" />
+        </div>
       </div>
-    </el-card>
-  </div>
+
+      <div class="mt-depth-col">
+        <div class="mt-section-title">{{ t('manualTrade.depth') }}</div>
+        <table v-if="quote?.bid?.length" class="mt-depth">
+          <thead>
+            <tr>
+              <th>{{ t('manualTrade.level') }}</th>
+              <th class="num">{{ t('manualTrade.price') }}</th>
+              <th class="num">{{ t('manualTrade.qty') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="lv in asks" :key="lv.label" :class="['ask', { off: !(lv.price > 0) }]"
+              role="button" tabindex="0" @click="pickPrice(lv.price)" @keydown.enter="pickPrice(lv.price)">
+              <td>{{ lv.label }}</td>
+              <td class="num">{{ fmtPrice(lv.price) }}</td>
+              <td class="num">{{ fmtQty(lv.vol) }}</td>
+            </tr>
+            <tr class="mid"><td colspan="3">{{ t('manualTrade.last') }} {{ fmtPrice(quote?.last) }}</td></tr>
+            <tr v-for="lv in bids" :key="lv.label" :class="['bid', { off: !(lv.price > 0) }]"
+              role="button" tabindex="0" @click="pickPrice(lv.price)" @keydown.enter="pickPrice(lv.price)">
+              <td>{{ lv.label }}</td>
+              <td class="num">{{ fmtPrice(lv.price) }}</td>
+              <td class="num">{{ fmtQty(lv.vol) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <EmptyState v-else :description="t('manualTrade.noDepth')" size="small" />
+        <div class="mt-muted">{{ t('manualTrade.depthTip') }}</div>
+      </div>
+    </div>
+
+    <!-- 下方仅状态行 -->
+    <div class="mt-status">
+      <template v-if="receipt">
+        <StatusTag :value="receipt.status || 'pending'" />
+        <span v-if="receipt.req_id">{{ t('manualTrade.reqId') }} {{ receipt.req_id }}</span>
+        <span v-if="receipt.vt_orderid">{{ t('manualTrade.vtId') }} {{ receipt.vt_orderid }}</span>
+        <span v-if="receipt.volume">{{ receipt.volume }} @ {{ fmtPrice(receipt.price) }}</span>
+        <span v-if="receipt.reason || receipt.error" class="mt-err">{{ receipt.reason || receipt.error }}</span>
+      </template>
+      <span v-else class="mt-muted">—</span>
+    </div>
+  </ContentCard>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart, LineChart, CandlestickChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
+import ContentCard from '../components/ContentCard.vue'
+import StatusTag from '../components/StatusTag.vue'
+import EmptyState from '../components/EmptyState.vue'
+import IconBtn from '../components/IconBtn.vue'
 import { cssVar } from '../utils/cssVar'
 import { getTdInterfaces, stockDetail, stockSearch, getKline, stockIntraday,
          submitManualOrder, getManualOrderResult, apiErr } from '../api'
@@ -120,7 +120,14 @@ const { t } = useI18n()
 use([CanvasRenderer, BarChart, LineChart, CandlestickChart,
      GridComponent, TooltipComponent, LegendComponent, MarkLineComponent])
 
+const formRef = ref(null)
 const form = ref({ account_id: '', symbol: '', action: 'BUY', volume: 100, price: 0 })
+const rules = computed(() => ({
+  account_id: [{ required: true, message: t('manualTrade.invalidForm'), trigger: 'change' }],
+  symbol: [{ required: true, pattern: /^\d{6}\.[A-Z]{4}$/, message: t('manualTrade.invalidForm'), trigger: 'change' }],
+  volume: [{ required: true, message: t('manualTrade.invalidForm'), trigger: 'change' }],
+  price: [{ required: true, message: t('manualTrade.invalidForm'), trigger: 'change' }],
+}))
 const tdAccounts = ref([])
 const symbolOptions = ref([])
 const symbolLoading = ref(false)
@@ -128,8 +135,8 @@ const chartMode = ref('day')
 const chartLoading = ref(false)
 const klineData = ref([])
 const intraday = ref({})
-const quote = computed(() => detail.value.quote)
 const detail = ref({})
+const quote = computed(() => detail.value.quote)
 const submitting = ref(false)
 const receipt = ref(null)
 let pollTimer = null
@@ -140,15 +147,35 @@ const marketUnit = computed(() => {
   const s = form.value.symbol || ''
   if (/^\d{6}\.(XSHG|XSHE)$/.test(s)) {
     const n = s.slice(0, 6)
-    if (n.startsWith('11') || n.startsWith('12')) return t('manualTrade.unitLot')   // 可转债=张
-    if (n.startsWith('5') || n.startsWith('1')) return t('manualTrade.unitShare')   // 场内基金=份
-    return t('manualTrade.unitShare')                                              // A股=股
+    if (n.startsWith('11') || n.startsWith('12')) return t('manualTrade.unitLot')
+    return t('manualTrade.unitShare')
   }
   return t('manualTrade.unitDefault')
 })
-
-const fmtDepth = v => (v > 0 ? Number(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : '-')
-const pickPrice = p => { if (p > 0) form.value.price = Number(p) }
+const tickDecimals = computed(() => {
+  const ts = Number(detail.value?.tick_size || detail.value?.instrument?.tick_size || 0.01)
+  if (!(ts > 0)) return 2
+  return Math.max(0, Math.min(4, Math.round(-Math.log10(ts))))
+})
+const fmtPrice = (v) => (v > 0 ? Number(v).toFixed(tickDecimals.value) : '-')
+const fmtQty = (v) => (v == null || v === '' ? '-' : Number(v).toLocaleString())
+const asks = computed(() => {
+  const q = quote.value || {}
+  const out = []
+  for (let i = 1; i <= 5; i++) {
+    out.push({ label: `${t('manualTrade.ask')}${6 - i}`, price: q.ask?.[5 - i], vol: q.ask_v?.[5 - i] })
+  }
+  return out
+})
+const bids = computed(() => {
+  const q = quote.value || {}
+  const out = []
+  for (let i = 1; i <= 5; i++) {
+    out.push({ label: `${t('manualTrade.bid')}${i}`, price: q.bid?.[i - 1], vol: q.bid_v?.[i - 1] })
+  }
+  return out
+})
+const pickPrice = (p) => { if (p > 0) form.value.price = Number(p) }
 
 onMounted(async () => {
   try {
@@ -169,7 +196,6 @@ const searchSymbols = async (q) => {
   finally { symbolLoading.value = false }
 }
 
-// 手输归一：6 位代码按交易所补后缀；9/6/68→XSHG，0/3→XSHE；已有 .SSE/.SZSE 归一到 vt
 const normalizeSymbol = (raw) => {
   let s = String(raw || '').trim().toUpperCase()
   const dot = s.lastIndexOf('.')
@@ -178,8 +204,7 @@ const normalizeSymbol = (raw) => {
     const map = { SSE: 'XSHG', SHSE: 'XSHG', XSHG: 'XSHG', SZSE: 'XSHE', XSHE: 'XSHE', BSE: 'BJSE' }
     s = s.slice(0, dot) + '.' + (map[ex] || ex)
   } else if (/^\d{6}$/.test(s)) {
-    const n = s.slice(0, 1)
-    s += (n === '9' || n === '6') ? '.XSHG' : '.XSHE'
+    s += (s.startsWith('9') || s.startsWith('6')) ? '.XSHG' : '.XSHE'
   }
   return s
 }
@@ -201,22 +226,23 @@ const onSymbolChange = async () => {
   } catch { detail.value = {}; klineData.value = [] }
   finally { if (seq === chartSeq) chartLoading.value = false }
 }
-
 const fetchIntraday = async (seq = chartSeq) => {
   try {
     const d = await stockIntraday(form.value.symbol) || {}
     if (seq === chartSeq) intraday.value = d
-  } catch { /* 分时失败保留旧数据 */ }
+  } catch { /* 保留旧数据 */ }
 }
 const onChartMode = async () => {
   if (chartMode.value === 'intraday') { chartLoading.value = true; await fetchIntraday(); chartLoading.value = false }
 }
+const reload = () => { if (form.value.symbol) onSymbolChange() }
 
-// 分时横轴：固定 09:30-11:30 + 13:00-15:00 两段拼接（4h=240 分钟），仅 1 天
+// 分时横轴：固定 09:30-11:30 + 13:00-15:00（两段拼接，仅 1 天）
 const _intradayAxis = (() => {
   const axis = []
-  for (let m = 9 * 60 + 30; m <= 11 * 60 + 30; m++) axis.push(`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`)
-  for (let m = 13 * 60; m <= 15 * 60; m++) axis.push(`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`)
+  const pad = (n) => String(n).padStart(2, '0')
+  for (let m = 9 * 60 + 30; m <= 11 * 60 + 30; m++) axis.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`)
+  for (let m = 13 * 60; m <= 15 * 60; m++) axis.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`)
   return axis
 })()
 const _mapIdx = (hhmm) => {
@@ -240,7 +266,7 @@ const intradayOption = computed(() => {
   return {
     tooltip: { trigger: 'axis' },
     legend: { data: [t('manualTrade.priceLine'), t('manualTrade.avgPrice')] },
-    grid: [{ left: '8%', right: '3%', top: '8%', height: '54%' },
+    grid: [{ left: '8%', right: '3%', top: '10%', height: '52%' },
            { left: '8%', right: '3%', top: '70%', height: '18%' }],
     xAxis: [{ type: 'category', data: _intradayAxis, boundaryGap: false },
             { type: 'category', gridIndex: 1, data: _intradayAxis, axisLabel: { show: false }, boundaryGap: false }],
@@ -274,13 +300,12 @@ const klineOption = computed(() => ({
 const resetForm = () => {
   form.value = { account_id: tdAccounts.value[0]?.code || '', symbol: '', action: 'BUY', volume: 100, price: 0 }
   receipt.value = null; detail.value = {}; klineData.value = []; intraday.value = {}
+  formRef.value?.clearValidate()
 }
 
 const submitOrder = async () => {
+  try { await formRef.value?.validate() } catch { return }
   const f = form.value
-  if (!f.account_id || !/^\d{6}\.[A-Z]{4}$/.test(f.symbol) || !(f.volume > 0) || !(f.price > 0)) {
-    ElMessage.warning(t('manualTrade.invalidForm')); return
-  }
   try {
     await ElMessageBox.confirm(
       `${f.account_id} | ${f.symbol} | ${f.action} | ${f.volume} | ${f.price}`,
@@ -306,30 +331,41 @@ const startPoll = (reqId) => {
       const d = await getManualOrderResult(reqId)
       receipt.value = d
       if (d?.status === 'done') { clearInterval(pollTimer); pollTimer = null }
-    } catch { /* 轮询失败保留 dispatched */ }
+    } catch { /* 保留 dispatched */ }
   }, 1000)
 }
 </script>
 
 <style scoped>
-.mt-page { padding: var(--sp-2); }
-.mt-head { display: flex; justify-content: space-between; align-items: center; }
-.mt-hint { color: var(--text-secondary); font-size: var(--fs-foot); }
-.mt-row { margin-top: var(--sp-3); }
-.mt-label { font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-1); }
-.mt-unit { font-size: var(--fs-body); }
-.mt-chart-row { margin-top: var(--sp-3); }
+.mt-toolbar { display: flex; flex-wrap: nowrap; align-items: flex-end; gap: var(--sp-2); }
+.mt-toolbar :deep(.el-form-item) { margin: 0; }
+.mt-w-account { width: 112px; }
+.mt-w-symbol { width: 168px; }
+.mt-w-dir { width: 104px; }
+.mt-w-num { width: 120px; }
+.mt-btn { width: 60px; }
+.mt-btns :deep(.el-form-item__content) { gap: var(--sp-1); }
+.mt-main { display: flex; gap: var(--sp-3); height: 420px; margin-top: var(--sp-3); }
+.mt-chart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .mt-chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-1); }
-.mt-chart-src { color: var(--text-secondary); font-size: var(--fs-foot); }
-.mt-chart { height: 340px; }
-.mt-depth { border: 1px solid var(--border); }
-.mt-depth-row { display: flex; justify-content: space-between; padding: var(--sp-1); cursor: pointer; font-size: var(--fs-foot); }
-.mt-depth-row:hover { background: var(--bg-hover); }
-.mt-depth-row.ask b { color: var(--down); }
-.mt-depth-row.bid b { color: var(--up); }
-.mt-depth-mid { text-align: center; padding: var(--sp-1); font-size: var(--fs-body); font-weight: 600; border-block: 1px solid var(--border); }
-.mt-depth-tip { color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-1); }
-.mt-receipt { margin-top: var(--sp-3); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
-.mt-receipt-txt { font-size: var(--fs-foot); color: var(--text-secondary); }
-.mt-receipt-err { font-size: var(--fs-foot); color: var(--danger); }
+.mt-chart { flex: 1; min-height: 0; }
+.mt-chart-canvas { width: 100%; height: 100%; }
+.mt-depth-col { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column; }
+.mt-section-title { font-size: var(--fs-body); font-weight: 600; margin-bottom: var(--sp-1); }
+.mt-depth { width: 100%; border-collapse: collapse; font-size: var(--fs-foot); }
+.mt-depth th { padding: var(--sp-1) 0; color: var(--text-secondary); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border); }
+.mt-depth th:first-child, .mt-depth td:first-child { text-align: left; }
+.mt-depth td { padding: var(--sp-1) 0; text-align: right; }
+.mt-depth .num { font-family: var(--font-num); }
+.mt-depth tbody tr { cursor: pointer; }
+.mt-depth tbody tr:hover { background: var(--bg-hover); }
+.mt-depth .ask td:nth-child(2) { color: var(--down); }
+.mt-depth .bid td:nth-child(2) { color: var(--up); }
+.mt-depth tr.off { color: var(--text-secondary); cursor: default; }
+.mt-depth tr.mid td { text-align: center; color: var(--text-secondary); border-block: 1px solid var(--border); }
+.mt-muted { color: var(--text-secondary); font-size: var(--fs-foot); }
+.mt-status { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-3); font-size: var(--fs-foot); color: var(--text-secondary); }
+.mt-err { color: var(--danger); }
+@media (max-width: 1400px) { .mt-depth-col { flex-basis: 200px; } }
+@media (max-width: 1279px) { .mt-toolbar { flex-wrap: wrap; } }
 </style>
