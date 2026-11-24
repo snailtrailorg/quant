@@ -227,6 +227,22 @@ class TestCallbackFaultInjection:
             _cleanup(oid=oid)
 
     @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
+    def test_partial_not_marked_unknown(self, _event_table):
+        """partial=券商已回报部分成交，不是“无回报”；超时对账不得把它打回 unknown。"""
+        from unittest.mock import MagicMock
+        from src.strategy_runner import trading
+        vt = "XTP.ITEST" + uuid.uuid4().hex[:8]
+        oid = _insert_order("partial", vt)
+        try:
+            adapter = MagicMock(); adapter.query_orders.return_value = []
+            trading.reconcile_stale_orders(adapter, "td-xtp", threshold_s=0,
+                                          now=time.time() + 100000, broker_query=lambda: {})
+            st, _ = _status_and_events(oid)
+            assert st == "partial"
+        finally:
+            _cleanup(oid=oid)
+
+    @pytest.mark.skipif(not _db_up(), reason="真库集成守门（无 dev 库跳过）")
     def test_unknown_corrected_by_late_terminal(self, _event_table):
         """unknown 不在终态集，迟到券商终态可纠正（否则永久 unknown）。"""
         from src.quant_common.domain import OrderStatus

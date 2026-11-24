@@ -169,7 +169,7 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
                 "FROM order_log o WHERE o.account_code=%s AND o.status = ANY(%s) "
                 "AND o.vt_orderid IS NOT NULL AND o.vt_orderid <> '' "
                 "ORDER BY o.id DESC LIMIT 100",
-                (account_id, ["submitted", "submitting", "partial"])).fetchall()
+                (account_id, ["submitted", "submitting"])).fetchall()
         cache = {str(getattr(o, "vt_orderid", "")): o for o in (adapter.query_orders() or [])}
         # 券商在途清单（可选）：键可能是纯 order_xtp_id，与 XTP.<id> 归一
         inflight: set[str] = set()
@@ -203,7 +203,7 @@ def reconcile_stale_orders(adapter, account_id: str, *, threshold_s: float = 120
                     "UPDATE order_log SET status='unknown', error=%s "
                     "WHERE id=%s AND status = ANY(%s)",
                     ("无券商回报超时（reconciler）", oid,
-                     ["submitted", "submitting", "partial"]))
+                     ["submitted", "submitting"]))
                 conn.commit()
             if _cur.rowcount:
                 record_order_event(stage="timeout", source="reconciler", order_id=oid,
