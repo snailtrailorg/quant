@@ -198,6 +198,12 @@ class XtpExecutionPort:
     def connected(self) -> bool:
         return bool(getattr(self._api, "connect_status", False))
 
+    @property
+    def logged_in(self) -> bool:
+        """登录完成（session_id>0）——查询/下单前必须满足；connect_status 只是 TCP。"""
+        return bool(getattr(self._api, "login_status", False)) and \
+            int(getattr(self._api, "session_id", 0) or 0) > 0
+
     # ── 交易 ──────────────────────────────────────────────
     def send(self, order: Order) -> OrderReceipt:
         obj = _transport.objects()

@@ -330,10 +330,11 @@ def test_main_maps_slot_busy_to_75():
     from src.td_exec import main as M
     with patch.dict("os.environ", {"TD_CODE": "td-xtp"}), \
          patch.object(M.TdExec, "run", side_effect=SessionBusy("busy")), \
-         patch.object(M, "_install_signal"):
-        with pytest.raises(SystemExit) as ei:
-            M.main()
-    assert ei.value.code == 75
+         patch.object(M, "_install_signal"), \
+         patch("src.td_exec.main.os._exit") as ex75, \
+         patch("src.td_exec.main.logging.shutdown"):
+        M.main()   # 必须硬退出：sys.exit 会被 vnpy 非 daemon 线程挂住（2026-11-24 事故）
+    ex75.assert_called_once_with(75)
 
 
 def test_exec_interface_codes_follow_carriers():

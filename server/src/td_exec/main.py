@@ -401,7 +401,9 @@ class TdExec:
             if now - last_cfg >= 15:
                 self._reload_iface()
                 last_cfg = now
-            _recon_conn = bool(getattr(getattr(self, "_exec_port", None), "connected", False))
+            # 必须登录完成（session_id>0）才查券商：TCP 连上但未登录时调 XTP 查询
+            # 会以无效 session 查槽位 → libxtptraderapi 越界 SEGV（2026-11-24 事故）
+            _recon_conn = bool(getattr(getattr(self, "_exec_port", None), "logged_in", False))
             if (now - self._last_reconcile >= 30 and getattr(self, "_adapter", None) is not None
                     and _recon_conn):
                 self._last_reconcile = now
@@ -500,9 +502,12 @@ def main() -> None:
         logger.error("td_exec 启动失败（配置错误）: %s", e)
         sys.exit(EX_CONFIG)
     except (SessionBusy, SessionUnavailable) as e:
-        # 瞬时（号段被占/DB 抖）→ 75 让 systemd 退避重拉；按 1（非约定码）退出会误触 StartLimit
+        # 瞬时（号段被占/DB 抖）→ 75 让 systemd 退避重拉；按 1（非约定码）退出会误触 StartLimit。
+        # 必须 os._exit：vnpy EventEngine/XTP SDK 非 daemon 线程会让 sys.exit 挂住，
+        # 90s 后被 watchdog SIGABRT（2026-11-24 事故里每次“有主”都留下假 core）
         logger.error("td_exec 会话不可用（退避重试）: %s", e)
-        sys.exit(EX_TEMPFAIL)
+        logging.shutdown()
+        os._exit(EX_TEMPFAIL)
     except SessionConfigError as e:
         logger.error("td_exec 会话配置错误（不重试）: %s", e)
         sys.exit(EX_CONFIG)
