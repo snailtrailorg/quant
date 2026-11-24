@@ -82,6 +82,17 @@ class TestWriteOrderStatus:
         assert "<> ALL" in upd.args[0]
         assert set(upd.args[1][2]) == set(ORDER_FINAL_STATES)
 
+    def test_partial_then_cancel_maps_part_cancelled(self):
+        """XTP status 3（部成、剩余不排队）→ vnpy CANCELLED；我们须保留已成交量。"""
+        from src.strategy_runner.trading import write_order_status
+        d = OrderState(orderid='', vt_orderid='XTP.9', symbol='002594.XSHE',
+                       direction=Direction.LONG, status=OrderStatus.CANCELLED,
+                       volume=600, traded=300, price=70.0)
+        conn, _ = _conn([(9,)])
+        with patch('src.data_platform.db.get_conn', return_value=conn):
+            write_order_status(d, MagicMock(), 's1', 'X')
+        upd = [c for c in conn.execute.call_args_list if 'UPDATE order_log' in c.args[0]][0]
+        assert upd.args[1][0] == 'part_cancelled'
     def test_never_raise(self):
         from src.strategy_runner.trading import write_order_status
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):

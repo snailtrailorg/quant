@@ -106,7 +106,7 @@ def test_status_mapping_equivalent(status, expected):
     c_old = _run(OLD.write_order_status, raw=raw, adapter=a1, rows=[(11,)])
     c_new = _run(NEW.write_order_status, domain=LT.to_domain_order(raw), adapter=a2, rows=[(11,)])
     assert c_old.calls == c_new.calls
-    assert c_new.calls[1][1] == (expected, 11, ["all_traded", "cancelled", "rejected"])
+    assert c_new.calls[1][1] == (expected, 11, ["all_traded", "cancelled", "rejected", "part_cancelled"])
 
 
 def test_non_advancing_status_no_db():

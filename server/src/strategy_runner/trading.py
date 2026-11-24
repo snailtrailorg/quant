@@ -66,7 +66,7 @@ def frozen_allows(action: str, frozen: dict) -> bool:
     return is_flat_or_reduce({"action": action})
 
 
-ORDER_FINAL_STATES = ("all_traded", "cancelled", "rejected")   # 批 68 终态集（SQL 闭包=只进不退主防线）
+ORDER_FINAL_STATES = ("all_traded", "cancelled", "rejected", "part_cancelled")   # 终态集（part_cancelled=部成后撤/不排队，XTP status 3）
 
 
 def _client_id_of(d, adapter, vt: str) -> str:
@@ -100,9 +100,15 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
     try:
         m = {OrderStatus.PARTIAL: "partial", OrderStatus.ALL_TRADED: "all_traded",
              OrderStatus.CANCELLED: "cancelled", OrderStatus.REJECTED: "rejected"}
-        new_status = m.get(getattr(d, "status", None))
+        _st = getattr(d, "status", None)
+        new_status = m.get(_st)
         if not new_status:
             return   # SUBMITTED/NOT_TRADED=非推进
+        _traded = int(getattr(d, "traded", 0) or 0)
+        _vol = int(getattr(d, "volume", 0) or 0)
+        # XTP status 3（部成、剩余不排队）被 vnpy 归为 CANCELLED；有成交量时不能写成纯 cancelled
+        if _st == OrderStatus.CANCELLED and _traded > 0 and (_vol <= 0 or _traded < _vol):
+            new_status = "part_cancelled"
         from src.data_platform.db import get_conn
         vt = getattr(d, "vt_orderid", "") or ""
         with get_conn() as conn:
@@ -145,6 +151,7 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str
                                status=new_status, error=error,
                                detail={"vt_orderid": vt, "symbol": getattr(d, "symbol", symbol),
                                        "volume": getattr(d, "volume", None),
+                                       "traded": getattr(d, "traded", None),
                                        "price": getattr(d, "price", None)})
     except Exception as e:
         logger.warning("order_log 终态回写失败(never-raise): %s", e)
@@ -1051,6 +1058,45 @@ def bump(entry: dict, *, no_quote: bool, systemic_down: bool,
     return out
 
 
+def _working_sell_qty(adapter) -> dict:
+    """symbol -> 在途卖单剩余量（frozen 可能来自这些单，不是 T+1）。"""
+    out = {}
+    try:
+        for od in (adapter.query_orders() or []):
+            st = getattr(od, 'status', None)
+            name = getattr(st, 'name', str(st))
+            if name not in ('SUBMITTING', 'SUBMITTED', 'NOT_TRADED', 'PARTIAL'):
+                continue
+            if 'SHORT' not in str(getattr(od, 'direction', '')).upper():
+                continue
+            sym = str(getattr(od, 'symbol', '') or '')
+            left = int(getattr(od, 'volume', 0) or 0) - int(getattr(od, 'traded', 0) or 0)
+            if sym and left > 0:
+                out[sym] = out.get(sym, 0) + left
+    except Exception:   # noqa: BLE001
+        return {}
+    return out
+
+
+def classify_close_residual(positions, working: dict) -> tuple[list, list, int]:
+    """剩余仓分类（纯函数）：可卖/在途卖单冻结=待平；无在途且不可卖=真 T+1。"""
+    pending, skipped, sellable_total = [], [], 0
+    for p in positions or []:
+        vol = int(getattr(p, 'volume', 0) or 0)
+        frozen = int(getattr(p, 'frozen', 0) or 0)
+        sym = str(getattr(p, 'symbol', '') or '')
+        if vol <= 0:
+            continue
+        sellable = max(vol - frozen, 0)
+        sellable_total += sellable
+        if sellable > 0:
+            pending.append(f'{sym}:{vol}')
+        elif working.get(sym, 0) > 0:
+            pending.append(f'{sym}:working')   # 等这批卖单成交，不得 final:done
+        else:
+            skipped.append(sym)
+    return pending, skipped, sellable_total
+
 def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                          req_id: str = "", deadline_ts: float = 0.0,
                          td_api=None, skipped_accounts: list | None = None,
@@ -1130,6 +1176,7 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             logger.info("全平首轮 req=%s 持仓查询=%d 条（TD连接=%s）",
                         req_id, len(positions),
                         bool(getattr(td_api, "connect_status", None)))
+        _working = _working_sell_qty(adapter)   # 区分「T+1 冻结」与「在途卖单冻结」
         for pos in positions:
             vol = int(getattr(pos, "volume", 0) or 0)
             frozen = int(getattr(pos, "frozen", 0) or 0)
@@ -1142,6 +1189,9 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             # T+1 只约束「卖出」（A 股现货可卖=volume-frozen）；BUY 买回平空不受 T+1 限制，
             # 其可平量=持仓量（原有 frozen 亦为在途卖单冻结，不适用买回）。
             if action == "SELL" and sellable <= 0:
+                if _working.get(sym, 0) > 0:
+                    # frozen 来自本批在途卖单：等成交/重定价，不当 T+1 跳过
+                    continue
                 if sym not in out["skipped_t1"]:
                     out["skipped_t1"].append(sym)
                 logger.warning("全平 skip %s：T+1 冻结不可平（volume=%d frozen=%d）", sym, vol, frozen)
@@ -1286,15 +1336,12 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
             # 批187：pending 只算**可卖量**>0 的持仓。T+1 全冻票（volume>0 但可卖=0）
             # 已在 skipped_t1 记名、本就卖不掉——若算进 pending，无限循环模式（无 retry_max）
             # 会永不终止空转。冻结仓如实显示在 positions_remain/skipped_t1，但不再是 pending。
-            round_pending = []
-            sellable_remain = 0
-            for p in remain_positions:
-                _vol = int(getattr(p, "volume", 0) or 0)
-                _frozen = int(getattr(p, "frozen", 0) or 0)
-                _sellable = max(_vol - _frozen, 0)
-                sellable_remain += _sellable
-                if _sellable > 0:
-                    round_pending.append(f"{getattr(p, 'symbol', '?')}:{_vol}")
+            # 可卖/在途卖单冻结=待平；无在途且不可卖=真 T+1（否则会带着自家挂单提前 final:done）
+            round_pending, _skip2, sellable_remain = classify_close_residual(
+                remain_positions, _working_sell_qty(adapter))
+            for _s in _skip2:
+                if _s not in out["skipped_t1"]:
+                    out["skipped_t1"].append(_s)
             if remain <= 0:
                 empty_hits += 1
                 # 空回报双确认（批188 上产实录修正）：**一律**要求连续两轮空 + TD 真连接才认

@@ -397,7 +397,8 @@ class TestCloseAllChunkingAndExchangeReject:
         a.get_vt_orderid.return_value = "oid-x"
         rejected = SimpleNamespace(vt_orderid="oid-x", symbol="600000.SSE",
                                    status=Status.REJECTED)
-        a.query_orders.side_effect = [[], [rejected]]   # 撤单轮=空；拒单回报轮=REJECTED
+        # _working_sell_qty 新增了查询：只在下单后返回 REJECTED（撤单/预检轮为空）
+        a.query_orders.side_effect = lambda: [rejected] if a.send_order.called else []
         rc = MagicMock(); rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
         with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
              patch.object(T, "_quote_price", return_value=({"px": 10.0}, "")), \

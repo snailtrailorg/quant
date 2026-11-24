@@ -100,6 +100,34 @@ def test_resolve_unknown_orders_uses_trade_sum():
     assert ev.call_args.kwargs["status"] == "all_traded"
 
 
+def test_classify_close_residual_working_is_pending_not_t1():
+    from types import SimpleNamespace as NS
+    from src.strategy_runner.trading import classify_close_residual
+    pos = [NS(symbol='002594.XSHE', volume=1300, frozen=1300)]
+    pending, skipped, sellable = classify_close_residual(pos, {'002594.XSHE': 1300})
+    assert pending == ['002594.XSHE:working'] and skipped == [] and sellable == 0
+
+
+def test_classify_close_residual_true_t1_is_skipped():
+    from types import SimpleNamespace as NS
+    from src.strategy_runner.trading import classify_close_residual
+    pos = [NS(symbol='002594.XSHE', volume=1300, frozen=1300)]
+    pending, skipped, _ = classify_close_residual(pos, {})
+    assert pending == [] and skipped == ['002594.XSHE']
+
+
+def test_working_sell_qty_counts_open_short_remaining():
+    from types import SimpleNamespace as NS
+    from unittest.mock import MagicMock
+    from src.quant_common.domain import Direction, OrderStatus
+    from src.strategy_runner.trading import _working_sell_qty
+    a = MagicMock()
+    a.query_orders.return_value = [
+        NS(symbol='002594.XSHE', direction=Direction.SHORT, status=OrderStatus.PARTIAL, volume=1300, traded=300),
+        NS(symbol='300760.XSHE', direction=Direction.SHORT, status=OrderStatus.ALL_TRADED, volume=600, traded=600),
+    ]
+    assert _working_sell_qty(a) == {'002594.XSHE': 1000}
+
 def test_reconcile_skips_broker_inflight():
     from src.strategy_runner import trading as T
     a = MagicMock(); a.query_orders.return_value = []
