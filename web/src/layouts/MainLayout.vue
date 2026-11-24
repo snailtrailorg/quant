@@ -121,21 +121,22 @@
 
           <el-sub-menu index="research">
             <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
+            <!-- 批189 IA：每日研判提首位；实盘测试（原纸上交易）从实盘组迁入置于末位 -->
+            <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
             <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
             <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
             <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
             <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
             <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
-            <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
+            <el-menu-item index="/paper-trade" v-if="canPerm('paper_trade')"><el-icon><Document /></el-icon>{{ t('nav.paperTrade') }}</el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="live">
             <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
-            <!-- 批 86-B：菜单可见性与后端闸同键（canPerm）——viewer/analyst 不显示实盘任务（后端
-                 list 端点同键收紧，nav hidden 行兜底），纸上交易对 analyst/trader/admin 显示。 -->
-            <el-menu-item index="/live-task" v-if="canPerm('live_control')"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
-            <el-menu-item index="/paper-trade" v-if="canPerm('paper_trade')"><el-icon><Document /></el-icon>{{ t('nav.paperTrade') }}</el-menu-item>
+            <!-- 批189 IA：交易看板提首位；策略交易（原实盘任务）→ 手动交易（新增）→ 紧急处置 -->
             <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
+            <el-menu-item index="/live-task" v-if="canPerm('live_control')"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
+            <el-menu-item index="/manual-trade" v-if="canPerm('trade')"><el-icon><EditPen /></el-icon>{{ t('nav.manualTrade') }}</el-menu-item>
             <el-menu-item v-if="canHalt" index="/emergency"><el-icon><AlarmClock /></el-icon>{{ t('nav.emergency') }}</el-menu-item>
           </el-sub-menu>
 
@@ -184,7 +185,7 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock, Document,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide, Check, AlarmClock } from '@element-plus/icons-vue'   // 批 171o：AlarmClock（紧急处置菜单）   // 批166 数据组；批167 Check（语言菜单当前项）
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide, Check, AlarmClock, EditPen } from '@element-plus/icons-vue'   // 批 171o：AlarmClock（紧急处置菜单）；批189：EditPen（手动交易菜单）   // 批166 数据组；批167 Check（语言菜单当前项）
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -360,6 +361,7 @@ const searchIndex = computed(() => [
   { label: t('nav.factors'), path: '/factors' }, { label: t('nav.strategy'), path: '/strategy' },
   { label: t('nav.backtest'), path: '/backtest' }, { label: t('nav.analysis'), path: '/analysis' },
   { label: t('nav.liveTasks'), path: '/live-task' }, { label: t('nav.tradingDesk'), path: '/trading' },
+  { label: t('nav.manualTrade'), path: '/manual-trade' },   // 批189：手动交易
   { label: t('nav.risk'), path: '/risk' }, { label: t('nav.reconcile'), path: '/reconcile' },
   { label: t('nav.dataSync'), path: '/dataops/sync' }, { label: t('nav.dataCheck'), path: '/dataops/quality' }, { label: t('nav.integrations'), path: '/integrations' },   // 批166：数据组两项（sync/quality 常用）
   { label: t('nav.observe'), path: '/observe' }, { label: t('nav.settings'), path: '/settings' },

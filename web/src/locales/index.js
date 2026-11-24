@@ -180,9 +180,9 @@ mail: '邮件 SMTP',
       userMgmt: '用户管理', aiChat: 'AI 助手',
       healthLogs: '系统监控',   // 批87：dataCenter 死键清——菜单/⌘K 统一用 nav.dataops（双键并存=存量债）
       stockPool: '自选标的', dailyInsight: '每日研判',   // 批89：四字统一+去股（多市场心智：池可装转债/ETF/crypto 标的）
-      tradingDesk: '交易终端', liveTasks: '实盘任务',
-      paperTrade: '纸上交易',   // 批 86-B：业界规范名（Backtesting→Paper trading→Live trading 链；「实盘测试」土语废弃）
-      liveTask: '实盘任务', trading: '交易终端', users: '用户管理',   // 批49：NAV id camel 形态（菜单权限表显示名兜底链——id 与侧栏词条键不同名 3 枚）；批89 trading 与 tradingDesk 同步改，PermMatrix 显示名不分裂
+      tradingDesk: '交易看板', liveTasks: '策略交易',
+      paperTrade: '实盘测试', manualTrade: '手动交易',   // 批189 IA：纸上交易→实盘测试（迁研究组末位）；新增手动交易（下单价）
+      liveTask: '策略交易', trading: '交易看板', users: '用户管理',   // 批49：NAV id camel 形态（菜单权限表显示名兜底链）；批189 与侧栏同步改名
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
       dashboard: '全局总览',   // 批89：四字统一
       strategy: '策略管理',
@@ -1470,6 +1470,16 @@ mail: '邮件 SMTP',
       loadFailed: '安全态势加载失败（网络或服务异常），稍后自动重试',
       confirmDelFinding: '确认删除已修复漏洞 {id}（{pkg}）？删除后不再出现在列表。',
     },
+    manualTrade: {
+      hint: '限价单；数量为基本单位；可点击右侧盘口价格自动填入',
+      account: '交易接口', accountPh: '选择交易接口', symbol: '标的', symbolPh: '输入代码（如 603118）',
+      marketHint: '数量单位', action: '方向', volume: '数量', price: '价格',
+      submit: '下单', reset: '重置', confirmTitle: '确认下单', confirmBtn: '确认',
+      dayK: '日K', intraday: '分时', priceLine: '价格', avgPrice: '均价',
+      depth: 'L1 盘口', ask: '卖', bid: '买', depthTip: '点击任一档价格自动填入交易价格',
+      noChart: '输入代码后显示行情', noDepth: '暂无盘口', unitLot: '张', unitShare: '股', unitDefault: '单位',
+      invalidForm: '请填完整的接口/标的/数量/价格', submitted: '已提交',
+    },
   },  en: {
     screener: {
  results: 'Results', addToPool: 'Add to pool', selectPool: 'Select pool',
@@ -1667,9 +1677,9 @@ mail: 'Email SMTP',
       userMgmt: 'User Management', aiChat: 'AI Assistant',
       healthLogs: 'System Monitor',   // batch87: dead key dataCenter removed — menu/⌘K use nav.dataops
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
-      tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
-      paperTrade: 'Paper Trading',   // 批 86-B：业界规范名
-      liveTask: 'Live Tasks', trading: 'Trading Desk', users: 'User Management',   // 批49：NAV id camel 形态
+      tradingDesk: 'Trading Board', liveTasks: 'Strategy Trading',
+      paperTrade: 'Live Testing', manualTrade: 'Manual Trade',   // 批189 IA rename + new manual order page
+      liveTask: 'Strategy Trading', trading: 'Trading Board', users: 'User Management',   // 批49：NAV id camel 形态；批189 rename
       gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
       dashboard: 'Dashboard',
       strategy: 'Strategies',
@@ -2928,6 +2938,16 @@ mail: 'Email SMTP',
       loadFailed: 'Failed to load security posture (network or service error); will retry automatically',
       confirmDelFinding: 'Delete fixed finding {id} ({pkg})? It will no longer appear in the list.',
     },
+    manualTrade: {
+      hint: 'Limit order; volume in base units; click any depth price to fill price',
+      account: 'Trading interface', accountPh: 'Select interface', symbol: 'Symbol', symbolPh: 'Enter code (e.g. 603118)',
+      marketHint: 'Volume unit', action: 'Side', volume: 'Volume', price: 'Price',
+      submit: 'Place order', reset: 'Reset', confirmTitle: 'Confirm order', confirmBtn: 'Confirm',
+      dayK: 'Daily K', intraday: 'Intraday', priceLine: 'Price', avgPrice: 'Avg',
+      depth: 'L1 depth', ask: 'Ask', bid: 'Bid', depthTip: 'Click any level price to auto-fill order price',
+      noChart: 'Enter a symbol to show charts', noDepth: 'No depth', unitLot: 'lots', unitShare: 'shares', unitDefault: 'units',
+      invalidForm: 'Fill in interface / symbol / volume / price', submitted: 'Submitted',
+    },
   },
   'zh-tw': {
       app: {
@@ -3189,11 +3209,12 @@ mail: 'Email SMTP',
         "healthLogs": "系統監控",
         "stockPool": "自選標的",
         "dailyInsight": "每日研判",
-        "tradingDesk": "交易終端",
-        "liveTasks": "實盤任務",
-        "paperTrade": "紙上交易",
-        "liveTask": "實盤任務",
-        "trading": "交易終端",
+        "tradingDesk": "交易看板",
+        "liveTasks": "策略交易",
+        "paperTrade": "實盤測試",
+        "manualTrade": "手動交易",
+        "liveTask": "策略交易",
+        "trading": "交易看板",
         "users": "使用者管理",
         "gResearch": "策略研究",
         "gLive": "實盤交易",
@@ -4914,6 +4935,16 @@ mail: 'Email SMTP',
         "noSnapshot": "暫無安全快照（每日 06:00 採集，首次採集後此處展示態勢）",
         "loadFailed": "安全態勢載入失敗（網路或服務異常），稍後自動重試",
         "confirmDelFinding": "確認刪除已修復漏洞 {id}（{pkg}）？刪除後不再出現在列表。",
+      },
+      "manualTrade": {
+        "hint": "限價單；數量為基本單位；點擊右側盤口價格自動填入",
+        "account": "交易介面", "accountPh": "選擇交易介面", "symbol": "標的", "symbolPh": "輸入代碼（如 603118）",
+        "marketHint": "數量單位", "action": "方向", "volume": "數量", "price": "價格",
+        "submit": "下單", "reset": "重置", "confirmTitle": "確認下單", "confirmBtn": "確認",
+        "dayK": "日K", "intraday": "分時", "priceLine": "價格", "avgPrice": "均價",
+        "depth": "L1 盤口", "ask": "賣", "bid": "買", "depthTip": "點擊任一檔價格自動填入交易價格",
+        "noChart": "輸入代碼後顯示行情", "noDepth": "暫無盤口", "unitLot": "張", "unitShare": "股", "unitDefault": "單位",
+        "invalidForm": "請填完整的介面/標的/數量/價格", "submitted": "已提交",
       },
   },
 }

@@ -17,6 +17,8 @@ const routes = [
 
       // 交易
       { path: 'trading', name: 'trading', component: () => import('./views/Trading.vue') },
+      // 批189：手动交易页（独立菜单项，实盘组策略交易下方）；路由门与后端 require_perm("trade") 同键
+      { path: 'manual-trade', name: 'manual-trade', component: () => import('./views/ManualTrade.vue'), meta: { perm: 'trade' } },
       { path: 'monitoring', redirect: '/live-task' },
 
       // 策略

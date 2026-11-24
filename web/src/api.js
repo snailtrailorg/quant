@@ -220,6 +220,9 @@ export const deleteSyncData = id => api.delete('/sync/data/' + id)
 export const getPosition = () => api.get('/position')
 export const getOrders = () => api.get('/orders')
 export const getOrderEvents = (oid, limit = 500) => api.get(`/orders/${oid}/events`, { params: { limit } })
+// 手工下单（批189）：真下单走 /manual-order；场外单登记走 /reconcile/manual-order（不同语义）
+export const submitManualOrder = (data) => api.post('/manual-order', data)
+export const getManualOrderResult = (reqId) => api.get(`/manual-order/${reqId}`)
 export const getPnl = () => api.get('/pnl')
 
 // 邀请制用户管理
