@@ -340,6 +340,8 @@ const startPoll = (reqId) => {
 
 <style scoped>
 .mt-page { display: flex; flex-direction: column; gap: var(--sp-3); }
+.mt-page :deep(.el-card__header) { font-size: var(--fs-card); }
+.mt-page :deep(.el-card__header span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-form-card { flex: 0 0 auto; }
 .mt-toolbar { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: var(--sp-2); }
 .mt-toolbar :deep(.el-form-item) { margin: 0; min-width: 0; }
@@ -365,11 +367,11 @@ const startPoll = (reqId) => {
 .mt-chart { flex: 1; min-height: 0; }
 .mt-chart-canvas { width: 100%; height: 100%; }
 .mt-depth-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
-.mt-depth { width: 100%; border-collapse: collapse; font-size: var(--fs-foot); }
-.mt-depth th { padding: var(--sp-1) 0; color: var(--text-secondary); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border); }
+.mt-depth { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.mt-depth th { padding: var(--sp-1) 0; color: var(--text-secondary); font-size: var(--fs-label); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border); }
 .mt-depth th:first-child, .mt-depth td:first-child { text-align: left; }
 .mt-depth td { padding: var(--sp-1) 0; text-align: right; }
-.mt-depth .num { font-family: var(--font-num); }
+.mt-depth .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .mt-depth tbody tr { cursor: pointer; }
 .mt-depth tbody tr:hover { background: var(--bg-hover); }
 .mt-depth .ask td:nth-child(2) { color: var(--down); }
