@@ -40,7 +40,7 @@
 
   <!-- 行情/盘口两张卡，等高 -->
   <div class="mt-main">
-    <ContentCard :title="t('manualTrade.chartTitle')" class="mt-chart-card">
+    <ContentCard :title="chartTitle" class="mt-chart-card">
       <div class="mt-chart-head">
         <el-radio-group v-model="chartMode" size="small" @change="onChartMode">
           <el-radio-button value="day">{{ t('manualTrade.dayK') }}</el-radio-button>
@@ -54,7 +54,7 @@
       </div>
     </ContentCard>
 
-    <ContentCard :title="t('manualTrade.depth')" class="mt-depth-card">
+    <ContentCard :title="depthTitle" class="mt-depth-card">
       <div class="mt-depth-body">
         <table v-if="quote?.bid?.length" class="mt-depth">
           <thead>
@@ -71,8 +71,7 @@
               <td class="num">{{ fmtPrice(lv.price) }}</td>
               <td class="num">{{ fmtQty(lv.vol) }}</td>
             </tr>
-            <tr class="mid"><td colspan="3">{{ t('manualTrade.last') }} {{ fmtPrice(quote?.last) }}</td></tr>
-            <tr v-for="lv in bids" :key="lv.label" :class="['bid', { off: !(lv.price > 0) }]"
+            <tr v-for="(lv, idx) in bids" :key="lv.label" :class="['bid', { off: !(lv.price > 0), first: idx === 0 }]"
               role="button" tabindex="0" @click="pickPrice(lv.price)" @keydown.enter="pickPrice(lv.price)">
               <td>{{ lv.label }}</td>
               <td class="num">{{ fmtPrice(lv.price) }}</td>
@@ -160,6 +159,8 @@ const tickDecimals = computed(() => {
 })
 const fmtPrice = (v) => (v > 0 ? Number(v).toFixed(tickDecimals.value) : '-')
 const fmtQty = (v) => (v == null || v === '' ? '-' : Number(v).toLocaleString())
+const chartTitle = computed(() => detail.value?.name || quote.value?.name || form.value.symbol || t('manualTrade.chartTitle'))
+const depthTitle = computed(() => (quote.value?.last > 0 ? fmtPrice(quote.value.last) : t('manualTrade.depth')))
 const asks = computed(() => {
   const q = quote.value || {}
   const out = []
@@ -374,7 +375,7 @@ const startPoll = (reqId) => {
 .mt-depth .ask td:nth-child(2) { color: var(--down); }
 .mt-depth .bid td:nth-child(2) { color: var(--up); }
 .mt-depth tr.off { color: var(--text-secondary); cursor: default; }
-.mt-depth tr.mid td { text-align: center; color: var(--text-secondary); border-block: 1px solid var(--border); }
+.mt-depth tr.bid.first td { border-top: 1px solid var(--border); }
 .mt-muted { color: var(--text-secondary); font-size: var(--fs-foot); }
 .mt-status { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; font-size: var(--fs-foot); color: var(--text-secondary); }
 .mt-err { color: var(--danger); }
