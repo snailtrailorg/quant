@@ -54,7 +54,7 @@
       </div>
     </ContentCard>
 
-    <ContentCard :title="depthTitle" class="mt-depth-card">
+    <ContentCard :title="depthTitle" :class="['mt-depth-card', depthTitleClass]">
       <div class="mt-depth-body">
         <table v-if="quote?.bid?.length" class="mt-depth">
           <thead>
@@ -71,7 +71,8 @@
               <td class="num">{{ fmtPrice(lv.price) }}</td>
               <td class="num">{{ fmtQty(lv.vol) }}</td>
             </tr>
-            <tr v-for="(lv, idx) in bids" :key="lv.label" :class="['bid', { off: !(lv.price > 0), first: idx === 0 }]"
+            <tr class="sep"><td colspan="3"><span class="mt-depth-sep" /></td></tr>
+            <tr v-for="lv in bids" :key="lv.label" :class="['bid', { off: !(lv.price > 0) }]"
               role="button" tabindex="0" @click="pickPrice(lv.price)" @keydown.enter="pickPrice(lv.price)">
               <td>{{ lv.label }}</td>
               <td class="num">{{ fmtPrice(lv.price) }}</td>
@@ -161,6 +162,25 @@ const fmtPrice = (v) => (v > 0 ? Number(v).toFixed(tickDecimals.value) : '-')
 const fmtQty = (v) => (v == null || v === '' ? '-' : Number(v).toLocaleString())
 const chartTitle = computed(() => detail.value?.name || quote.value?.name || form.value.symbol || t('manualTrade.chartTitle'))
 const depthTitle = computed(() => (quote.value?.last > 0 ? fmtPrice(quote.value.last) : t('manualTrade.depth')))
+const prevClose = computed(() => {
+  const q = quote.value || {}
+  const direct = Number(q.pre_close || detail.value?.pre_close || detail.value?.limit?.pre_close || 0)
+  if (direct > 0) return direct
+  const rows = klineData.value || []
+  if (!rows.length) return 0
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const last = rows[rows.length - 1]
+  if (String(last.ts || '').slice(0, 10) === today && rows.length > 1) return Number(rows[rows.length - 2].close) || 0
+  return Number(last.close) || 0
+})
+const depthTitleClass = computed(() => {
+  const l = Number(quote.value?.last || 0)
+  const p = prevClose.value
+  if (!(l > 0) || !(p > 0)) return ''
+  return l > p ? 'up' : l < p ? 'down' : 'flat'
+})
 const asks = computed(() => {
   const q = quote.value || {}
   const out = []
@@ -377,7 +397,10 @@ const startPoll = (reqId) => {
 .mt-depth .ask td:nth-child(2) { color: var(--down); }
 .mt-depth .bid td:nth-child(2) { color: var(--up); }
 .mt-depth tr.off { color: var(--text-secondary); cursor: default; }
-.mt-depth tr.bid.first td { border-top: 1px solid var(--border); }
+.mt-depth tr.sep td { padding: var(--sp-1) 0; }
+.mt-depth-sep { display: block; height: 1px; background: var(--border); }
+.mt-depth-card.up :deep(.el-card__header span) { color: var(--up); }
+.mt-depth-card.down :deep(.el-card__header span) { color: var(--down); }
 .mt-muted { color: var(--text-secondary); font-size: var(--fs-foot); }
 .mt-status { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; font-size: var(--fs-foot); color: var(--text-secondary); }
 .mt-err { color: var(--danger); }
