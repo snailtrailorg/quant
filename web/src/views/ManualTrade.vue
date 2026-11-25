@@ -378,7 +378,7 @@ const startPoll = (reqId) => {
 .mt-f-btns { flex: 0 0 128px; }
 .mt-f-btns :deep(.el-form-item__content) { gap: var(--sp-1); flex-wrap: nowrap; }
 .mt-btn { width: 60px; }
-.mt-main { display: flex; gap: var(--sp-3); height: 420px; align-items: stretch; }
+.mt-main { display: flex; gap: var(--sp-3); height: 480px; align-items: stretch; }
 .mt-chart-card { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .mt-depth-card { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column; }
 .mt-chart-card :deep(.el-card__body),
