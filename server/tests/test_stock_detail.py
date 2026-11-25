@@ -101,35 +101,20 @@ class TestStockDetail:
         assert _normalize("600000.SH") == ("600000.SH", "600000.XSHG")
         assert _normalize("600000.XSHG") == ("600000.SH", "600000.XSHG")
 
-    def test_quote_hub_pub_missing_depth_then_tencent(self):
-        """读链：pub 最小块新鲜但无 per-account 全量 → 用 pub；陈旧/缺失 → 腾讯。"""
-        import time as _t
-        from datetime import datetime as _dt
+    def test_quote_fallback_hub_to_tencent(self):
+        """批 70c：公共表单 GET（per-account 键写侧仍双写但读者已切 pub）。"""
         from src.data_platform import stock_detail as sd
-        r, store = _fake_redis({
-            "hub:latest_tick:pub:600000.XSHG": json.dumps(
-                {"last": 9.0, "_ts_epoch": _t.time(), "account_id": "md-xtp"}),
-            "hub:latest_tick:md-xtp:600000.XSHG": json.dumps(
-                {"last": 9.0, "ts": _dt.now().astimezone().isoformat(),
-                 "bid": [8.9, 8.8, 8.7, 8.6, 8.5], "ask": [9.0, 9.1, 9.2, 9.3, 9.4]}),
-        })
+        r, store = _fake_redis({"hub:latest_tick:pub:600000.XSHG": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00", "_ts_epoch": 1.0, "account_id": 1})})
         with patch.object(sd, "_r", return_value=r):
             q = sd._quote_block("600000.SH", "600000.XSHG")
-        assert q["source"] == "hub" and q["bid"][0] == 8.9 and "_ts_epoch" not in q
-        # 陈旧 pub（历史残留键）→ 腾讯
-        r2, _ = _fake_redis({"hub:latest_tick:pub:600000.XSHG": json.dumps(
-            {"last": 9.0, "_ts_epoch": 1.0, "account_id": "md-xtp"})})
+        assert q["source"] == "hub" and q["last"] == 9.0 and "_ts_epoch" not in q
+        # hub miss → tencent（_quote_block 函数内 from .market_snapshot import——patch 源模块）
+        r2, _ = _fake_redis()
         from src.data_platform import market_snapshot as ms
         with patch.object(sd, "_r", return_value=r2), \
              patch.object(ms, "get_quote", return_value={"last": 1.0, "source": "tencent"}) as mg:
             q2 = sd._quote_block("600000.SH", "600000.XSHG")
         assert q2["source"] == "tencent" and mg.called
-        # hub miss → tencent
-        r3, _ = _fake_redis()
-        with patch.object(sd, "_r", return_value=r3), \
-             patch.object(ms, "get_quote", return_value={"last": 1.0, "source": "tencent"}):
-            q3 = sd._quote_block("600000.SH", "600000.XSHG")
-        assert q3["source"] == "tencent"
 
     def test_slow_block_partial_not_cached(self):
         """部分降级块不落缓存（否则缺块 10min）——2026-08-20 本地实测坑。"""
