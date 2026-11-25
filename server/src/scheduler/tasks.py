@@ -995,6 +995,45 @@ def security_scan(self):
             pass   # 卫生失败不影响扫描
 
 
+@app.task(name="src.scheduler.tasks.grype_db_update",
+          bind=True, soft_time_limit=1800, time_limit=1900)
+def grype_db_update(self):
+    """漏洞库更新（beat 05:00 / 手动按钮）——与 security_scan 解耦、幂等（锁+状态键）。
+
+    失败告警（system/warn），不抛给调用方重试（下次 beat/手动重跑即可）。
+    """
+    from src.health_monitor.security_collector import update_grype_db
+    from src.quant_common.redis_client import business_redis
+    br = business_redis()
+    lock, token = "sec:grype_db_lock", str(getattr(self.request, "id", "") or "manual")
+    try:
+        got = br.set(lock, token, nx=True, ex=1800)
+    except Exception:
+        got = False
+    if not got:
+        return {"status": "busy"}
+    try:
+        out = update_grype_db()
+        if out.get("state") != "updated":
+            try:
+                from src.alert_notify import notify
+                notify("warn", "system", "漏洞库更新失败",
+                       f"state={out.get('state')} {out.get('error') or ''}".strip(),
+                       source_ref="grype_db_update")
+            except Exception:
+                pass
+        return out
+    finally:
+        try:
+            cur = br.get(lock)
+            if isinstance(cur, bytes):
+                cur = cur.decode()
+            if cur == token:
+                br.delete(lock)
+        except Exception:
+            pass
+
+
 # data_sync_scheduler 进程内联跑，池轮 280s 时间盒会逼近该 beat 的 300s 软超时，并挤掉
 # 同周期其他到期同步项（内联路径 = tier1 九键用的小任务，秒级完成）。
 # 批 157：crypto 盘中档 sid 集（变体任务路由单源——web trigger 与 scheduler dispatch 共用）

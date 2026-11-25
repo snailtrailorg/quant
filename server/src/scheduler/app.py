@@ -149,8 +149,13 @@ app.conf.update(
         # 裁定，先例=data-gap-reconcile/sm-reconcile）——六分区采集+基线 diff+AI 摘要，
         # 任务侧 soft_time_limit=600 覆盖全局 300s。
         "dep-audit": {
-            "task": "src.scheduler.tasks.dep_audit",   # 批 154 补②：依赖滞后预算（05:00 早扫描 1h，写 Valkey 缓存供 security_scan 读）
+            "task": "src.scheduler.tasks.dep_audit",   # 依赖判定（04:00 → 05:00 库 → 06:00 扫描，各留 1h）
+            "schedule": crontab(hour=4, minute=0),
+        },
+        "grype-db-update": {
+            "task": "src.scheduler.tasks.grype_db_update",   # 漏洞库单独更新（扫描不再隐式联网）
             "schedule": crontab(hour=5, minute=0),
+            "options": {"queue": "data"},
         },
         "security-scan": {
             "task": "src.scheduler.tasks.security_scan",

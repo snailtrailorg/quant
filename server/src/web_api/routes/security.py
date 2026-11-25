@@ -112,15 +112,7 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
         lock_val = lock_val.decode()
     if lock_val:
         raise ApiError(409, "SEC_SCAN_RUNNING", f"扫描进行中（task={lock_val[:8]}）")
-    try:
-        # 手动刷新=用户要「现在就准」：判定列（latest/judge）必须同轮重算，
-        # 不再受 DEP_AUDIT_FRESH_H 档——否则升级/换包后页面仍按旧判定报可升级
-        # （2026-11-25 实测 54 条 version==latest 的假阳性）。
-        from src.scheduler.tasks import dep_audit
-        dep_audit.delay()
-        logger.info("dep_audit dispatched (manual refresh)")
-    except Exception as _e:
-        logger.warning("dep_audit dispatch failed: %s", _e)   # 不静默
+    # 2026-11-25 三任务拆分：扫描只管扫描，依赖审计/漏洞库由各自按钮与 beat 调度
     task = security_scan.delay()
     try:
         br.set("sec:scan_lock", str(task.id), ex=2700)
@@ -160,6 +152,49 @@ def _dep_health_summary(snap, ledger_rows):
             "dev_n": dev_n, "checked_at": dh.get("checked_at"),
             "fresh": dh.get("fresh"), "pkg_mgr": dh.get("pkg_mgr"),
             "errors": dh.get("errors") or []}
+
+
+@router.post("/dep-audit")
+def dep_audit_trigger(payload: dict = Depends(require_perm("data_sync"))):
+    """手动触发依赖审计（与 beat 04:00 同一任务）。运行中 → 409。"""
+    import json as _j
+    import datetime as _d
+    from src.quant_common.redis_client import business_redis
+    from src.scheduler.tasks import dep_audit
+    br = business_redis()
+    try:
+        raw = br.get("sec:dep_audit:beat")
+        if raw:
+            b = _j.loads(raw.decode() if isinstance(raw, bytes) else raw)
+            if b.get("status") != "done" and b.get("ts"):
+                ts = _d.datetime.fromisoformat(str(b["ts"]))
+                if (_d.datetime.now(_d.timezone.utc) - ts).total_seconds() < 600:
+                    raise ApiError(409, "SEC_AUDIT_RUNNING", "依赖审计进行中")
+    except ApiError:
+        raise
+    except Exception:
+        pass
+    t = dep_audit.delay()
+    audit_log(payload.get("username", ""), "trigger_dep_audit", "")
+    return {"status": "submitted", "task_id": t.id}
+
+
+@router.post("/db-update")
+def grype_db_update_trigger(payload: dict = Depends(require_perm("data_sync"))):
+    """手动触发漏洞库更新（与 beat 05:00 同一任务）。运行中 → 409。"""
+    from src.quant_common.redis_client import business_redis
+    from src.scheduler.tasks import grype_db_update
+    br = business_redis()
+    try:
+        if br.get("sec:grype_db_lock"):
+            raise ApiError(409, "SEC_DB_UPDATE_RUNNING", "漏洞库更新进行中")
+    except ApiError:
+        raise
+    except Exception:
+        pass
+    t = grype_db_update.delay()
+    audit_log(payload.get("username", ""), "trigger_grype_db_update", "")
+    return {"status": "submitted", "task_id": t.id}
 
 
 @router.get("/dep-audit-debug")

@@ -16,10 +16,9 @@ class TestScanTrigger:
         client.get.return_value = None            # 无锁 -> 不 409；无缓存 -> 派 audit
         with patch("src.scheduler.tasks.security_scan.delay", return_value=fake) as d, \
              patch("src.quant_common.redis_client.business_redis",
-                   MagicMock(return_value=client)) as bf, \
-             patch("src.scheduler.tasks.dep_audit.delay", MagicMock()) as ad:
+                   MagicMock(return_value=client)) as bf:
             out = S.security_scan_trigger({"username": "admin"})
-        assert d.called and bf.called and ad.called
+        assert d.called and bf.called   # 三任务拆分：扫描不再顺带派 dep_audit
         assert out == {"status": "submitted", "task_id": "task-abc"}
 
     def test_lock_occupied_returns_409(self):

@@ -582,6 +582,34 @@ def _collect_dnf(path: Path | None = None) -> dict:
     return part
 
 
+def update_grype_db() -> dict:
+    """独立任务入口：漏洞库更新（beat 05:00 / 手动按钮）。
+
+    状态落 `sec:grype_db_state`（扫描只读该状态，不再隐式更新）；失败即返回
+    update-failed+原因，由任务层告警。never-raise（返回结构里带 error）。
+    """
+    import datetime as _dtd
+    env = {
+        **os.environ,
+        "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR,
+        "GRYPE_DB_AUTO_UPDATE": "false",
+        "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+    }
+    state, err = "unknown", ""
+    try:
+        state = _update_db(env)
+    except Exception as e:   # noqa: BLE001
+        state, err = "update-failed", str(e)[:200]
+    out = {"ts": _dtd.datetime.now(_dtd.timezone.utc).isoformat(),
+           "state": state, "error": err}
+    try:
+        from src.quant_common.redis_client import business_redis as _br
+        _br().set("sec:grype_db_state", json.dumps(out), ex=7 * 86400)
+    except Exception as e:   # noqa: BLE001
+        logger.warning("漏洞库状态写失败: %s", e)
+    return out
+
+
 _DB_UPDATE_TIMEOUT = 1800   # DB 更新上限（首次/大版本全量 ~3.1GB——prod 带宽实测 2.8MB/s）
 
 
@@ -659,7 +687,19 @@ def _collect_vulns() -> dict:
         #    手工扫 aliases。
         # ④ cwd=/tmp + --source-name/version：syft 要逐级 stat 祖先目录推断 chroot
         #    上下文，worker cwd=shared/ 有权限断点（prod 实证）；source 参数消 WARN。
-        db_state = _update_db(_env)   # 每次先 update（批 124 用户裁定——误报最小）
+        # 漏洞库更新已拆为独立任务（beat 05:00 / 手动按钮）：扫描只读状态与本地 DB，
+        # 不在扫描里隐式联网（2026-11-25 三任务拆分；各任务幂等、各自告警）。
+        db_state = "unknown"
+        try:
+            from src.quant_common.redis_client import business_redis as _brs
+            _rawst = _brs().get("sec:grype_db_state")
+            if _rawst:
+                _st = json.loads(_rawst.decode() if isinstance(_rawst, bytes) else _rawst)
+                db_state = _st.get("state") or "unknown"
+                part["db_error"] = _st.get("error") or ""
+                part["db_checked_at"] = _st.get("ts")
+        except Exception as _ebs:
+            logger.warning("漏洞库状态读取失败（按 unknown 继续）: %s", _ebs)
         # 批185：本地拉取时刻（供 A 区「漏洞库」卡与上游构建时间并列展示）
         try:
             from src.quant_common.redis_client import business_redis as _brl

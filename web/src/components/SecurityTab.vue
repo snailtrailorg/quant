@@ -17,6 +17,11 @@
           <span>{{ t('secpage.postureTitle') }}</span>
           <div style="display:flex;align-items:center;gap:12px">
             <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
+            <!-- 2026-11-25 三任务：依赖审计 / 漏洞库 / 扫描 各自独立触发（顺序建议 审计→库→扫描） -->
+            <el-button size="small" :loading="auditPending" :disabled="auditPending"
+                       @click="onAudit">{{ t('secpage.runAudit') }}</el-button>
+            <el-button size="small" :loading="dbPending" :disabled="dbPending"
+                       @click="onDbUpdate">{{ t('secpage.runDb') }}</el-button>
             <!-- 批 138/141：手动重扫——原位置保留（批 171p 曾误迁入扫描结果卡，已回位） -->
             <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
                      :disabled="scanning || localPending" @click="onRescan" />
@@ -265,7 +270,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { WarningFilled, Delete, Refresh, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan, deleteSecuritySummary } from '../api'
+import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan,
+         triggerDepAudit, triggerGrypeDbUpdate, deleteSecuritySummary } from '../api'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
@@ -303,6 +309,28 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 // 批 155 §4.4c：扫描态=服务端真源 scan_running（刷新/跨端一致）；本地布尔仅防抖
 const scanning = computed(() => !!(snap.value?.scan_running))
 const localPending = ref(false)
+const auditPending = ref(false)
+const dbPending = ref(false)
+const onAudit = async () => {
+  if (auditPending.value) return
+  auditPending.value = true
+  try {
+    await triggerDepAudit()
+    ElMessage.success(t('secpage.auditStarted'))
+  } catch (e) {
+    ElMessage.warning(e?.detail || e?.code || t('common.deleteFailed'))
+  } finally { auditPending.value = false }
+}
+const onDbUpdate = async () => {
+  if (dbPending.value) return
+  dbPending.value = true
+  try {
+    await triggerGrypeDbUpdate()
+    ElMessage.success(t('secpage.dbStarted'))
+  } catch (e) {
+    ElMessage.warning(e?.detail || e?.code || t('common.deleteFailed'))
+  } finally { dbPending.value = false }
+}
 const onRescan = async () => {
   if (scanning.value || localPending.value) return
   localPending.value = true

@@ -5,17 +5,20 @@
 from unittest.mock import MagicMock, patch
 
 
-def test_manual_scan_always_dispatches_dep_audit(monkeypatch):
-    """2026-11-25 演进：手动刷新=要「现在就准」，判定列必须同轮重算，不再受 30h 档。
-
-    旧行为（fresh 即跳过）导致升级后页面仍按旧判定报可升级（实测 54 条假阳性）。
-    """
+def test_three_ops_are_independent(monkeypatch):
+    """2026-11-25 三任务拆分：扫描/依赖审计/漏洞库各自端点与任务，互不隐式派发。"""
     import inspect
+    from pathlib import Path
     from src.web_api.routes import security as S
-    src = inspect.getsource(S.security_scan_trigger)
-    code = chr(10).join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
-    assert "dep_audit.delay()" in code
-    assert "DEP_AUDIT_FRESH_H" not in code   # 注释可提旧机制，代码不得再用
+    from src.scheduler import tasks
+    scan_code = chr(10).join(ln for ln in inspect.getsource(S.security_scan_trigger).splitlines()
+                             if not ln.strip().startswith("#"))
+    assert "dep_audit.delay()" not in scan_code          # 扫描不再顺带派 audit
+    assert hasattr(S, "dep_audit_trigger") and hasattr(S, "grype_db_update_trigger")
+    assert hasattr(tasks, "grype_db_update")
+    app_src = Path("src/scheduler/app.py").read_text()
+    assert '"dep-audit"' in app_src and "crontab(hour=4, minute=0)" in app_src
+    assert '"grype-db-update"' in app_src and "crontab(hour=5, minute=0)" in app_src
 
 
 def test_local_pkg_zero_upstream(monkeypatch):
