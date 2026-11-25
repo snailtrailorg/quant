@@ -29,8 +29,17 @@ command -v ./venv/bin/pip-compile >/dev/null || {
 # UPGRADE=1 forward-roll: bump resolved versions to latest stable
 UPGRADE_FLAG=""
 [ "${UPGRADE:-0}" = "1" ] && UPGRADE_FLAG="--upgrade"
+# PKGS="a b c"：只把这些包及其依赖解到最新（默认空=按现有约束最小改动）
+PKG_FLAGS=""
+if [ -n "${PKGS:-}" ]; then
+    for p in $PKGS; do PKG_FLAGS="$PKG_FLAGS --upgrade-package $p"; done
+fi
 echo "① 重编译 $LOCK（--generate-hashes）..."
-./venv/bin/pip-compile --generate-hashes --no-strip-extras $UPGRADE_FLAG \
+# 索引必须与 ③ 的 dry-run 同源：编译走 pypi.org / 校验走镜像会解析出镜像没有的版本
+# （2026-11-25 实证：lark-oapi 1.9.0 编译通过、dry-run 找不到 → 半成品 lock）
+# shellcheck disable=SC2086
+./venv/bin/pip-compile --generate-hashes --no-strip-extras $UPGRADE_FLAG $PKG_FLAGS \
+    --index-url "${QUANT_PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
     --output-file "$LOCK" "$REQ"
 
 echo "② 校验 hash 完整性..."

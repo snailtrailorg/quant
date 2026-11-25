@@ -24,6 +24,31 @@ def test_ledger_rows_only_from_two_authorities():
     assert "_upsert_components(conn, today, _os_up" in src
 
 
+def test_vendored_artifacts_excluded_from_ledger():
+    """setuptools/pip 内置副本不是独立安装包：不得入台账（会覆盖真装版本）。"""
+    arts = [
+        {"type": "python", "name": "platformdirs", "version": "4.14.5",
+         "locations": [{"path": "/platformdirs-4.14.5.dist-info/METADATA"}]},
+        {"type": "python", "name": "platformdirs", "version": "4.4.0",
+         "locations": [{"path": "/setuptools/_vendor/platformdirs-4.4.0.dist-info/METADATA"}]},
+        {"type": "binary", "name": "Simple Launcher", "version": "1.1.0",
+         "locations": [{"path": "/pip/_vendor/distlib/t64.exe"}]},
+    ]
+    rows = sc._ledger_from_sbom(arts, None)
+    assert [(r[1], r[2]) for r in rows] == [("platformdirs", "4.14.5")]
+
+
+def test_freeze_wins_over_sbom_for_pip_domain():
+    """pip 域版本真源=freeze；SBOM 同名 pip 行不得覆盖，os/binary 行照收。"""
+    rows = sc._merge_ledger(
+        {"platformdirs": "4.14.5"},
+        [("pip", "platformdirs", "4.4.0", "pip 安装"),
+         ("os", "expat", "2.5.0-6.al8", "OS rpm")])
+    by = {(r[0], r[1]): r[2] for r in rows}
+    assert by[("pip", "platformdirs")] == "4.14.5"
+    assert by[("os", "expat")] == "2.5.0-6.al8"
+
+
 def test_meta_keys_never_rows():
     """语义钉：outdated 值为 list 时 str(v) 才产生全串伪行——白名单后绝迹。"""
     part = {"components": {"nginx": "1.24.0", "outdated": [{"name": "x"}],

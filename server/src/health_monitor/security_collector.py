@@ -204,6 +204,50 @@ def _norm_key(name: str) -> str:
     return _re.sub(r"[-_.]+", "-", str(name)).lower()
 
 
+def _is_vendored(art: dict) -> bool:
+    """SBOM 工件是否位于某个包的内置副本目录（setuptools/_vendor、pip/_vendor）。
+
+    这些副本随宿主包发布，**不独立安装、也不可独立升级**；计入台账会把
+    真装版本覆盖成宿主内置版本（2026-11-25 实证：platformdirs 4.4.0 盖掉 4.14.5、
+    importlib-metadata 8.7.1 盖掉 10.1.0），并让 n_outdated/last_changed 抖动。
+    """
+    return any("/_vendor/" in (loc.get("path") or "")
+               for loc in (art.get("locations") or []))
+
+
+def _ledger_from_sbom(arts: list, sp=None) -> list[tuple[str, str, str, str]]:
+    """SBOM 工件 → 台账行（python→pip / rpm→os / binary）；vendored 副本剔除。"""
+    out: list[tuple[str, str, str, str]] = []
+    for art in arts or []:
+        a_type = (art.get("type") or "").lower()
+        if a_type not in ("python", "rpm", "binary"):
+            continue
+        if _is_vendored(art):
+            continue
+        ver = str(art.get("version") or "")
+        if ver.upper() == "UNKNOWN":   # syft 噪声（setuptools 内部 launcher 等）
+            continue
+        src = {"python": "pip", "rpm": "os", "binary": "binary"}[a_type]
+        out.append((src, (art.get("name") or "").lower(), ver,
+                    _component_origin(a_type, art.get("locations"), sp)))
+    return out
+
+
+def _merge_ledger(pip_map: dict, sbom_rows: list[tuple]) -> list[tuple]:
+    """pip 域版本真源=pip freeze（实际安装）；SBOM 只补 freeze 缺名 + 提供 os/binary 域。
+
+    顺序反了会让 SBOM 的旧版本覆盖实际安装（同名后写覆盖）——2026-11-25 修复。
+    """
+    rows = [("pip", str(n), str(v), "pip 安装") for n, v in (pip_map or {}).items()]
+    have = {_norm_key(r[1]) for r in rows}
+    for r in sbom_rows or []:
+        if r[0] == "pip" and _norm_key(r[1]) in have:
+            continue
+        rows.append(r)
+        have.add(_norm_key(r[1]))
+    return rows
+
+
 def judged_map_of(rows: list[dict]) -> dict:
     """dep_health 行 → 判定表，**键带 source**（批183d：同名跨源不互覆盖）。
 
@@ -676,20 +720,7 @@ def _collect_vulns() -> dict:
         # 台账 pip/rpm 域顺带产出（SBOM arts 零额外成本）；type 判源：python→pip，rpm→rpm
         # 台账收 python/rpm/binary 三型（批 124：binary 必须入账——否则列表里
         # 找不到 ffmpeg 这类捆绑原生库，正是用户痛点）；origin 自动推导
-        ledger: list[tuple[str, str, str, str]] = []
-        for art in sbom_arts:
-            a_type = (art.get("type") or "").lower()
-            if a_type not in ("python", "rpm", "binary"):
-                continue
-            ver = str(art.get("version") or "")
-            if ver.upper() == "UNKNOWN":   # syft 噪声（setuptools 内部 launcher 等）
-                continue
-            src = {"python": "pip", "rpm": "os", "binary": "binary"}[a_type]   # 批184a：SBOM type→域
-            ledger.append((
-                src, (art.get("name") or "").lower(), ver,
-                _component_origin(a_type, art.get("locations"), _sp),
-            ))
-        part["ledger"] = ledger
+        part["ledger"] = _ledger_from_sbom(sbom_arts, _sp)
     except subprocess.TimeoutExpired:
         logger.warning("grype 链超时 >%ss（DB 下载/网络？）", _GRYPE_TIMEOUT)
         _degraded(part, f"grype 超时 >{_GRYPE_TIMEOUT}s（DB 下载/网络？）")
@@ -1096,11 +1127,9 @@ def run_security_scan(today: date | None = None) -> dict:
             fresh = _upsert_findings(conn, today, vulns.get("findings") or [])
 
             # 批179：组件列表真源=实际安装集 ∪ SBOM 台账（SBOM 只做漏洞关联，不再决定谁上榜）
-            _ledger = list(vulns.get("ledger") or [])   # noqa: F811（复用上面声明，保持同对象语义）
-            _have = {_norm_key(r[1]) for r in _ledger if len(r) > 1}
-            for _pn, _pv in (parts.get("components", {}).get("pip") or {}).items():
-                if _norm_key(_pn) not in _have:
-                    _ledger.append(("pip", _pn, _pv, "pip 安装"))
+            # pip 域以 freeze 为准（SBOM 只补缺名 + os/binary）——防 vendored/旧版本覆盖
+            _ledger = _merge_ledger(parts.get("components", {}).get("pip") or {},
+                                    vulns.get("ledger") or [])   # noqa: F811
             _upsert_components(conn, today, _ledger, pkg_mgr=_pkg_mgr)
             # 批181：优先刷新清单（只写清单、不联网；dep_audit 下轮先刷这些包的 latest）
             try:
