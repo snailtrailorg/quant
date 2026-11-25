@@ -20,6 +20,30 @@ def _rows_to_dicts(cur, cols: tuple[str, ...]) -> list[dict]:
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _norm_pip_name(name: str) -> str:
+    import re
+    return re.sub(r"[-_.]+", "-", str(name)).lower()
+
+
+def dedupe_components(rows: list[dict]) -> list[dict]:
+    """按 (source, 规范化名) 去重——历史行可能 _ / - 并存（实测 importlib_metadata 双行）。
+
+    保留 checked_at 最新的一行；同刻优先带判定列的行。归一/GC 之前也能正确展示。
+    """
+    best: dict = {}
+    for r in rows:
+        key = (r.get("source"),
+               _norm_pip_name(r.get("name")) if r.get("source") == "pip" else r.get("name"))
+        old = best.get(key)
+        if old is None:
+            best[key] = r
+            continue
+        rc, oc = str(r.get("checked_at") or ""), str(old.get("checked_at") or "")
+        if rc > oc or (rc == oc and old.get("judge_class") is None and r.get("judge_class")):
+            best[key] = r
+    return list(best.values())
+
+
 def get_snapshot(scan_date: date) -> dict | None:
     """当日快照行（六分区 jsonb 已反序列化为 dict）；无行返回 None（路由层转 404）。"""
     from src.data_platform.db import get_conn
@@ -84,7 +108,7 @@ def get_component_ledger() -> list[dict]:
         cols = ("source", "name", "version", "origin", "last_changed",
                 "managed_by", "latest_version", "latest_source",
                 "judge_class", "judge_why", "checked_at", "pkg_mgr")
-        return _rows_to_dicts(cur, cols)
+        return dedupe_components(_rows_to_dicts(cur, cols))
 
 
 def get_snapshots_recent(days: int, today: date) -> list[dict]:

@@ -64,3 +64,16 @@ def test_upsert_idempotent_two_runs():
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc._upsert_components)
     assert 'SELECT version FROM security_component' in src   # 存在则 UPDATE/否则 INSERT
+
+
+def test_component_ledger_dedupes_pip_name_variants():
+    """importlib_metadata / importlib-metadata 历史双行 → 只留 checked_at 最新一行。"""
+    from src.data_platform.security_store import dedupe_components
+    rows = [
+        {"source": "pip", "name": "importlib-metadata", "version": "8.7.1",
+         "checked_at": "2026-11-25T05:40:54", "judge_class": "actionable", "judge_why": "x"},
+        {"source": "pip", "name": "importlib_metadata", "version": "10.1.0",
+         "checked_at": "2026-11-25T08:04:01", "judge_class": None, "judge_why": None},
+    ]
+    out = dedupe_components(rows)
+    assert len(out) == 1 and out[0]["version"] == "10.1.0"
