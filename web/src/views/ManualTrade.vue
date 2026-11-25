@@ -388,17 +388,20 @@ const startPoll = (reqId) => {
 .mt-chart-canvas { width: 100%; height: 100%; }
 .mt-depth-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 .mt-depth { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
-.mt-depth th { padding: var(--sp-1) 0; color: var(--text-secondary); font-size: var(--fs-label); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border); }
+.mt-depth th { padding: var(--sp-1) 0; color: var(--text-primary); font-size: var(--fs-label); font-weight: 400; text-align: right; border-bottom: 1px solid var(--border-weak); }
 .mt-depth th:first-child, .mt-depth td:first-child { text-align: left; }
-.mt-depth td { padding: var(--sp-1) 0; text-align: right; }
+.mt-depth td { padding: var(--sp-1) 0; text-align: right; color: var(--text-primary); }
 .mt-depth .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .mt-depth tbody tr { cursor: pointer; }
 .mt-depth tbody tr:hover { background: var(--bg-hover); }
 .mt-depth .ask td:nth-child(2) { color: var(--down); }
 .mt-depth .bid td:nth-child(2) { color: var(--up); }
-.mt-depth tr.off { color: var(--text-secondary); cursor: default; }
+.mt-depth tr.off { cursor: default; }
+.mt-depth tr.off td:nth-child(2) { color: var(--text-secondary); }
+.mt-depth tr.sep { cursor: default; }
+.mt-depth tr.sep:hover { background: none; }
 .mt-depth tr.sep td { padding: var(--sp-1) 0; }
-.mt-depth-sep { display: block; height: 1px; background: var(--border); }
+.mt-depth-sep { display: block; height: 1px; background: var(--border-weak); }
 .mt-depth-card.up :deep(.el-card__header span) { color: var(--up); }
 .mt-depth-card.down :deep(.el-card__header span) { color: var(--down); }
 .mt-muted { color: var(--text-secondary); font-size: var(--fs-foot); }
