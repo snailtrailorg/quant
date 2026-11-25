@@ -163,16 +163,57 @@ def analyze_cache_set(ts_code: str, text: str, ttl: int = 600) -> None:
 
 # ── 实时块（不缓存，各源自带 TTL）──
 
+HUB_TICK_MAX_AGE_S = 120   # 公共 tick 新鲜度上限（断流/陈旧键降级腾讯；TTL 外的历史残留键必须拦）
+
+
+def _tick_epoch(q: dict) -> float | None:
+    """tick 事件时间 → epoch（pub 用 _ts_epoch；per-account 用 ts ISO）。"""
+    import time as _t
+    e = q.get("_ts_epoch")
+    if e is not None:
+        try:
+            return float(e)
+        except (TypeError, ValueError):
+            return None
+    ts = q.get("ts")
+    if not ts:
+        return None
+    try:
+        from datetime import datetime as _dt
+        return _dt.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except Exception:   # noqa: BLE001 —— 时间不可解析按不新鲜处理
+        return None
+
+
+def _fresh(q: dict, now: float | None = None) -> bool:
+    import time as _t
+    ep = _tick_epoch(q)
+    return ep is not None and (float(now if now is not None else _t.time()) - ep) <= HUB_TICK_MAX_AGE_S
+
+
 def _quote_block(ts_code: str, vt: str) -> dict | None:
     try:
-        # 批 70c：公共表单 GET（各 hub 独立双写+写侧 epoch 防 ts 回退——读者零逻辑；TTL 65s
-        # 封在场；payload 带账户来源 account_id）。miss=无在场 hub→腾讯降级。
+        # 批 70c：公共表单 GET（各 hub 独立双写+写侧 epoch 防 ts 回退；payload 带 account_id）。
+        # 公共键只含 ts/last/volume（体积最小），五档在 per-account 键——按 account_id 回读合并。
+        # 两级都必须新鲜：曾有 10-22 残留键被当实时价返回（无五档、无时效闸）。
         raw = _r().get(f"hub:latest_tick:pub:{vt}")
         if raw:
             q = json.loads(raw)
-            q.pop("_ts_epoch", None)
-            q["source"] = "hub"
-            return q
+            if _fresh(q):
+                acct = q.get("account_id")
+                full_key = (f"hub:latest_tick:{acct}:{vt}" if acct
+                            else f"hub:latest_tick:{vt}")
+                try:
+                    raw_full = _r().get(full_key)
+                    if raw_full:
+                        full = json.loads(raw_full)
+                        if _fresh(full) and full.get("bid"):
+                            q = full   # 五档/涨跌停/昨收 以 per-account 全量快照为准
+                except Exception as e:   # noqa: BLE001 —— 回读失败保留公共最小块
+                    logger.warning("hub 全量 tick 读失败 %s: %s", full_key, e)
+                q.pop("_ts_epoch", None)
+                q["source"] = "hub"
+                return q
     except Exception as e:
         logger.warning("hub tick 读失败 %s: %s", vt, e)
     from .market_snapshot import get_quote

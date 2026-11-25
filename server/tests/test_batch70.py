@@ -59,14 +59,25 @@ class TestPubLatestTick:
         _pub_write(r, "X.XSHG", "{}", None, 1)   # ts None 跳过
         assert r.set.call_count == 1
 
-    def test_reader_single_get_pub(self):
+    def test_reader_pub_then_full_tick(self):
+        """读链：pub（最小块）→ 按 account_id 回读 per-account 全量（五档）；陈旧键降级腾讯。"""
         import json as _json
+        import time as _t
         from unittest.mock import patch
         from src.data_platform import stock_detail as sd
-        r = MagicMock()
-        r.get.return_value = _json.dumps({"last": 10.5, "_ts_epoch": 1.0, "account_id": 3, "ts": "2026-09-28T10:00:00+08:00"})
-        with patch.object(sd, "_r", return_value=r), \
-             patch("src.data_platform.market_snapshot.get_quote", return_value=None):
+        now = _t.time()
+        pub = _json.dumps({"last": 10.5, "_ts_epoch": now, "account_id": "md-xtp"})
+        from datetime import datetime as _dt
+        full = _json.dumps({"last": 10.5, "ts": _dt.now().astimezone().isoformat(),
+                            "bid": [10.4, 10.3, 10.2, 10.1, 10.0], "ask": [10.5, 10.6, 10.7, 10.8, 10.9]})
+        r = MagicMock(side_effect=lambda k: pub if k.endswith(":pub:600000.XSHG") else full)
+        with patch.object(sd, "_r", return_value=MagicMock(get=r)), \
+             patch("src.data_platform.market_snapshot.get_quote", return_value={"source": "tencent"}):
             q = sd._quote_block("600000.SH", "600000.XSHG")
-        assert q["source"] == "hub" and q["last"] == 10.5 and "_ts_epoch" not in q
-        r.get.assert_called_once_with("hub:latest_tick:pub:600000.XSHG")
+        assert q["source"] == "hub" and q["bid"][0] == 10.4 and "_ts_epoch" not in q
+        # 陈旧 pub（10-22 残留键）必须走腾讯，不得把历史价当实时
+        r_stale = MagicMock(return_value=_json.dumps({"last": 9.0, "_ts_epoch": 1.0, "account_id": "md-xtp"}))
+        with patch.object(sd, "_r", return_value=MagicMock(get=r_stale)), \
+             patch("src.data_platform.market_snapshot.get_quote", return_value={"source": "tencent", "bid": [1.0]}) as gq:
+            q2 = sd._quote_block("600000.SH", "600000.XSHG")
+        assert q2["source"] == "tencent" and gq.called
