@@ -154,3 +154,11 @@ class TestEvr:
 
     def test_release_alpha_suffix(self):
         assert evr_key(None, "1.1.1", "13.el8") > evr_key(None, "1.1.1", "13.ael8")
+
+    def test_installed_equals_latest_is_no_update(self):
+        """旧 judge_class=actionable + 已装==最新 ⇒ no（升级后 audit 未刷新前不得假阳性）。"""
+        from src.quant_common.depjudge import has_update_of
+        assert has_update_of("actionable", "4.14.8", "4.14.8") == "no"
+        assert has_update_of("in_constraint", "15.0.1", "15.0.1") == "no"
+        assert has_update_of("actionable", "15.0.1", "17.4") == "yes"
+        assert has_update_of("unknown", None, "1.0") == "unknown"

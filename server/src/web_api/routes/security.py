@@ -101,11 +101,9 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     """手动触发安全扫描（批 138；批 155 串行化 §4.4c）。
 
     Valkey sec:scan_lock（TTL>任务 time_limit）：占用中 -> 409 SEC_SCAN_RUNNING
-    （拒绝入队而非排队）；任务收尾 DEL（值=自己）；崩溃 TTL 兜底。缓存
-    stale 顺带 async 派 dep_audit（fresh 线=DEP_AUDIT_FRESH_H 单源）。
+    （拒绝入队而非排队）；任务收尾 DEL（值=自己）；崩溃 TTL 兜底。
+    手动刷新**必派** dep_audit（判定列同轮重算；旧 fresh 档会让升级后仍报可升级）。
     """
-    import json as _json
-    import datetime as _dt
     from src.quant_common.redis_client import business_redis
     from src.scheduler.tasks import security_scan
     br = business_redis()
@@ -115,27 +113,14 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     if lock_val:
         raise ApiError(409, "SEC_SCAN_RUNNING", f"扫描进行中（task={lock_val[:8]}）")
     try:
-        from src.quant_common.depjudge import DEP_AUDIT_FRESH_H
-        raw = br.get("sec:dep_audit")
-        fresh = False
-        if raw:
-            c = _json.loads(raw)
-            # 批 155 §4.1 契约：schema 不识别=视为无缓存（旧 154 结构 ts 新鲜也不能
-            # 压住新 audit 派发——prod 实证：昨晚旧缓存 age 12.7h 判 fresh 导致
-            # 新 audit 三小时未被派发、采集侧全 unknown）
-            if c.get("schema_version") == 2:
-                # 批 156：schema 2 才算 fresh（1=旧形态——扫描侧走回退路径，审计需升级重写）
-                ts = _dt.datetime.fromisoformat(c["ts"].split("+00:00-")[0] + "+00:00"
-                                                if "+00:00-" in c["ts"] else c["ts"])
-                fresh = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() < DEP_AUDIT_FRESH_H * 3600
-        if not fresh:
-            from src.scheduler.tasks import dep_audit
-            dep_audit.delay()
-            logger.info("dep_audit dispatched (cache stale/missing)")
-    except ApiError:
-        raise
+        # 手动刷新=用户要「现在就准」：判定列（latest/judge）必须同轮重算，
+        # 不再受 DEP_AUDIT_FRESH_H 档——否则升级/换包后页面仍按旧判定报可升级
+        # （2026-11-25 实测 54 条 version==latest 的假阳性）。
+        from src.scheduler.tasks import dep_audit
+        dep_audit.delay()
+        logger.info("dep_audit dispatched (manual refresh)")
     except Exception as _e:
-        logger.warning("dep_audit dispatch probe failed: %s", _e)   # 批155 验证期：不再静默
+        logger.warning("dep_audit dispatch failed: %s", _e)   # 不静默
     task = security_scan.delay()
     try:
         br.set("sec:scan_lock", str(task.id), ex=2700)
@@ -146,9 +131,9 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     return {"status": "submitted", "task_id": task.id}
 
 
-def _hu(judge_class):
+def _hu(judge_class, version=None, latest=None):
     from src.quant_common.depjudge import has_update_of
-    return has_update_of(judge_class)
+    return has_update_of(judge_class, version, latest)
 
 
 def _stale_days(row):
@@ -164,7 +149,8 @@ def _dep_health_summary(snap, ledger_rows):
     comp = snap.get("components") or {}
     dh = comp.get("dep_health") or {}
     cnt = Counter(r.get("judge_class") or "unknown" for r in ledger_rows)
-    has_n = sum(1 for r in ledger_rows if _hu(r.get("judge_class")) == "yes")
+    has_n = sum(1 for r in ledger_rows
+                if _hu(r.get("judge_class"), r.get("version"), r.get("latest_version")) == "yes")
     dev_n = sum(1 for r in (dh.get("rows") or []) if r.get("group") == "dev")
     return {"has_update_n": has_n,
             "actionable": cnt.get("actionable", 0),
@@ -217,7 +203,8 @@ def dep_health_groups(_u: dict = Depends(require_perm("read"))):
     from src.quant_common.depjudge import has_update_of
     groups = {"yes": [], "no": [], "unknown": []}
     for r in rows:
-        r["has_update"] = has_update_of(r.get("judge_class"))   # 派生（store 不落此列）
+        r["has_update"] = has_update_of(r.get("judge_class"), r.get("version"),
+                                        r.get("latest_version"))   # 派生（store 不落此列）
         groups.setdefault(r["has_update"], []).append(r)
     return {
         "counts": {k: len(v) for k, v in groups.items()},
@@ -350,7 +337,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
               "pkg_mgr": _r.get("pkg_mgr"),      # 批184b：实现（dnf/apt）——生态列靠它区分
               "judge_class": _r.get("judge_class"),
               "judge_why": _r.get("judge_why") or "",
-              "has_update": _hu(_r.get("judge_class")),
+              "has_update": _hu(_r.get("judge_class"), _r.get("version"),
+                                    _r.get("latest_version")),
               "stale_days": _stale_days(_r)}
         _o.update(_vuln_fields(_r))
         _ledger_out.append(_o)

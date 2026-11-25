@@ -112,13 +112,18 @@ def judge(cur: str | None, constraint: str | None, latest: str | None,
         return "unknown", f"内部错误: {e}"
 
 
-def has_update_of(judge_class: str | None) -> str:
+def has_update_of(judge_class: str | None, version: str | None = None,
+                  latest: str | None = None) -> str:
     """judge_class -> yes/no/unknown（服务端单源；批 179b 三态化）。
 
     unknown / 未判定 = 上游版本不可得（latest 未取到 / 未登记 / 无法解析），是「未知」
     而非「无更新」——不能把没查到谎报成已确认最新。current/pinned/drift/unreachable
     均有明确判定，仍为 no。
     """
+    # 现场一致性：已装==上游最新 ⇒ 无论旧判定是什么都不构成「可升级」
+    # （判定列按轮次落库，升级后到下一轮 audit 前会残留 actionable——实测 54 条假阳性）
+    if version and latest and str(version).strip() == str(latest).strip():
+        return HAS_UPDATE_NO
     if judge_class in ("actionable", "in_constraint"):
         return HAS_UPDATE_YES
     if judge_class in ("current", "pinned", "drift", "unreachable"):

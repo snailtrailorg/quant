@@ -5,12 +5,17 @@
 from unittest.mock import MagicMock, patch
 
 
-def test_fresh_check_requires_schema(monkeypatch):
-    # 批 155 §4.1（未变行为）：旧 schema 缓存不得判 fresh 压住 audit 派发。
+def test_manual_scan_always_dispatches_dep_audit(monkeypatch):
+    """2026-11-25 演进：手动刷新=要「现在就准」，判定列必须同轮重算，不再受 30h 档。
+
+    旧行为（fresh 即跳过）导致升级后页面仍按旧判定报可升级（实测 54 条假阳性）。
+    """
     import inspect
     from src.web_api.routes import security as S
     src = inspect.getsource(S.security_scan_trigger)
-    assert 'c.get("schema_version") == 2' in src
+    code = chr(10).join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
+    assert "dep_audit.delay()" in code
+    assert "DEP_AUDIT_FRESH_H" not in code   # 注释可提旧机制，代码不得再用
 
 
 def test_local_pkg_zero_upstream(monkeypatch):

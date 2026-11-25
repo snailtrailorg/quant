@@ -414,8 +414,24 @@ def _collect_components() -> dict:
         if _sv == 2:
             _upg_all = dict(os_c.get("upgrades") or {})
             _repos = os_c.get("all_repos") or {}
+            # 已装清单以**现场**为准：用户 dnf upgrade 后不必等 dep_audit 下一轮，
+            # 否则页面继续按契约快照报「可更新」（2026-11-25 用户实证）。
+            _installed = os_c.get("installed") or []
+            try:
+                from src.health_monitor.os_pkg import detect_provider
+                _prov = detect_provider()
+                if _prov is not None:
+                    def _evr(p):
+                        base = p.version + (("-" + p.release) if getattr(p, "release", "") else "")
+                        e = getattr(p, "epoch", "") or ""
+                        return f"{e}:{base}" if e not in ("", "0", "(none)") else base
+                    _live = [{"name": p.name, "version": _evr(p)} for p in _prov.list_installed()]
+                    if _live:
+                        _installed = _live
+            except Exception as _e_os:
+                logger.warning("OS 现场清单读取失败（回落契约快照）: %s", _e_os)
             _seen_best = {}   # multilib 同名取最高版（B1）
-            for _ip in os_c.get("installed") or []:
+            for _ip in _installed:
                 _n = _ip.get("name") or ""
                 if not _n:
                     continue
@@ -429,8 +445,11 @@ def _collect_components() -> dict:
                 _row = {"name": _n, "cur": _cur, "managed_by": "repo",
                         "source": "os", "pkg_mgr": os_c.get("pkg_mgr"), "group": "os"}
                 if _n in _upg_all:
-                    _row.update({"latest": _upg_all[_n], "judge_class": "actionable",
-                                "judge_why": "仓库可升 " + str(_upg_all[_n]), "has_update": "yes"})
+                    _latest = _upg_all[_n]
+                    _same = str(_cur or "").strip() == str(_latest or "").strip()
+                    _row.update({"latest": _latest, "judge_class": "actionable",
+                                "judge_why": "仓库可升 " + str(_latest),
+                                "has_update": "no" if _same else "yes"})
                 elif _n in _repos:
                     _row.update({"latest": None, "judge_class": "current", "judge_why": "", "has_update": "no"})
                 else:
