@@ -49,6 +49,14 @@ def test_freeze_wins_over_sbom_for_pip_domain():
     assert by[("os", "expat")] == "2.5.0-6.al8"
 
 
+def test_pip_names_normalized_to_single_row():
+    """importlib_metadata 与 importlib-metadata 是同一实体——台账不得双行（实测 8.7.1/10.1.0 并存）。"""
+    rows = sc._merge_ledger(
+        {"importlib_metadata": "10.1.0"},
+        [("pip", "importlib-metadata", "8.7.1", "pip 安装")])
+    assert [(r[1], r[2]) for r in rows] == [("importlib-metadata", "10.1.0")]
+
+
 def test_meta_keys_never_rows():
     """语义钉：outdated 值为 list 时 str(v) 才产生全串伪行——白名单后绝迹。"""
     part = {"components": {"nginx": "1.24.0", "outdated": [{"name": "x"}],

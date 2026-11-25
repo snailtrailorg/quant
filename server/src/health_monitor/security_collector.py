@@ -228,8 +228,10 @@ def _ledger_from_sbom(arts: list, sp=None) -> list[tuple[str, str, str, str]]:
         if ver.upper() == "UNKNOWN":   # syft 噪声（setuptools 内部 launcher 等）
             continue
         src = {"python": "pip", "rpm": "os", "binary": "binary"}[a_type]
-        out.append((src, (art.get("name") or "").lower(), ver,
-                    _component_origin(a_type, art.get("locations"), sp)))
+        name = (art.get("name") or "").lower()
+        if src == "pip":
+            name = _norm_key(name)   # importlib_metadata / importlib-metadata 同一实体
+        out.append((src, name, ver, _component_origin(a_type, art.get("locations"), sp)))
     return out
 
 
@@ -238,7 +240,7 @@ def _merge_ledger(pip_map: dict, sbom_rows: list[tuple]) -> list[tuple]:
 
     顺序反了会让 SBOM 的旧版本覆盖实际安装（同名后写覆盖）——2026-11-25 修复。
     """
-    rows = [("pip", str(n), str(v), "pip 安装") for n, v in (pip_map or {}).items()]
+    rows = [("pip", _norm_key(str(n)), str(v), "pip 安装") for n, v in (pip_map or {}).items()]
     have = {_norm_key(r[1]) for r in rows}
     for r in sbom_rows or []:
         if r[0] == "pip" and _norm_key(r[1]) in have:
