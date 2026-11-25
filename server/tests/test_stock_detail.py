@@ -224,6 +224,10 @@ class TestHubLatestTick:
         assert d["upper_limit"] == 9.99 and d["lower_limit"] == 8.17   # S1 防回归
         assert d["bid"][0] == 9.00 and d["ask"][0] == 9.01
         assert ex == 65
+        # 公共键必须同形：详情页只读 pub，缺五档就是盘口时有时无（批70 回归）
+        pd = json.loads(store["hub:latest_tick:pub:600000.XSHG"][0])
+        assert pd["bid"][0] == 9.00 and pd["ask"][0] == 9.01
+        assert pd["upper_limit"] == 9.99 and pd["pre_close"] == 9.08
 
     def test_zero_price_filtered(self):
         """M1：竞价 0 价不上屏。"""

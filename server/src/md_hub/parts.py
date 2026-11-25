@@ -311,7 +311,9 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, account_id=None) -> 
     if symbol in fail_ts and now - fail_ts[symbol] < 60:
         return   # 退避窗口内跳过（连败后不再每 tick 撞 Valkey）
     try:
-        r.set(_key(LATEST_TICK_PREFIX.rstrip(":"), account_id) + ":" + symbol, json.dumps({
+        # 一份 payload 双写（per-account + pub）：字段单源，防两处清单漂移
+        # （2026-09-28 批70 读者切 pub 后五档丢失，根因就是两份 payload 不同形）。
+        payload = {
             "ts": tick.datetime.isoformat() if tick.datetime else None,
             "name": getattr(tick, "name", ""),
             "last": tick.last_price,
@@ -323,7 +325,9 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, account_id=None) -> 
             "bid_v": [tick.bid_volume_1, tick.bid_volume_2, tick.bid_volume_3, tick.bid_volume_4, tick.bid_volume_5],
             "ask": [tick.ask_price_1, tick.ask_price_2, tick.ask_price_3, tick.ask_price_4, tick.ask_price_5],
             "ask_v": [tick.ask_volume_1, tick.ask_volume_2, tick.ask_volume_3, tick.ask_volume_4, tick.ask_volume_5],
-        }), ex=LATEST_TICK_TTL)
+        }
+        r.set(_key(LATEST_TICK_PREFIX.rstrip(":"), account_id) + ":" + symbol,
+              json.dumps(payload), ex=LATEST_TICK_TTL)
         # 批 70c：公共表双写（同 try 同退避——两键同命运；事件时间归一 epoch）
         _epoch = None
         try:
@@ -332,10 +336,7 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, account_id=None) -> 
                 _epoch = _dt.fromisoformat(str(tick.datetime).replace("Z", "+00:00")).timestamp()
         except Exception:
             _epoch = None
-        _pub_write(r, symbol, json.dumps({
-            "ts": tick.datetime.isoformat() if tick.datetime else None,
-            "last": tick.last_price, "volume": tick.volume,
-        }, ensure_ascii=False), _epoch, account_id)
+        _pub_write(r, symbol, json.dumps(payload, ensure_ascii=False), _epoch, account_id)
         fail_ts.pop(symbol, None)
     except Exception as e:
         fail_ts[symbol] = now
