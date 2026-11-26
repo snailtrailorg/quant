@@ -56,6 +56,7 @@ websockets>=11,<16             # 批13：显式 pin（企微自实现 ws）；�
 pydantic>=2.14
 pyyaml>=6.0
 python-dotenv>=1.0
+packaging>=24           # 批190：depjudge 直接 import（Version/SpecifierSet/Requirement）——原靠传递带入未声明
 
 # === 嵌入模型 bge-m3 不进主 venv（拖 torch ~2GB）===
 # 独立 worker 进程单独建: requirements-embedding.txt
