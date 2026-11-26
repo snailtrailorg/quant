@@ -972,21 +972,28 @@ def _security_tmp_sweep() -> list[str]:
 # 首次/大版本全量 ~3.1GB，prod 带宽 2.8MB/s ⇒ 最长 ~20min）+ syft/grype 链 + 五分区
 def security_scan(self):
     """批 120：每日安全态势扫描（六分区 → 快照落库 + 基线 diff 告警 + AI 摘要
-    fail-soft）。批 155 §4.4c：收尾释放串行化锁（值=自己才删，防误删）。
+    fail-soft）。批 190：入口 SET NX 抢锁=定时/手动互斥单一判定源（路由只预检）。
     尾部卫生（2026-10-31）：_security_tmp_sweep 清扫描类临时残件（grype 孤儿/sbom/旧锁）。"""
     from src.health_monitor.security_collector import run_security_scan
+    from src.quant_common.redis_client import business_redis
+    br = business_redis()
+    lock = "sec:scan_lock"
+    token = str(getattr(self.request, "id", "") or "manual")
+    try:
+        got = br.set(lock, token, nx=True, ex=2700)
+    except Exception:
+        got = False
+    if not got:
+        return {"status": "busy"}
     try:
         return run_security_scan()
     finally:
         try:
-            from src.quant_common.redis_client import business_redis
-            br = business_redis()
-            lock_val = br.get("sec:scan_lock")
-            if isinstance(lock_val, bytes):
-                lock_val = lock_val.decode()          # redis-py bytes vs str 恒不等（409 的 b'' 铁证）
-            cur_id = str(self.request.id) if getattr(self, "request", None) else ""
-            if lock_val and lock_val == cur_id:
-                br.delete("sec:scan_lock")
+            cur = br.get(lock)
+            if isinstance(cur, bytes):
+                cur = cur.decode()                    # redis-py bytes vs str 恒不等（409 的 b'' 铁证）
+            if cur == token:
+                br.delete(lock)
         except Exception:
             pass   # 锁 TTL 2700s 兜底，释放失败不炸任务
         try:
@@ -1007,7 +1014,7 @@ def grype_db_update(self):
     br = business_redis()
     lock, token = "sec:grype_db_lock", str(getattr(self.request, "id", "") or "manual")
     try:
-        got = br.set(lock, token, nx=True, ex=1800)
+        got = br.set(lock, token, nx=True, ex=2100)   # 批190：TTL>time_limit 1900，超时不提前解锁
     except Exception:
         got = False
     if not got:
@@ -1063,7 +1070,62 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
 @app.task(name="src.scheduler.tasks.dep_audit",
           soft_time_limit=172800, time_limit=172800)   # 批 161：名义保命值（48h 永不日常触达）——真实控制=心跳+僵死判定（方案批161 v2 §2.1；None 豁免在 celery 5.6/billiard 回落全局 300s，双盲审铁证）
 def dep_audit():
-    """依赖健康审计 v3（批 161：异步幂等心跳化——用户原则立法首个应用）。
+    """入口互斥（批190）：SET NX 抢锁=定时/手动单一判定源；拿不到返回 busy。"""
+    import datetime as _dt
+    import uuid as _uuid
+    from src.quant_common.redis_client import business_redis
+    br = business_redis(socket_timeout=3, socket_connect_timeout=2)
+    lock = "sec:dep_audit_lock"
+    token = _dt.datetime.now(_dt.timezone.utc).isoformat() + "-" + _uuid.uuid4().hex[:8]
+    try:
+        got = br.set(lock, token, nx=True, ex=172800 + 300)
+    except Exception:
+        got = False
+    if not got:
+        # 批190：锁在但心跳停/终态=僵尸（SIGKILL 无 finally）——清锁重抢一次，
+        # 否则 48h TTL 内手动/beat 全被挡（原三态重开语义不能因加锁倒退）。
+        # 无 beat 时用锁值内嵌时间判定（抢锁→首次心跳之间仍视为活，不清）。
+        try:
+            import json as _json
+            raw = br.get("sec:dep_audit:beat")
+            b = _json.loads(raw.decode() if isinstance(raw, bytes) else raw) if raw else None
+            now = _dt.datetime.now(_dt.timezone.utc)
+            if b:
+                stale = b.get("status") == "done" or (
+                    b.get("ts") and (now - _dt.datetime.fromisoformat(b["ts"])).total_seconds() > 600)
+            else:
+                lv = br.get(lock)
+                if isinstance(lv, bytes):
+                    lv = lv.decode()
+                stale = False
+                if lv:
+                    try:
+                        stale = (now - _dt.datetime.fromisoformat(
+                            str(lv).rsplit("-", 1)[0])).total_seconds() > 600
+                    except Exception:
+                        stale = False
+            if stale:
+                br.delete(lock)
+                got = br.set(lock, token, nx=True, ex=172800 + 300)
+        except Exception:
+            pass
+    if not got:
+        return {"status": "busy"}
+    try:
+        return _dep_audit_impl(token)
+    finally:
+        try:
+            cur = br.get(lock)
+            if isinstance(cur, bytes):
+                cur = cur.decode()
+            if cur == token:
+                br.delete(lock)
+        except Exception:
+            pass
+
+
+def _dep_audit_impl(run_id: str):
+    """依赖健康审计 v3（批 161：异步幂等心跳化——用户原则立法首个应用；批190 主体拆出）。
 
     单线程全量+按批落库（25 包 executemany）+心跳三态+续跑跳网。四件套：
     异步（beat 派发）/心跳（sec:dep_audit:beat ts+n，TTL 26h）/僵死才杀（下轮入口
@@ -1089,7 +1151,7 @@ def dep_audit():
     CACHE_KEY = "sec:dep_audit"
     BEAT_KEY = "sec:dep_audit:beat"
     BATCH = 25
-    run_id = _dt.datetime.now(_dt.timezone.utc).isoformat() + "-" + _uuid.uuid4().hex[:8]
+    # run_id 由入口锁 token 传入（批190）
     br = business_redis(socket_timeout=3, socket_connect_timeout=2)   # 批182：单次 IO 上限（非任务级超时）
 
     # —— 入口三态判定（批 161 纯函数语义，僵死才杀的眼睛）——
@@ -1178,7 +1240,12 @@ def dep_audit():
             done_names = set()
 
     def _flush_batch(batch_rows):
-        """25 包一批 executemany upsert（judge 随行落列；批=断点粒度，幂等覆盖写）。"""
+        """25 包一批 executemany（批=断点粒度，幂等覆盖写）。
+
+        批190：取到上游的包才写判定；本轮未取到（网络错/额度用尽）只推 last_seen，
+        latest/judge/checked_at 保持上次成功值——否则一次网络失败会把昨日正确判定
+        降级成 unknown。
+        """
         if not batch_rows:
             return
         SQL = ("INSERT INTO security_component (source, name, version, origin, "
@@ -1188,9 +1255,17 @@ def dep_audit():
                "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
                "last_seen=now(), checked_at=now(), latest_version=EXCLUDED.latest_version, "
                "latest_source='pypi', judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
+        SQL_KEEP = ("INSERT INTO security_component (source, name, version, origin, first_seen, last_seen) "
+                    "VALUES ('pip', %s, %s, 'pip 安装', now(), now()) "
+                    "ON CONFLICT (source, name) DO UPDATE SET last_seen=now()")
+        ok_rows = [r[:5] for r in batch_rows if not r[5]]
+        keep_rows = [(r[0], r[1]) for r in batch_rows if r[5]]
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.executemany(SQL, batch_rows)
+                if ok_rows:
+                    cur.executemany(SQL, ok_rows)
+                if keep_rows:
+                    cur.executemany(SQL_KEEP, keep_rows)
             conn.commit()
 
     # 批181：scan 落的漏洞包优先刷新清单（只影响刷新频率，不改变判定）
@@ -1225,6 +1300,7 @@ def dep_audit():
         grp = "dev" if name in dev_names else "runtime"
         constraint = constraints.get(name)   # 步4修复：提前（icm 计算依赖——原序 UnboundLocalError）
         latest, icm = None, None
+        _skip_write = False   # 批190：本轮未取到上游 ⇒ 不写判定列（保留上次成功结果）
         _reuse_judge = None   # 批182：每轮重置（原漏重置 → 上包 judged 污染本包）
         if local:
             managed = "local"
@@ -1244,8 +1320,10 @@ def dep_audit():
             _budget_out = (name in _miss and name not in _priority
                            and n_remote >= _REFILL_MAX)
             if _budget_out:
-                # 批182：本轮联网额度用尽——不查上游（下轮补；latest=None → unknown）
+                # 批182：本轮联网额度用尽——不查上游（下轮补）
+                # 批190：不写判定列（旧判定保留，不当成 unknown 降级）
                 _reuse_judge = ("unknown", "本轮上游刷新额度用尽，下轮补")
+                _skip_write = True
             else:
                 try:
                     if name in _priority:
@@ -1264,13 +1342,14 @@ def dep_audit():
                         icm = _icm_fn(vers, constraint, cur)   # 步4盲审 B-P0-2：in_constraint 分支输入断供修复（v2 重构迁移遗漏）
                 except Exception as ex:
                     n_fail += 1
+                    _skip_write = True   # 批190：网络错≠上游无版本，旧判定保留
                     if n_fail <= 3:
                         errors.append(f"pypi {name}: {str(ex)[:100]}")
         if _reuse_judge is not None:
             jc, jw = _reuse_judge            # 续跑沿用（不重算）
         else:
             jc, jw = _judge(cur, constraint, latest, icm, True, managed)
-        batch.append((name, cur, latest, jc, jw))
+        batch.append((name, cur, latest, jc, jw, _skip_write))
         pip_rows.append({"name": name, "cur": cur, "latest": latest,
                          "in_constraint_max": icm, "local": local, "group": grp,
                          "judge_class": jc, "judge_why": jw})
@@ -1364,7 +1443,7 @@ def dep_audit():
                    "n_reuse": n_reuse, "n_null_latest": n_null_latest,
                    "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
                    "n_undeclared": len(undeclared)},
-        "last_complete": {"run_id": run_id, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
+        # last_complete 仅完整轮写入（批190）：失败轮推进锚会让读取侧切面落到半轮
         # 批184a：pkg_mgr/installed_n 随契约下发——此前缺这两个键 ⇒ 台账 pkg_mgr 永远 NULL
         # （生态列只能显示「系统包」）、且 `pkg_mgr == "unsupported"` 降级分支永不触发（fail-open）
         # all_repos 只收「已装且在仓库里」的名字（≤ installed，不膨胀契约）：
@@ -1376,10 +1455,17 @@ def dep_audit():
         "constraints": constraints, "dev_names": dev_names,
         "errors": errors[:5],
     }
-    try:
-        br.set(CACHE_KEY, _json.dumps(payload))
-    except Exception:
-        pass
+    if pip_rows or os_installed:
+        if ok:
+            payload["last_complete"] = {"run_id": run_id,
+                                        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        try:
+            br.set(CACHE_KEY, _json.dumps(payload))
+        except Exception:
+            pass
+    else:
+        # 枚举全挂：不覆盖上一份契约（无数据可写成"完整轮"），失败事实走 errors/日志
+        logger.error("dep_audit 枚举全挂，保留上一份契约 errors=%s", errors[:3])
 
     return {"status": "ok" if ok else "partial",
             "n_pip": len(pip_rows), "n_local": len([r for r in pip_rows if r["local"]]),

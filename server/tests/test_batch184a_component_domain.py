@@ -120,7 +120,7 @@ def test_gc_not_scoped_by_source():
 def test_audit_writes_domain_not_impl_source():
     """dep_audit 的 OS 行写域名 'os'（实现走 pkg_mgr），不得回退 'system'。"""
     from src.scheduler import tasks
-    s = inspect.getsource(tasks.dep_audit)
+    s = inspect.getsource(tasks._dep_audit_impl)
     # 只取代码行——注释里提到 'system'（说明历史）不算回退
     body = "\n".join(ln for ln in s.splitlines() if not ln.strip().startswith("#"))
     assert "VALUES ('os', %s, %s, %s" in body

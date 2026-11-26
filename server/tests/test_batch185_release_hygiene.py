@@ -126,7 +126,7 @@ def test_audit_marks_current_when_repo_has_package():
     """
     import inspect
     from src.scheduler import tasks
-    s = inspect.getsource(tasks.dep_audit)
+    s = inspect.getsource(tasks._dep_audit_impl)
     assert "_lat is None and nm in _repo" in s
     assert '"current", ""' in s
 

@@ -14,7 +14,7 @@ def test_local_pkg_zero_upstream():
     """local 包不发起 pypi 请求（155 原语义保留——批161 源码断言更新）。"""
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     assert 'if local:' in src and 'managed = "local"' in src
     assert "pypi_versions_cached" not in src.split('if local:')[1].split("elif")[0]
 
@@ -23,7 +23,7 @@ def test_no_threadpool_and_no_random_rotation():
     """单线程+抽签退役（用户原则：时限拆除后提速无刚需）。"""
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     assert "ThreadPoolExecutor" not in src
     assert "1 / 7" not in src and "_rnd" not in src
 
@@ -39,7 +39,7 @@ def test_heartbeat_key_ttl_and_done_state():
     """心跳键 TTL 26h（跨 24h 判定窗）+done 终态。"""
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     assert "26 * 3600" in src
     assert "done" in src
 
@@ -48,7 +48,7 @@ def test_zombie_detection_three_states():
     """入口三态判定（纯逻辑段）：done=正常 / beat 停>10min=zombie / 无键=interrupted。"""
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     assert '"zombie" if age > 600' in src or "'zombie' if age > 600" in src
     assert "interrupted" in src
     assert "zombie" in src
@@ -58,7 +58,7 @@ def test_contract_shape_v3():
     """契约瘦身形态：last_complete/os 段/constraints/dev_names/counts；兼容 :rows 键已删（收尾批——表为唯一真源）。"""
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     for frag in ("last_complete", '"os"', "constraints", "dev_names", "prev_state"):
         assert frag in src, frag
     assert ":rows" not in src and "8 * 86400" not in src   # 收尾批：兼容键已删
@@ -93,7 +93,12 @@ def _mock_env(monkeypatch):
     store = {}
     client = MagicMock()
     client.get.side_effect = lambda k: store.get(k)
-    client.set.side_effect = lambda k, v, ex=None: store.__setitem__(k, v)
+    def _set(k, v, ex=None, nx=False):     # 批190：入口锁走 SET NX，桩需同签名
+        if nx and k in store:
+            return None
+        store[k] = v
+        return True
+    client.set.side_effect = _set
     monkeypatch.setattr("src.quant_common.redis_client.business_redis", lambda **kw: client)
 
     sql_calls = []
@@ -261,8 +266,11 @@ def test_refill_budget_caps_network(monkeypatch):
         def get(self, k):
             return store.get(k)
 
-        def set(self, k, v, ex=None):
+        def set(self, k, v, ex=None, nx=False):   # 批190：入口锁 SET NX 同签名
+            if nx and k in store:
+                return None
             store[k] = v
+            return True
 
         def mget(self, keys):
             return [None] * len(keys)          # 全 miss => 触发额度
@@ -284,7 +292,7 @@ def test_valkey_client_has_socket_timeout():
     from src.health_monitor import os_pkg
     from src.scheduler import tasks
     assert "socket_timeout=3" in inspect.getsource(os_pkg.pypi_versions_cached)
-    assert "socket_timeout=3" in inspect.getsource(tasks.dep_audit)
+    assert "socket_timeout=3" in inspect.getsource(tasks._dep_audit_impl)
 
 
 

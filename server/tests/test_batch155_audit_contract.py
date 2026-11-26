@@ -25,5 +25,5 @@ def test_local_pkg_zero_upstream(monkeypatch):
     # local 包零上游请求（155 立法，批 161 形态更新——详见 161 套同名测试）。
     import inspect
     from src.scheduler import tasks
-    src = inspect.getsource(tasks.dep_audit)
+    src = inspect.getsource(tasks._dep_audit_impl)
     assert 'if local:' in src

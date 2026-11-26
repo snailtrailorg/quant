@@ -98,11 +98,11 @@ def _count_new_findings(day: date, spans: list[tuple]) -> int:
 
 @router.post("/scan")
 def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
-    """手动触发安全扫描（批 138；批 155 串行化 §4.4c）。
+    """手动触发安全扫描（批 138；批 155 串行化；批 190 锁改任务入口权威）。
 
-    Valkey sec:scan_lock（TTL>任务 time_limit）：占用中 -> 409 SEC_SCAN_RUNNING
-    （拒绝入队而非排队）；任务收尾 DEL（值=自己）；崩溃 TTL 兜底。
-    手动刷新**必派** dep_audit（判定列同轮重算；旧 fresh 档会让升级后仍报可升级）。
+    Valkey sec:scan_lock：占用中 -> 409 SEC_SCAN_RUNNING（快速反馈；权威互斥=
+    任务入口 SET NX，路由**不写锁**——否则 route 先占会让任务自锁死）。
+    2026-11-25 三任务拆分：扫描只管扫描，依赖审计/漏洞库各走自身按钮与 beat。
     """
     from src.quant_common.redis_client import business_redis
     from src.scheduler.tasks import security_scan
@@ -113,11 +113,7 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     if lock_val:
         raise ApiError(409, "SEC_SCAN_RUNNING", f"扫描进行中（task={lock_val[:8]}）")
     # 2026-11-25 三任务拆分：扫描只管扫描，依赖审计/漏洞库由各自按钮与 beat 调度
-    task = security_scan.delay()
-    try:
-        br.set("sec:scan_lock", str(task.id), ex=2700)
-    except Exception:
-        pass
+    task = security_scan.delay()   # 锁由任务入口抢（批190：单一判定源，del 失败不留假忙）
     audit_log(payload.get("username", ""), "trigger_security_scan", "")
     logger.info("security scan triggered by %s (task=%s)", payload.get("username"), task.id)
     return {"status": "submitted", "task_id": task.id}

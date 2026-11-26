@@ -600,11 +600,28 @@ def update_grype_db() -> dict:
         state = _update_db(env)
     except Exception as e:   # noqa: BLE001
         state, err = "update-failed", str(e)[:200]
-    out = {"ts": _dtd.datetime.now(_dtd.timezone.utc).isoformat(),
-           "state": state, "error": err}
+    now = _dtd.datetime.now(_dtd.timezone.utc).isoformat()
+    out = {"ts": now, "state": state, "error": err}
     try:
+        # 批190：状态分层——state/ts 只在成功时推进；失败只写 last_attempt。
+        # 否则一次网络失败会把「上次成功更新」冲掉（本地旧库其实仍可用）。
         from src.quant_common.redis_client import business_redis as _br
-        _br().set("sec:grype_db_state", json.dumps(out), ex=7 * 86400)
+        br = _br()
+        prev = {}
+        try:
+            raw = br.get("sec:grype_db_state")
+            prev = json.loads(raw.decode() if isinstance(raw, bytes) else raw) if raw else {}
+        except Exception:
+            prev = {}
+        if state == "updated":
+            out.pop("last_attempt", None)
+            br.set("sec:grype_db_state", json.dumps(out), ex=7 * 86400)
+        else:
+            merged = dict(prev) if prev else {"state": state, "ts": now, "error": err}
+            if merged.get("state") != "updated":     # 从未成功过：失败态即有效态
+                merged.update({"state": state, "ts": now, "error": err})
+            merged["last_attempt"] = {"ts": now, "state": state, "error": err}
+            br.set("sec:grype_db_state", json.dumps(merged), ex=7 * 86400)
     except Exception as e:   # noqa: BLE001
         logger.warning("漏洞库状态写失败: %s", e)
     return out
@@ -1167,6 +1184,7 @@ def run_security_scan(today: date | None = None) -> dict:
     diff_items: list[dict] = []
     ai_summary = ""
     from src.data_platform.db import get_conn
+    _write_snap = False
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT components, ports, ssh_cfg FROM security_snapshot "
@@ -1253,17 +1271,24 @@ def run_security_scan(today: date | None = None) -> dict:
                     len(_os_all), len(_gm), _pkg_mgr)
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
-        conn.execute(
-            "INSERT INTO security_snapshot "
-            "(scan_date, status, components, ports, ssh_cfg, dnf, headers, ai_summary) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT (scan_date) DO UPDATE SET status=EXCLUDED.status, "
-            "components=EXCLUDED.components, ports=EXCLUDED.ports, ssh_cfg=EXCLUDED.ssh_cfg, "
-            "dnf=EXCLUDED.dnf, headers=EXCLUDED.headers, ai_summary=EXCLUDED.ai_summary, "
-            "created_at=now()",
-            (today, status, json.dumps(parts["components"]), json.dumps(parts["ports"]),
-             json.dumps(parts["ssh_cfg"]), json.dumps(parts["dnf"]),
-             json.dumps(parts["headers"]), None))
+        # 批190：**整轮 ok 才覆盖**——失败轮保留上次成功结果（否则 created_at 推进会让
+        # 读取侧把所有 finding 判 fixed=假清零）。库内无任何 ok 行时仍落一行 degraded 供诊断。
+        _write_snap = status == "ok"
+        if not _write_snap:
+            _write_snap = conn.execute(
+                "SELECT 1 FROM security_snapshot WHERE status='ok' LIMIT 1").fetchone() is None
+        if _write_snap:
+            conn.execute(
+                "INSERT INTO security_snapshot "
+                "(scan_date, status, components, ports, ssh_cfg, dnf, headers, ai_summary) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (scan_date) DO UPDATE SET status=EXCLUDED.status, "
+                "components=EXCLUDED.components, ports=EXCLUDED.ports, ssh_cfg=EXCLUDED.ssh_cfg, "
+                "dnf=EXCLUDED.dnf, headers=EXCLUDED.headers, ai_summary=EXCLUDED.ai_summary, "
+                "created_at=now()",
+                (today, status, json.dumps(parts["components"]), json.dumps(parts["ports"]),
+                 json.dumps(parts["ssh_cfg"]), json.dumps(parts["dnf"]),
+                 json.dumps(parts["headers"]), None))
         conn.commit()
 
     if diff_items:
@@ -1278,6 +1303,22 @@ def run_security_scan(today: date | None = None) -> dict:
         {"zone": z, "reason": (p.get("degraded_reason") or "采集失败")}
         for z, p in (*parts.items(), ("vulns", vulns)) if p.get("status") == "degraded"
     ]
+    # 批190：本轮尝试结果独立落键——失败/降级不覆盖快照，但「试过且失败」必须可定位
+    try:
+        import datetime as _dta
+        from src.quant_common.redis_client import business_redis as _bra
+        _brk = "sec:scan_last_attempt"
+        if _write_snap:
+            _bra().delete(_brk)
+        else:
+            _bra().set(_brk, json.dumps({
+                "ts": _dta.datetime.now(_dta.timezone.utc).isoformat(),
+                "scan_date": today.isoformat(), "status": status,
+                "degraded_zones": degraded_zones,
+                "n_fresh_vulns": len(fresh),
+            }), ex=7 * 86400)
+    except Exception as _ea:
+        logger.warning("扫描尝试状态写入失败（不影响扫描）: %s", _ea)
     # 批185：**安全采集连续失败告警**（属安全域；health R 系列管服务/资源，不混——
     # 那条链响应是「重启服务」，本条响应是「装扫描器/查 grype DB/重扫」）。
     # 边界：本条只管「跑了但 vulns 分区 degraded」。**根本没跑**（beat/worker 停）由
@@ -1309,7 +1350,7 @@ def run_security_scan(today: date | None = None) -> dict:
 
     if status == "degraded" or fresh or diff_items:
         ai_summary = _ai_summary(today, fresh, diff_items, degraded_zones)
-    if ai_summary:
+    if ai_summary and _write_snap:   # 批190：失败轮摘要不得写到上次成功行上
         try:
             with get_conn() as conn:
                 conn.execute("UPDATE security_snapshot SET ai_summary=%s WHERE scan_date=%s",

@@ -14,6 +14,6 @@ def test_resume_window_is_two_hours_not_26h():
     """续跑窗=单轮上限 2h；26h 会让 24h 后的新轮被上一轮整轮罩住。"""
     import inspect
     from src.scheduler import tasks
-    s = inspect.getsource(tasks.dep_audit)
+    s = inspect.getsource(tasks._dep_audit_impl)
     assert "timedelta(hours=2)" in s
     assert "timedelta(hours=26)" not in s

@@ -15,20 +15,23 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.postureTitle') }}</span>
-          <div style="display:flex;align-items:center;gap:12px">
-            <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
-            <!-- 2026-11-25 三任务：依赖审计 / 漏洞库 / 扫描 各自独立触发（顺序建议 审计→库→扫描） -->
-            <el-button size="small" :loading="auditPending" :disabled="auditPending"
-                       @click="onAudit">{{ t('secpage.runAudit') }}</el-button>
-            <el-button size="small" :loading="dbPending" :disabled="dbPending"
-                       @click="onDbUpdate">{{ t('secpage.runDb') }}</el-button>
-            <!-- 批 138/141：手动重扫——原位置保留（批 171p 曾误迁入扫描结果卡，已回位） -->
-            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
-                     :disabled="scanning || localPending" @click="onRescan" />
-          </div>
+          <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
         </div>
       </template>
       <div class="card-grid">
+        <!-- ① 系统版本（当前版+双链一致性+最近 5 版） -->
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.deploys') }}</span></div>
+          <div class="card-value">
+            <span class="pct small">{{ deployShort }}</span>
+            <el-tag v-if="snap.deploy?.web_same === false" size="small" type="warning">web ≠</el-tag>
+          </div>
+          <div class="kpi-sub deploy-list">
+            <div v-for="r in snap.deploy?.recent || []" :key="r"
+                 :class="{ 'deploy-cur': r === snap.deploy?.current }">{{ deployFmt(r) }}</div>
+          </div>
+        </el-card>
+        <!-- ② 存在漏洞 -->
         <el-card shadow="never" class="metric-card">
           <div class="card-head">
             <span class="card-name">{{ t('secpage.vulnTotal') }}</span>
@@ -46,10 +49,39 @@
             <span v-if="!srcCounts.length" class="kpi-sub">{{ t('secpage.noVulnOpt') }}</span>
           </div>
         </el-card>
-        <!-- 批 171p：「扫描结果」卡（原 扫描状态+快照日期 两卡合并——用户裁定；stale 解释
-             文案随合并退役〔机制自白费解——两卡并排时间自明〕；重扫钮随迁入本卡） -->
+        <!-- ③ 系统组件 + 依赖审计（手动钮入卡右上角） -->
         <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.scanResult') }}</span></div>
+          <div class="card-head">
+            <span class="card-name">{{ t('secpage.compUpdates') }}</span>
+            <IconBtn :icon="Search" :title="t('secpage.runAudit')"
+                     :loading="auditPending" @click="onAudit" />
+          </div>
+          <div class="card-value">
+            <span class="kpi-prefix">{{ t('secpage.updTotal') }}:</span>
+            <span class="pct small">{{ updCounts.total }}</span>
+          </div>
+          <div class="kpi-sub">{{ t('secpage.osUpdates') }}: {{ updCounts.os }}</div>
+          <div class="kpi-sub">{{ t('secpage.pypiUpdates') }}: {{ updCounts.pip }}</div>
+        </el-card>
+        <!-- ④ 漏洞库 + 库更新（手动钮入卡右上角） -->
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head">
+            <span class="card-name">{{ t('secpage.vulnDb') }}</span>
+            <IconBtn :icon="Download" :title="t('secpage.runDb')"
+                     :loading="dbPending" @click="onDbUpdate" />
+          </div>
+          <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
+          <div class="kpi-sub" style="white-space:nowrap">{{ t('secpage.dbUpstreamAt') }}：{{ dbBuiltTime }}</div>
+          <div class="kpi-sub" style="white-space:nowrap">{{ t('secpage.dbLocalAt') }}：{{ dbLocalTime }}</div>
+          <div v-if="dbStateHint" class="kpi-sub warn">{{ dbStateHint }}</div>
+        </el-card>
+        <!-- ⑤ 扫描结果 + 重扫（手动钮入卡右上角；批 171p 两卡合并） -->
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head">
+            <span class="card-name">{{ t('secpage.scanResult') }}</span>
+            <IconBtn :icon="Refresh" :title="t('secpage.rescan')"
+                     :loading="scanning || localPending" @click="onRescan" />
+          </div>
           <div class="card-value">
             <span class="pct small">{{ snap.scan_date }}</span>
             <StatusTag :value="snap.status" />
@@ -62,31 +94,6 @@
           <div class="kpi-sub dep-outdated" :class="{ warn: depOutdatedWarn }">
             {{ t('secpage.depOutdated') }}: {{ snap.dep_health?.has_update_n ?? '—' }}
           </div>
-        </el-card>
-        <!-- 批 171p：「最近上产」卡（当前版+双链一致性+最近 5 版） -->
-        <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.deploys') }}</span></div>
-          <div class="card-value">
-            <span class="pct small">{{ deployShort }}</span>
-            <el-tag v-if="snap.deploy?.web_same === false" size="small" type="warning">web ≠</el-tag>
-          </div>
-          <div class="kpi-sub deploy-list">
-            <div v-for="r in snap.deploy?.recent || []" :key="r"
-                 :class="{ 'deploy-cur': r === snap.deploy?.current }">{{ deployFmt(r) }}</div>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.compUpdates') }}</span></div>
-          <div class="card-value"><span class="pct small">{{ updCounts.total }}</span></div>
-          <div class="kpi-sub">{{ t('secpage.osUpdates') }}: {{ updCounts.os }}</div>
-          <div class="kpi-sub">{{ t('secpage.pypiUpdates') }}: {{ updCounts.pip }}</div>
-        </el-card>
-        <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
-          <div class="card-value"><span class="pct small" style="white-space:nowrap">{{ dbBuiltDate }}</span></div>
-          <div class="kpi-sub" style="white-space:nowrap">{{ t('secpage.dbUpstreamAt') }}：{{ dbBuiltTime }}</div>
-          <div class="kpi-sub" style="white-space:nowrap">{{ t('secpage.dbLocalAt') }}：{{ dbLocalTime }}</div>
-          <div v-if="dbStateHint" class="kpi-sub warn">{{ dbStateHint }}</div>
         </el-card>
       </div>
     </el-card>
@@ -268,7 +275,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { WarningFilled, Delete, Refresh, Tickets } from '@element-plus/icons-vue'
+import { WarningFilled, Delete, Refresh, Tickets, Search, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan,
          triggerDepAudit, triggerGrypeDbUpdate, deleteSecuritySummary } from '../api'
@@ -581,9 +588,10 @@ const onDeleteSummary = async (d) => {
 /* A 区四卡——同 SystemMetricsCards 形态（wd-20 首屏同构；窄屏 2×2 回退同款） */
 .card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); }
 .metric-card { border: 1px solid var(--border-weak); }
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
+.card-head { display: flex; justify-content: space-between; align-items: center; min-height: var(--icon-btn); margin-bottom: var(--sp-2); }
 .card-name { font-size: var(--fs-label); color: var(--text-secondary); }
-.card-value { display: flex; align-items: center; min-height: 34px; margin-bottom: var(--sp-2); }
+.card-value { display: flex; align-items: center; gap: var(--sp-1); min-height: 34px; margin-bottom: var(--sp-2); }
+.kpi-prefix { color: var(--text-secondary); font-size: var(--fs-foot); }
 .pct { font-family: var(--font-num); font-size: var(--fs-page); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pct.critical { color: var(--critical); }
 .pct.warn { color: var(--warn-fill); }
