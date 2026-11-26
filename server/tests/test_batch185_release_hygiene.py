@@ -152,4 +152,4 @@ def test_ledger_gc_is_immediate():
     src = inspect.getsource(sc.run_security_scan)
     assert "timedelta(days=3)" not in src
     assert "timedelta(days=7)" not in src
-    assert "source='pip' AND last_seen < now()" in src
+    assert "source='pip' AND NOT (name = ANY(%s::text[]))" in src

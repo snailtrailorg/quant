@@ -1251,17 +1251,22 @@ def run_security_scan(today: date | None = None) -> dict:
         # （pip=freeze 完整枚举 / os=dep_audit / binary=SBOM），不再留 3 天宽限。
         # 域级采集守卫：该域本轮没有产出（降级）时跳过该域 GC，防一次采集失败清空台账。
         #   pip/binary ← _ledger（vulns ok 且 freeze 成功才有）；os ← _os_all（dep_audit 清单）。
-        # 锚点必须用**本事务 now()**（=事务开始时刻，与 upsert 的 last_seen=now() 同值）：
-        # 用 today(00:00) 会让同日第二轮扫描漏判——上午扫描已把行 last_seen 写成当天时刻，
-        # 大于 00:00 ⇒ "本轮未见"的行永远删不掉（staging 实证：11:47 扫过的三包仍在）。
+        # 判据必须是**本轮名单**，不能比时间：last_seen 是 date（00:00），同日多轮无法
+        # 区分；now()/锚点都会把本轮刚写的行（00:00）判成"未见"而清空全表
+        # （2026-11-26 staging 实证）。名单来自与 upsert 同一份 _ledger/_os_all，天然一致。
         if _ledger:
+            _pip_names = [r[1] for r in _ledger if r[0] == "pip"]
+            _bin_names = [r[1] for r in _ledger if r[0] == "binary"]
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='pip' AND last_seen < now()")
+                         "WHERE source='pip' AND NOT (name = ANY(%s::text[]))",
+                         (_pip_names,))
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='binary' AND last_seen < now()")
+                         "WHERE source='binary' AND NOT (name = ANY(%s::text[]))",
+                         (_bin_names,))
         if _os_all:
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='os' AND last_seen < now()")
+                         "WHERE source='os' AND NOT (name = ANY(%s::text[]))",
+                         ([r["name"] for r in _os_all],))
         # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:

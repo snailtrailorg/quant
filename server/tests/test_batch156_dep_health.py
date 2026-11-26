@@ -32,7 +32,7 @@ def test_alias_purge_and_global_gc(monkeypatch):
     assert '_LEGACY8' not in src, "运行期别名清理应已迁移到 0189"
     # 批191（用户裁定）：三域统一「本轮未见即删」，不再留 3 天宽限
     for dom in ("pip", "binary", "os"):
-        assert f"source='{dom}' AND last_seen < now()" in src, dom
+        assert f"source='{dom}' AND NOT (name = ANY(%s::text[]))" in src, dom
     assert "timedelta(days=3)" not in src
 
 
