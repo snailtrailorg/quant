@@ -35,7 +35,8 @@ lock 外 3 包不升（不在依赖闭包，无法走 lock；单独 pip 升级�
 
 ## 3. venv 瘦身（一次性 prune）
 
-- `quant-pip-wrapper` 新增 `prune` 子命令：硬编码 `ruff pip-tools akshare`，不接受包名参数（零注入面），幂等。
+- `quant-pip-wrapper` 新增 `prune` 子命令：硬编码 `ruff pip-tools akshare decorator cachecontrol exceptiongroup`，不接受包名参数（零注入面），幂等。
+  - 后三个为无用途残留（decorator 无 Required-by / cachecontrol 零依赖 / exceptiongroup 仅 celery 的 py<3.11 marker）。
 - 子命令白名单 `freeze|upgrade-tools|dry-run|install|rebuild|prune`；`prune` 豁免 release_id 校验。
 - staging/prod 各执行一次（`sudo -n -u quant /usr/local/sbin/quant-pip-wrapper prune`），三包已从 venv 消失。
 - 不自动随发布跑：三包已不在任何清单，复发面=0。

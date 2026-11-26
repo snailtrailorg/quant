@@ -55,7 +55,7 @@ def test_wrapper_prune_is_hardcoded_whitelist():
     """prune=一次性、硬编码三包（不接受任意包名=零注入面）。"""
     w = (_REPO / "deploy/wrappers/quant-pip-wrapper").read_text()
     assert "prune)" in w
-    assert 'uninstall -y ruff pip-tools akshare' in w
+    assert 'uninstall -y ruff pip-tools akshare decorator cachecontrol exceptiongroup' in w
     assert 'prune" >&2; exit 2' in w or "[ $# -eq 1 ]" in w
 
 def test_merge_ledger_keeps_sbom_dependency_chain():

@@ -10,7 +10,7 @@
 #   dry-run <release_id>  —— pip install --dry-run --require-hashes -r <staged>/requirements.lock 预检
 #                            （解析失败即非零退出——场景 1 坏 requirements 的拦截点；哈希校验防依赖漂移）
 #   install <release_id>  —— 真装（调用侧按指纹变化才触发）
-#   prune                 —— 批191：一次性卸载退役包（硬编码 ruff/pip-tools/akshare；幂等）
+#   prune                 —— 批191：一次性卸载退役包（硬编码白名单；幂等）
 #
 # 严参校验:
 #   子命令白名单 freeze|dry-run|install；release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$
@@ -73,7 +73,9 @@ esac
 
 # 批191：一次性 venv 瘦身——白名单硬编码（不接受任意包名=零注入面）；幂等（不存在时 pip 跳过）
 if [ "$sub" = "prune" ]; then
-  exec "$PIP" uninstall -y ruff pip-tools akshare
+  # 白名单：ruff（dev 工具）+ pip-tools/akshare（历史残留）+ 三个无用途残留
+  #   decorator（无 Required-by）/ cachecontrol（零依赖）/ exceptiongroup（celery 仅 py<3.11 marker）
+  exec "$PIP" uninstall -y ruff pip-tools akshare decorator cachecontrol exceptiongroup
 fi
 
 if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
