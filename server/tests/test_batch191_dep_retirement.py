@@ -68,3 +68,10 @@ def test_merge_ledger_keeps_sbom_dependency_chain():
     assert rows2 == [("pip", "foo", "1.0", "vnpy→foo")]
     rows3 = _merge_ledger({"bar": "1.0"}, [])
     assert rows3 == [("pip", "bar", "1.0", "pip 安装")]
+
+def test_dep_audit_keep_row_writes_last_changed():
+    """批191：未取到上游的包首次入库也必须写 last_changed（NOT NULL 回归钉）。"""
+    import inspect
+    from src.scheduler import tasks
+    src = inspect.getsource(tasks._dep_audit_impl)
+    assert "first_seen, last_changed, last_seen" in src

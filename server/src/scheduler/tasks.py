@@ -1253,8 +1253,11 @@ def _dep_audit_impl(run_id: str):
                "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
                "last_seen=now(), checked_at=now(), latest_version=EXCLUDED.latest_version, "
                "latest_source='pypi', judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
-        SQL_KEEP = ("INSERT INTO security_component (source, name, version, origin, first_seen, last_seen) "
-                    "VALUES ('pip', %s, %s, 'pip 安装', now(), now()) "
+        # 批191 修：INSERT 分支必须给 last_changed（NOT NULL）——新包首次即"未取到上游"时
+        # 走本语句（如 lazy-importer 新依赖），漏列会整轮 NotNullViolation（16:16 prod 实证）。
+        SQL_KEEP = ("INSERT INTO security_component "
+                    "(source, name, version, origin, first_seen, last_changed, last_seen) "
+                    "VALUES ('pip', %s, %s, 'pip 安装', now(), now(), now()) "
                     "ON CONFLICT (source, name) DO UPDATE SET last_seen=now()")
         ok_rows = [r[:5] for r in batch_rows if not r[5]]
         keep_rows = [(r[0], r[1]) for r in batch_rows if r[5]]
