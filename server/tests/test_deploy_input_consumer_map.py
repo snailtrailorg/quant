@@ -32,8 +32,7 @@ _A06 = _REPO / "docs" / "architecture" / "A06-部署管道架构.md"
 
 # 抽核行（强断言样本）: (输入名片段, 消费者 path 尾段, 行锚, 该行±50 行窗口必含词)
 _STRONG_SPOT_CHECKS = [
-    ("requirements.lock", "quant-pip-wrapper", 75, "requirements.lock"),
-    ("requirements-dev", "quant-pip-wrapper", 103, "requirements-dev"),   # 批 151 校准（rebuild 分支加入后行移）
+    ("requirements.lock", "quant-pip-wrapper", 84, "requirements.lock"),   # 批191 校准（DEV 段删除后行移）
     ("deploy_slices", "release.yml", 162, "deploy_slices"),
     ("sudoers", "bootstrap.yml", 41, "sudoers-quant-deploy.j2"),
     ("deploy_hub_md_providers", "release.yml", 243, "deploy_hub_md_providers"),
@@ -115,9 +114,9 @@ class TestMapAlive:
         assert len(data) >= 15, f"§11 数据行 {len(data)} < 15（六类输入覆盖不足）"
 
     def test_six_input_classes_covered(self):
-        """六类输入（批 121 验收 1）：切片/指纹(lock 与 dev)/wrapper/sudoers/nginx conf。"""
+        """输入类（批 121 验收 1；批191 起 requirements-dev 退役 → 五类）：切片/指纹 lock/wrapper/sudoers/nginx conf。"""
         sec = _extract_section(_read_a06())
-        for kw in ("deploy_slices", "requirements.lock", "requirements-dev",
+        for kw in ("deploy_slices", "requirements.lock",
                    "wrapper", "sudoers", "nginx"):
             assert kw in sec, f"§11 缺输入类: {kw}"
 

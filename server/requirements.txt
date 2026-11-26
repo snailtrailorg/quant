@@ -57,6 +57,9 @@ pydantic>=2.14
 pyyaml>=6.0
 python-dotenv>=1.0
 packaging>=24           # 批190：depjudge 直接 import（Version/SpecifierSet/Requirement）——原靠传递带入未声明
+pybind11>=2.12           # 批191：EMQ/EMT 绑定编译（quant-emd-build）——原 requirements-dev 迁入
+filelock>=4.2.1          # 批191：pip/setuptools/wheel 工具链伴生——原 requirements-dev 迁入
+importlib-metadata>=8    # 批191：vnpy_xtp（lock 外 wheel）运行时依赖——原 requirements-dev 迁入
 
 # === 嵌入模型 bge-m3 不进主 venv（拖 torch ~2GB）===
 # 独立 worker 进程单独建: requirements-embedding.txt

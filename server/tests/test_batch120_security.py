@@ -588,12 +588,12 @@ class TestRegistration:
         assert "security.vuln_new" in RUNBOOK
 
     def test_pip_audit_retired(self):
-        """批 124 退役守卫：pip-audit 已被 grype 单源取代（prod 首轮绿后退役）——
-        此钉防误加回（若有人重新引入，采集器已无消费者，徒增工具链面）。"""
+        """批 124 退役守卫 + 批191：pip-audit 已被 grype 单源取代，且 requirements-dev.txt 退役。
+        此钉防误加回（采集器已无消费者，徒增工具链面）。"""
         from pathlib import Path
-        src = Path("requirements-dev.txt").read_text()
-        assert "pip-audit" not in src.replace("# ", "#")   # 注释里的退役史不算
-        assert "已退役" in src   # 退役注记在位（判定依据可查）
+        assert "pip-audit" not in Path("requirements.txt").read_text()
+        assert "pip-audit" not in Path("requirements.lock").read_text()
+        assert not Path("requirements-dev.txt").exists()   # 批191 退役（三包并入 requirements.txt）
 
 
 class TestBatch120FirstScanFixes:

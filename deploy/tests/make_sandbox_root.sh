@@ -59,10 +59,8 @@ cp "$HERE/../../server/src/data_platform/migration_policy.py" "$STAGE/src/data_p
 # 补占位道具（vendor 内容随场景无关——同步通道存在性即所验）
 mkdir -p "$STAGE/vendor"
 echo ".sbx vendor 占位（make_sandbox_root 生成）" > "$STAGE/vendor/README"
-# 批 136/133：requirements-dev.txt 与 deps/ 白名单切片占位（缺=rsync code 23 中止——批 133 沙箱回归实跑暴露）。
-# requirements-dev 复制真文件（沙箱 stage-5 若走真装，内容须合法）；deps 复制真 vnpy wheel
-# （quant-pip-wrapper 硬断言 releases/<id>/deps/vnpy-*.whl 在场——lock 的 file: URL 指它，dry-run 解析也需真文件）。
-cp "$HERE/../../server/requirements-dev.txt" "$STAGE/requirements-dev.txt"
+# 批 191：requirements-dev.txt 已退役（不再进白名单/切片）。
+# deps 复制真 vnpy wheel（quant-pip-wrapper 硬断言 releases/<id>/deps/vnpy-*.whl 在场——lock 的 file: URL 指它，dry-run 解析也需真文件）。
 mkdir -p "$STAGE/deps"
 cp "$HERE/../../server/deps/"*.whl "$STAGE/deps/"
 # 批 106 同款：3980c0c 把 requirements.lock 加进白名单 + 改 quant-pip-wrapper 读 lock，

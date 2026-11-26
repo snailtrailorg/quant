@@ -1144,7 +1144,7 @@ def _dep_audit_impl(run_id: str):
     from src.health_monitor import os_pkg
     from src.quant_common.depjudge import judge as _judge
     from src.quant_common.depjudge import in_constraint_max as _icm_fn
-    from src.quant_common.depjudge import parse_constraints, parse_names
+    from src.quant_common.depjudge import parse_constraints
     from src.quant_common.depjudge import _v as _pep440
     from src.quant_common.redis_client import business_redis
 
@@ -1184,16 +1184,14 @@ def _dep_audit_impl(run_id: str):
     try:
         here = _os.path.dirname(_os.path.abspath(__file__))
         server_dir = _os.path.dirname(_os.path.dirname(here))
-        for fname, is_dev in (("requirements.txt", False),
-                              ("requirements-dev.txt", True)):
-            path = _os.path.join(server_dir, fname)
-            try:
-                text = open(path, encoding="utf-8").read()
-            except Exception:
-                continue
+        # 批191：requirements-dev.txt 退役——生产附加依赖已并入 requirements.txt；
+        # dev 专用工具不再进 venv，组别统一 runtime（dev_names 恒空，保留变量供下游形状稳定）
+        path = _os.path.join(server_dir, "requirements.txt")
+        try:
+            text = open(path, encoding="utf-8").read()
             constraints.update(parse_constraints(text))
-            if is_dev:
-                dev_names = parse_names(text)
+        except Exception as e1:
+            errors.append(f"constraints: {e1}"[:120])
     except Exception as e:
         errors.append(f"constraints: {e}"[:120])
 

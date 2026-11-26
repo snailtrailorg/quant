@@ -38,7 +38,7 @@ echo "① 重编译 $LOCK（--generate-hashes）..."
 # 索引必须与 ③ 的 dry-run 同源：编译走 pypi.org / 校验走镜像会解析出镜像没有的版本
 # （2026-11-25 实证：lark-oapi 1.9.0 编译通过、dry-run 找不到 → 半成品 lock）
 # shellcheck disable=SC2086
-./venv/bin/pip-compile --generate-hashes --no-strip-extras $UPGRADE_FLAG $PKG_FLAGS \
+./venv/bin/pip-compile --generate-hashes --no-annotate --no-strip-extras $UPGRADE_FLAG $PKG_FLAGS \
     --index-url "${QUANT_PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
     --output-file "$LOCK" "$REQ"
 
