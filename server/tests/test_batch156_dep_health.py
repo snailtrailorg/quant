@@ -30,8 +30,10 @@ def test_alias_purge_and_global_gc(monkeypatch):
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc.run_security_scan)
     assert '_LEGACY8' not in src, "运行期别名清理应已迁移到 0189"
-    assert "DELETE FROM security_component WHERE last_seen < %s" in src
-    assert "timedelta(days=3)" in src        # 3 天退役（184 首轮已清完存量）
+    # 批191（用户裁定）：三域统一「本轮未见即删」，不再留 3 天宽限
+    for dom in ("pip", "binary", "os"):
+        assert f"source='{dom}' AND last_seen < %s" in src, dom
+    assert "timedelta(days=3)" not in src
 
 
 def test_managed_by_derived_covers_sbom_only():

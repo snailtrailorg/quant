@@ -1241,18 +1241,24 @@ def run_security_scan(today: date | None = None) -> dict:
         # · sys_rows / 8 别名探针已删（schema2 全量 OS 行覆盖真实包名；apt 下 rpm 命令不存在）；
         # · OS 行写 source='os'，origin/latest_source 由契约 pkg_mgr 派生（换 apt 不改域）；
         # · GC 三域统一（原仅 system/pip，rpm·binary 从不清理 ⇒ 永久累积）。
-        import datetime as _dt3
         _os_all = [r for r in _dh_rows if r.get("group") == "os"]
         if _os_all:
             # origin 传空 = **不覆盖**：SBOM 行已推导出依赖链（「ffmpeg 哪来的」），
             # 用「OS dnf」覆盖会让 D 区「依赖关系」列整列变空（批184a 审核发现）
             _os_up = [("os", r["name"], str(r.get("cur") or ""), "") for r in _os_all]
             _upsert_components(conn, today, _os_up, pkg_mgr=_pkg_mgr)
-        # 孤儿 GC：**仅本轮 ledger 非空**时执行（grype 失败 ⇒ ledger 空，否则会清空全表）。
-        # 3 天未再见即退役（184 首轮已把 rpm/binary 的历史存量清完，不再需要 7 天宽限）。
+        # 孤儿 GC（批191 用户裁定）：三域统一「本轮未见即删」——真源可信
+        # （pip=freeze 完整枚举 / os=dep_audit / binary=SBOM），不再留 3 天宽限。
+        # 域级采集守卫：该域本轮没有产出（降级）时跳过该域 GC，防一次采集失败清空台账。
+        #   pip/binary ← _ledger（vulns ok 且 freeze 成功才有）；os ← _os_all（dep_audit 清单）。
         if _ledger:
-            conn.execute("DELETE FROM security_component WHERE last_seen < %s",
-                         (today - _dt3.timedelta(days=3),))
+            conn.execute("DELETE FROM security_component "
+                         "WHERE source='pip' AND last_seen < %s", (today,))
+            conn.execute("DELETE FROM security_component "
+                         "WHERE source='binary' AND last_seen < %s", (today,))
+        if _os_all:
+            conn.execute("DELETE FROM security_component "
+                         "WHERE source='os' AND last_seen < %s", (today,))
         # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:

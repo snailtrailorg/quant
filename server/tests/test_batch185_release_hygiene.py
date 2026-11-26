@@ -146,8 +146,10 @@ def test_finding_scanner_expanded_and_backfilled():
 
 
 @needs_db
-def test_ledger_gc_uses_three_days():
+def test_ledger_gc_is_immediate():
+    """批191：三域即时退役（用户裁定），无 3/7 天宽限。"""
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc.run_security_scan)
-    assert "timedelta(days=3)" in src
+    assert "timedelta(days=3)" not in src
     assert "timedelta(days=7)" not in src
+    assert "source='pip' AND last_seen < %s" in src

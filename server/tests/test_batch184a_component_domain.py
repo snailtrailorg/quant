@@ -108,13 +108,13 @@ def test_os_upsert_keeps_sbom_origin():
     assert row[0] == "PySide6/lib/libffmpeg.so", row
 
 
-def test_gc_not_scoped_by_source():
-    """孤儿 GC 必须**全域**（原仅 system/pip ⇒ rpm·binary 永久累积）。"""
+def test_gc_covers_all_domains_immediately():
+    """孤儿 GC 必须覆盖**全域**（批191：pip/os/binary 各自即时删，漏一域即永久累积）。"""
     from src.health_monitor import security_collector as sc
     src_text = inspect.getsource(sc.run_security_scan)
-    m = re.search(r"DELETE FROM security_component WHERE last_seen < %s", src_text)
-    assert m, "统一 GC 语句缺失"
-    assert "source=" not in src_text[m.start():m.end() + 80], "GC 不得按 source 限定"
+    for dom in ("pip", "binary", "os"):
+        assert f"source='{dom}' AND last_seen < %s" in src_text, dom
+    assert "timedelta(days=3)" not in src_text
 
 
 def test_audit_writes_domain_not_impl_source():

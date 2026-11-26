@@ -30,6 +30,17 @@ def test_deploy_chain_only_mentions_retirement_in_comments():
                 assert line.lstrip().startswith("#"), f"{rel}: {line}"
 
 
+def test_gc_three_domains_immediate_with_domain_guard():
+    """批191：三域本轮未见即删；域级采集守卫（降级时跳过该域）。"""
+    import inspect
+    from src.health_monitor import security_collector as sc
+    src = inspect.getsource(sc.run_security_scan)
+    for dom in ("pip", "binary", "os"):
+        assert f"source='{dom}' AND last_seen < %s" in src, dom
+    assert "timedelta(days=3)" not in src            # 宽限已撤
+    assert "if _os_all:" in src                       # OS 域采集守卫
+
+
 def test_wrapper_prune_is_hardcoded_whitelist():
     """prune=一次性、硬编码三包（不接受任意包名=零注入面）。"""
     w = (_REPO / "deploy/wrappers/quant-pip-wrapper").read_text()
