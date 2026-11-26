@@ -70,7 +70,9 @@ echo "== 6 目标机前置（python3.11 已在=venv 同源；rsync assert）=="
 rsync --version | head -1
 
 echo "== 7 权限验证（白名单过/越权拒/dbro 通）=="
-sudo -u deploy sudo -n /usr/local/sbin/quant-svc status quant-md-hub@quant.service >/dev/null \
+# 批191：自证单元用 web-api（常驻且形态稳定）；原 quant-md-hub@quant 是 D32 P3 前的过渡
+# concrete 单元，现已 inactive(dead) ⇒ status 非零会把成功的装位误报成"白名单未过"
+sudo -u deploy sudo -n /usr/local/sbin/quant-svc status quant-web-api@quant.service >/dev/null \
   && echo "✅ ① 白名单过" || { echo "❌ ① 白名单未过" >&2; exit 1; }
 if sudo -u deploy sudo -n systemctl restart sshd >/dev/null 2>&1; then
   echo "❌ ② 越权竟然过了——sudoers 有洞，立即停用" >&2; exit 1

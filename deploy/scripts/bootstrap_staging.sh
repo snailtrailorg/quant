@@ -94,8 +94,9 @@ install -m 644 -o root -g root "$REPO"/server/scripts/systemd/quant-*.service /e
 systemctl daemon-reload
 
 echo "== 10 权限自证（白名单过/越权拒）=="
-sudo -u deploy sudo -n /usr/local/sbin/quant-svc is-active quant-md-hub@quant.service >/dev/null 2>&1 \
-  || echo "（hub 未起属预期——彩排波次才起；白名单本身已过）"
+# 批191：同 bootstrap_server —— 用 web-api（hub 过渡 concrete 单元已退役）
+sudo -u deploy sudo -n /usr/local/sbin/quant-svc is-active quant-web-api@quant.service >/dev/null 2>&1 \
+  || echo "（web-api 未起属预期——彩排波次才起；白名单本身已过）"
 if sudo -u deploy sudo -n systemctl restart sshd >/dev/null 2>&1; then
   echo "❌ 越权过了——检查 sudoers" >&2; exit 1
 else
