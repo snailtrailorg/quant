@@ -24,6 +24,15 @@ dev 与 staging 同物理机、逻辑独立。`requirements-dev.txt` 的真实�
 - `dep_audit` 不再解析 dev 名单（组别统一 runtime）。
 - `lock-sync.sh` 补 `--no-annotate`：缺它会因注释/命令行使 lock 全文件漂移（实测 270 行噪声）。
 
+### 2.1 依赖升级（2026-11-26，lock 内 8 包）
+
+`charset-normalizer 3.5.3 / plotly 7.2.0 / pycryptodome 4.6.0 / openai 3.59.0 / packaging 26.4 / redis 8.2.0 / lark-oapi 1.9.0 / fonttools[woff] 4.69.1`——`PKGS=... lock-sync` 选择性升级后走发布。
+
+lock 外 3 包不升（不在依赖闭包，无法走 lock；单独 pip 升级不持久）：
+`decorator`（无 Required-by）/ `cachecontrol`（pip 工具链残留）/ `exceptiongroup`（celery 的 marker 依赖，py3.11 实际不需要，但 dist-info 列出）。
+
+同时修 `dep_audit` 的 `SQL_KEEP`：新包首次即"未取到上游"时 INSERT 漏 `last_changed`（NOT NULL）⇒ 整轮 NotNullViolation（prod 16:16 实证 lazy-importer）；已补列并加回归测试。
+
 ## 3. venv 瘦身（一次性 prune）
 
 - `quant-pip-wrapper` 新增 `prune` 子命令：硬编码 `ruff pip-tools akshare`，不接受包名参数（零注入面），幂等。
