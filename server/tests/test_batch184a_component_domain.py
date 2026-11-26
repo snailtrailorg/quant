@@ -113,7 +113,7 @@ def test_gc_covers_all_domains_immediately():
     from src.health_monitor import security_collector as sc
     src_text = inspect.getsource(sc.run_security_scan)
     for dom in ("pip", "binary", "os"):
-        assert f"source='{dom}' AND last_seen < %s" in src_text, dom
+        assert f"source='{dom}' AND last_seen < now()" in src_text, dom
     assert "timedelta(days=3)" not in src_text
 
 

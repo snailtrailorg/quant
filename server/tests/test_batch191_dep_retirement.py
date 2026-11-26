@@ -36,7 +36,7 @@ def test_gc_three_domains_immediate_with_domain_guard():
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc.run_security_scan)
     for dom in ("pip", "binary", "os"):
-        assert f"source='{dom}' AND last_seen < %s" in src, dom
+        assert f"source='{dom}' AND last_seen < now()" in src, dom
     assert "timedelta(days=3)" not in src            # 宽限已撤
     assert "if _os_all:" in src                       # OS 域采集守卫
 

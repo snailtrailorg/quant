@@ -1251,14 +1251,17 @@ def run_security_scan(today: date | None = None) -> dict:
         # （pip=freeze 完整枚举 / os=dep_audit / binary=SBOM），不再留 3 天宽限。
         # 域级采集守卫：该域本轮没有产出（降级）时跳过该域 GC，防一次采集失败清空台账。
         #   pip/binary ← _ledger（vulns ok 且 freeze 成功才有）；os ← _os_all（dep_audit 清单）。
+        # 锚点必须用**本事务 now()**（=事务开始时刻，与 upsert 的 last_seen=now() 同值）：
+        # 用 today(00:00) 会让同日第二轮扫描漏判——上午扫描已把行 last_seen 写成当天时刻，
+        # 大于 00:00 ⇒ "本轮未见"的行永远删不掉（staging 实证：11:47 扫过的三包仍在）。
         if _ledger:
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='pip' AND last_seen < %s", (today,))
+                         "WHERE source='pip' AND last_seen < now()")
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='binary' AND last_seen < %s", (today,))
+                         "WHERE source='binary' AND last_seen < now()")
         if _os_all:
             conn.execute("DELETE FROM security_component "
-                         "WHERE source='os' AND last_seen < %s", (today,))
+                         "WHERE source='os' AND last_seen < now()")
         # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:
