@@ -49,6 +49,13 @@ DELETE ... source='os'     AND NOT (name = ANY(...));    -- 名单来自本轮 _
 - **为什么不能比时间**：`last_seen` 是 `date`（值为 00:00）。`last_seen < today` 在同日多轮漏判；`last_seen < now()`/固定锚点会把本轮刚写的行（00:00）全部判成“未见”而**清空全表**（2026-11-26 staging 实证，已重建）。
 - 名单与 upsert 同源（`_merge_ledger`/`_os_all`），无口径漂移。
 
+## 4.5 依赖关系列恢复（批189 回归修）
+
+- 症状：组件列表「依赖关系」列变空（用户实证“前几天有大量内容”）。
+- 根因：批 189 `ccdff01` 将 `_ledger` 从 SBOM 全量改为 `_merge_ledger`，pip 行 origin 固定 `"pip 安装"`，丢弃了 `_component_origin/_origin_chain` 算好的依赖链。
+- 修法：`_merge_ledger` 改为**版本取 freeze、origin 取 SBOM**（两个真源各取所长，不破坏版本真源）。
+- 验收：staging 109 条链 / prod 112 条链，示例 `websockets ← openai→websockets`、`amqp ← celery→kombu→amqp`。
+
 ## 5. 验收（实证）
 
 - staging：台账 `pip 161`、`os 3491`；三包 pip 行消失，探测行被 GC，仅剩 `os|ruff`（dnf）。
