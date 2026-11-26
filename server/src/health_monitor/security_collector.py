@@ -236,11 +236,20 @@ def _ledger_from_sbom(arts: list, sp=None) -> list[tuple[str, str, str, str]]:
 
 
 def _merge_ledger(pip_map: dict, sbom_rows: list[tuple]) -> list[tuple]:
-    """pip 域版本真源=pip freeze（实际安装）；SBOM 只补 freeze 缺名 + 提供 os/binary 域。
+    """pip 域版本真源=pip freeze（实际安装）；SBOM 补 origin（依赖链）+ 缺名 + os/binary。
 
     顺序反了会让 SBOM 的旧版本覆盖实际安装（同名后写覆盖）——2026-11-25 修复。
+    批191 修回归：批189 把 pip 行 origin 固定成 "pip 安装"，丢掉了 SBOM 经
+    _component_origin/_origin_chain 算好的依赖链（页面「依赖关系」列变空）。
+    现改为**版本取 freeze、origin 取 SBOM**——两个真源各取所长。
     """
-    rows = [("pip", _norm_key(str(n)), str(v), "pip 安装") for n, v in (pip_map or {}).items()]
+    sbom_origin: dict[str, str] = {}
+    for r in sbom_rows or []:
+        if r[0] == "pip":
+            sbom_origin.setdefault(_norm_key(r[1]), r[3])
+    rows = [("pip", _norm_key(str(n)), str(v),
+             sbom_origin.get(_norm_key(str(n))) or "pip 安装")
+            for n, v in (pip_map or {}).items()]
     have = {_norm_key(r[1]) for r in rows}
     for r in sbom_rows or []:
         if r[0] == "pip" and _norm_key(r[1]) in have:

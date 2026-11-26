@@ -57,3 +57,14 @@ def test_wrapper_prune_is_hardcoded_whitelist():
     assert "prune)" in w
     assert 'uninstall -y ruff pip-tools akshare' in w
     assert 'prune" >&2; exit 2' in w or "[ $# -eq 1 ]" in w
+
+def test_merge_ledger_keeps_sbom_dependency_chain():
+    """批191 回归修：版本取 freeze、origin 取 SBOM（依赖关系列恢复）。"""
+    from src.health_monitor.security_collector import _merge_ledger
+    rows = _merge_ledger({"pandas": "2.3.3"},
+                         [("pip", "pandas", "2.0.0", "vnpy→pyside6")])
+    assert rows == [("pip", "pandas", "2.3.3", "vnpy→pyside6")]
+    rows2 = _merge_ledger({}, [("pip", "foo", "1.0", "vnpy→foo")])
+    assert rows2 == [("pip", "foo", "1.0", "vnpy→foo")]
+    rows3 = _merge_ledger({"bar": "1.0"}, [])
+    assert rows3 == [("pip", "bar", "1.0", "pip 安装")]
